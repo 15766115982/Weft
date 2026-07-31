@@ -18,6 +18,22 @@
 Run tests: per service `cd <service>/scripts && node --test test/` (governance also runs
 `../viewer/test/`; retrieval requires npm install first — better-sqlite3 already installed).
 
+## M5 review-fix round 2 (2026-08-01, 108 tests all green)
+
+Second-round review of the M5 fixes: 2 findings, both confirmed, both fixed.
+
+- **N1 (low): UTC normalization changed derived values without a schema bump** —
+  pre-fix KBs would have kept raw-offset `src_updated` rows until each page's next edit,
+  mis-sorted in the interim. Fix: SCHEMA_VERSION 3→4 (full rebuild, zero cost for a
+  derived artifact), matching the user_version 2/3 precedent from M3's date-semantics
+  changes; the bump history is now documented in the comment
+- **N2 (wording nit): the new contract §2 rule did not hold for local** — local's body
+  IS the content (content-addressed, self-versioning); mtime is not embedded and
+  skipping an mtime-only change is correct. Fix: contract §2 and CONTEXT.md now scope
+  the "embed the version at full precision" rule to sources whose version is metadata
+  outside the content (e.g. Jira), with content-addressed sources called out as
+  self-versioning
+
 ## M5 review-fix round (2026-08-01, 108 tests all green: acquisition 19 / governance 52 / retrieval 37)
 
 External review of M5: 3 medium-low + 10 low + 2 engineering gaps. Confirmed and fixed:

@@ -109,8 +109,9 @@ missing `review |` log lines by diffing log.md against current page statuses, an
   docx/pdf binary conversion quality is uncontrollable).
 - **Pull boundary**: no whole-site sync; the scope is specified in the user session (Jira gets
   JQL, Confluence gets space key + optional CQL). Incremental: skip unchanged documents by
-  comparing `content_hash` (connectors embed the source-system version at full precision in
-  the hashed body, so hash-only skip is equivalent to version + hash).
+  comparing `content_hash` (where the version is metadata outside the content, e.g. Jira,
+  connectors embed it at full precision in the hashed body, so hash-only skip is equivalent
+  to version + hash; content-addressed sources like local are self-versioning).
 - **Connector pluginization**: a common framework (frontmatter generation, normalization,
   persisting, hashing, incremental skip) + one connector script per source; adding a source =
   adding one script, without touching the framework.

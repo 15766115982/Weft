@@ -80,10 +80,12 @@ extra: {}                             # source-specific metadata (optional, e.g.
 ### Incremental rules
 
 - Before pulling, read the target file first: skip when `content_hash` matches.
-  Connectors embed the source-system version **at full precision** in the
-  hashed body (e.g. the issue's `updated` timestamp), so a source-side edit
-  always changes the hash — hash-only skip is then equivalent to comparing
-  version + hash, without a day-granularity blind spot;
+  Where the source version is metadata outside the content (e.g. Jira), connectors
+  embed the source-system version **at full precision** in the hashed body, so a
+  source-side edit always changes the hash — hash-only skip is then equivalent to
+  comparing version + hash, without a day-granularity blind spot. Content-addressed
+  sources (e.g. local, where the body IS the content) are self-versioning: an
+  mtime-only change with identical content is correctly skipped;
 - `kb.json` records each connector's pull scope (JQL / space key / inbox path), making pulls
   repeatable.
 - **Character constraints**: `source` and `source_id` may only start with `[A-Za-z0-9]` and

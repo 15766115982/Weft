@@ -12,8 +12,11 @@ import { parseFrontmatter } from './frontmatter.mjs';
 const sha256 = (s) => crypto.createHash('sha256').update(s, 'utf8').digest('hex');
 
 // schema version: bump = full rebuild (the index is a derived artifact,
-// contract §1: deleting .kb/ does not affect correctness)
-const SCHEMA_VERSION = 3;
+// contract §1: deleting .kb/ does not affect correctness).
+// History: 2 = docs.updated column; 3 = docs.src_updated column;
+// 4 = both date columns normalized to UTC at index time (existing rows kept
+// their raw offsets, which mis-sort lexicographically — force a rebuild)
+const SCHEMA_VERSION = 4;
 
 export function openDb(kbRoot) {
   const dir = path.join(kbRoot, '.kb');
