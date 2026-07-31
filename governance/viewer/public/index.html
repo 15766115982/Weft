@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KB Review Viewer</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>KB Review Viewer</h1>
+  <nav>
+    <a href="#/queue">Review queue <span id="queue-count"></span></a>
+    <a href="#/browse">Browse pages</a>
+  </nav>
+  <p class="hint">Dumb viewer: buttons flip frontmatter <code>status</code> only.
+  Outcomes are written to <code>log.md</code> by the next governance <code>sweep</code>.</p>
+</header>
+<main id="app">Loading…</main>
+<script src="app.js"></script>
+</body>
+</html>

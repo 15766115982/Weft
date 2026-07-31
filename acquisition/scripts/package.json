@@ -1,0 +1,11 @@
+{
+  "name": "kb-acquisition",
+  "version": "0.1.0",
+  "description": "acquisition service: source connectors → normalized raw/ persistence (contract: ../../schema/contract.md)",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test test/"
+  }
+}

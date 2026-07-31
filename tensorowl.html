@@ -1,0 +1,287 @@
+<!DOCTYPE html><html lang="en"> <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Before You Reach for a Vector Database: Keyword Retrieval in the Agent Era — tensorOwl</title><meta name="description" content="Why do the strongest coding agents mostly reach for grep instead of a vector database? Notes on keyword retrieval, BM25, SQLite FTS5, Chinese tokenization, and why — in the agent era — retrieval is a workflow. Ending with the bigger shift from RAG to context engineering."><link rel="canonical" href="https://tensorowl.dev/writing/keyword-retrieval-in-the-agent-era/"><meta name="theme-color" content="#f7f5f0"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><meta property="og:type" content="website"><meta property="og:title" content="Before You Reach for a Vector Database: Keyword Retrieval in the Agent Era — tensorOwl"><meta property="og:description" content="Why do the strongest coding agents mostly reach for grep instead of a vector database? Notes on keyword retrieval, BM25, SQLite FTS5, Chinese tokenization, and why — in the agent era — retrieval is a workflow. Ending with the bigger shift from RAG to context engineering."><meta property="og:url" content="https://tensorowl.dev/writing/keyword-retrieval-in-the-agent-era/"><meta property="og:site_name" content="tensorOwl"><meta property="og:locale" content="en_US"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Before You Reach for a Vector Database: Keyword Retrieval in the Agent Era — tensorOwl"><meta name="twitter:description" content="Why do the strongest coding agents mostly reach for grep instead of a vector database? Notes on keyword retrieval, BM25, SQLite FTS5, Chinese tokenization, and why — in the agent era — retrieval is a workflow. Ending with the bigger shift from RAG to context engineering."><link rel="alternate" type="application/rss+xml" title="tensorOwl" href="/rss.xml"><link rel="sitemap" href="/sitemap-index.xml"><script type="application/ld+json">{"@context":"https://schema.org","@type":"Person","name":"Levi Lee","alternateName":["Wei Lee","tensorOwl"],"url":"https://tensorowl.dev","jobTitle":"AI / LLM Engineer","email":"mailto:levi@tensorowl.dev","description":"AI / LLM engineer and software-startup co-founder specializing in LLM agent systems, RAG pipelines, and deep-learning applications — multi-agent orchestration, retrieval systems, and the LLMOps and cloud infrastructure behind them.","address":{"@type":"PostalAddress","addressLocality":"Taipei","addressCountry":"TW"},"alumniOf":{"@type":"CollegeOrUniversity","name":"National Taiwan University"},"worksFor":[{"@type":"Organization","name":"Faca-iye Technology"}],"knowsAbout":["LLM agent systems","RAG pipelines","Multi-agent orchestration","Deep learning","LLMOps","Cloud deployment"],"sameAs":["https://github.com/AluminumShark","https://www.linkedin.com/in/wei-lee-3b2881193/","https://www.threads.com/@tensor0wl","https://www.instagram.com/tensor0wl"]}</script><script async src="https://www.googletagmanager.com/gtag/js?id=G-VELLMJ1S9G"></script><script>(function(){const gaId = "G-VELLMJ1S9G";
+
+        window.dataLayer = window.dataLayer || [];
+        function gtag() {
+          dataLayer.push(arguments);
+        }
+        gtag('js', new Date());
+        gtag('config', gaId);
+      })();</script><link rel="stylesheet" href="/_astro/Base.EDwKTHEv.css"></head> <body><a href="https://tensorowl.dev/cdn-cgi/content?id=CfnuhF.WclF0Ihu3ZAjIm9_bKdT8xPM9mnxAETXdwVE-1785336141.2712424-1.2.1.1-7SDqpCuGWhX3EnmLZXUy9PeAV5IMzqtuzJqR7fQRJXU" aria-hidden="true" rel="nofollow noopener" style="display: none !important; visibility: hidden !important"></a> <a class="skip" href="#main">Skip to content</a> <header class="site-head"> <div class="wrap"> <a class="wordmark" href="/">Levi Lee</a> <nav class="nav" aria-label="Primary"> <a href="/work"> Work </a><a href="/writing" aria-current="page"> Writing </a><a href="/about"> About </a> </nav> <div class="langswitch" aria-label="Language"> <a href="/writing/keyword-retrieval-in-the-agent-era" class="on" aria-current="true" lang="en"> EN </a><a href="/zh/writing/keyword-retrieval-in-the-agent-era" class lang="zh-Hant"> 中文 </a> </div> </div> </header> <main id="main" class="wrap">  <article> <header class="post-head reveal"> <p class="meta">June 1, 2026</p> <h1>Before You Reach for a Vector Database: Keyword Retrieval in the Agent Era</h1> </header>  <div class="prose reveal" style="animation-delay:.1s">  <p>For the past couple of years, the moment anyone said “RAG,” the first thing that came to mind was a vector database. The recipe goes roughly like this:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>Chunk the docs → turn them into embedding vectors → store in a vector DB → at query time, find the most similar chunks</span></span></code></pre>
+<p>It’s a powerful approach, especially good at “finding semantically similar content.” For example, if you ask:</p>
+<blockquote>
+<p>Is there any section that talks about the “employee offboarding process”?</p>
+</blockquote>
+<p>even if those exact words never appear — the doc instead says “account deactivation,” “access revocation,” “handover procedure” — vector search might still find it.</p>
+<p>But lately, in the world of AI agents — coding agents in particular — a curious thing has surfaced:</p>
+<p><strong>Often, the most useful search tool isn’t a vector database. It’s plain old grep.</strong> The humble keyword search.</p>
+<p>It sounds counterintuitive. We have LLMs, embeddings, vector databases — why reach back for grep? The answer isn’t that grep is smarter than embeddings. It’s that, given how agents work, grep has a few crucial advantages:</p>
+<ul>
+<li>It’s simple.</li>
+<li>It’s fast.</li>
+<li>It’s (mostly) explainable.</li>
+<li>It fails relatively clearly.</li>
+<li>It can be used, corrected, and verified by the agent over and over.</li>
+</ul>
+<p>That’s the theme of this post:</p>
+<blockquote>
+<p>In the age of AI agents, good retrieval isn’t necessarily the most complex retrieval — it’s the retrieval that’s easiest for an agent to use, correct, verify, and trace.</p>
+</blockquote>
+<p>A caveat up front: this “grep moment” is a 2025-to-early-2026 observation. By mid-2026 the conversation had already moved on — the return of keyword search is just one small piece of a bigger thing (context engineering), and on the hardest coding tasks, semantic retrieval is quietly coming back. More on that in sections 8 and 9.</p>
+<h2 id="1-vector-search-is-powerful-but-its-not-the-default-answer-to-everything">1. Vector search is powerful, but it’s not the default answer to everything</h2>
+<p>Let’s be clear: this post is not arguing embeddings are useless. Embeddings are very useful, especially for: <strong>finding content close in meaning to a passage.</strong></p>
+<p>For example:</p>
+<ul>
+<li>The user doesn’t know the exact wording used in the docs.</li>
+<li>There are lots of synonyms.</li>
+<li>The question is conceptual, not keyword-shaped.</li>
+<li>The corpus is large and you need semantic recall first.</li>
+<li>The docs say the same thing many different ways.</li>
+</ul>
+<p>In these cases, vector search is valuable.</p>
+<p>But a lot of internal docs, technical docs, manuals, and code search aren’t that kind of problem. Often the user is asking:</p>
+<ul>
+<li>How do I use this API?</li>
+<li>Where does this error message appear?</li>
+<li>How do I apply for an IP-MAC address?</li>
+<li>Where are shared-folder permissions configured?</li>
+<li>Who calls this function?</li>
+<li>Which document mentions this field?</li>
+</ul>
+<p>These don’t necessarily need “semantic similarity.” What they need is:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>exact hit → find the source → verifiable → citable</span></span></code></pre>
+<p>And that is exactly what keyword search, grep, and BM25 are good at.</p>
+<h2 id="2-why-do-coding-agents-still-lean-so-heavily-on-grep">2. Why do coding agents still lean so heavily on grep?</h2>
+<p>Start with coding agents. When a coding agent modifies code, it usually doesn’t know the answer up front. It explores the codebase like an engineer would. For example:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>1. Search for the error message</span></span>
+<span class="line"><span>2. Find the relevant file</span></span>
+<span class="line"><span>3. Read the function definition</span></span>
+<span class="line"><span>4. Search for who calls this function</span></span>
+<span class="line"><span>5. Find the test file</span></span>
+<span class="line"><span>6. Edit the code</span></span>
+<span class="line"><span>7. Run the tests</span></span>
+<span class="line"><span>8. If it fails, search with different keywords</span></span></code></pre>
+<p>The point of this flow isn’t “nail the perfect answer in one search.” It’s:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>search → read → reason → verify → search again</span></span></code></pre>
+<p>That’s <strong>agentic retrieval</strong>. In this style of work, grep shines because its feedback is very clear for corpora like code, English, and error strings.</p>
+<p>If you search:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#B392F0">grep</span><span style="color:#9ECBFF"> "PermissionDenied"</span><span style="color:#79B8FF"> -r</span><span style="color:#9ECBFF"> .</span></span></code></pre>
+<p>and it hits, the agent sees the filename, line number, and context. If it misses, the agent usually knows that path is a dead end and can try:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="bash"><code><span class="line"><span style="color:#B392F0">grep</span><span style="color:#9ECBFF"> "permission denied"</span><span style="color:#79B8FF"> -ri</span><span style="color:#9ECBFF"> .</span></span>
+<span class="line"><span style="color:#B392F0">grep</span><span style="color:#9ECBFF"> "access denied"</span><span style="color:#79B8FF"> -ri</span><span style="color:#9ECBFF"> .</span></span>
+<span class="line"><span style="color:#B392F0">grep</span><span style="color:#9ECBFF"> "403"</span><span style="color:#79B8FF"> -r</span><span style="color:#9ECBFF"> .</span></span></code></pre>
+<p>That kind of failure, in a code corpus, is <em>actionable</em>. The agent doesn’t just know it failed — it has a rough idea of how to fix the next step. That matters a lot.</p>
+<p>By contrast, when many complex retrieval systems fail, the feedback is murky. Vector search returns a pile of “looks similar” passages, but if the answer isn’t among them, the agent can’t easily tell whether it was:</p>
+<ul>
+<li>a bad query?</li>
+<li>the wrong embedding model?</li>
+<li>chunks too big? too small?</li>
+<li>top-k too small?</li>
+<li>the data was never indexed at all?</li>
+<li>the reranker mis-ranked?</li>
+</ul>
+<p>grep’s strength isn’t that it’s sophisticated — it’s that, on code-like corpora, it’s relatively transparent.</p>
+<blockquote>
+<p>⚠️ An honest caveat: grep’s “explainability” isn’t unconditional. For long Chinese sentences, a zero-result doesn’t necessarily tell you whether the cause was bad tokenization, the user’s synonym, or a page that was never indexed. In other words, grep’s feedback is very actionable on English/code, and much less magical on Chinese natural language — which is exactly why section 5 has to deal with tokenization specifically.</p>
+</blockquote>
+<h2 id="3-grep-isnt-smarter--its-better-suited-to-being-operated-by-an-agent">3. grep isn’t smarter — it’s better suited to being operated by an agent</h2>
+<p>Avoid one misunderstanding here: I’m not saying grep is technically superior to embeddings.</p>
+<p>grep doesn’t understand meaning. It doesn’t know “offboarding” might relate to “access revocation,” or that “request an account” and “create a user” might be the same thing. So of course grep has limits.</p>
+<p>But in many agent workflows, grep’s advantage is that it makes a great <em>tool</em>. It’s like a pocket knife — not flashy, but:</p>
+<ul>
+<li>quick to pick up</li>
+<li>intuitive to use</li>
+<li>you can see exactly where it cuts</li>
+<li>easy to correct if you cut wrong</li>
+<li>you can cut many times in a row</li>
+</ul>
+<p>For an agent, this matters enormously. An agent’s power doesn’t come from a single retrieval — it comes from iterating:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>Search 1: nothing</span></span>
+<span class="line"><span>Search 2: different keyword</span></span>
+<span class="line"><span>Search 3: narrow the path</span></span>
+<span class="line"><span>Search 4: found the relevant file</span></span>
+<span class="line"><span>Search 5: trace the call chain</span></span>
+<span class="line"><span>Search 6: confirm the tests</span></span></code></pre>
+<p>That flow is natural with grep / ripgrep / find / glob. It’s why some practitioners now describe agents as converging on the filesystem itself as their primary interface: if each doc page is a file and each section a directory, then <code>grep</code>, <code>cat</code>, <code>ls</code>, and <code>find</code> are most of what an agent needs — no separate retrieval service required. So the more precise statement is:</p>
+<blockquote>
+<p>grep matters again not because it understands more, but because it’s simple, transparent, and iterable — which happens to fit how AI agents work. It moves complexity out of “offline index engineering” and into the “online reasoning loop.”</p>
+</blockquote>
+<h2 id="4-so-what-is-bm25-and-how-does-it-relate-to-grep">4. So what is BM25, and how does it relate to grep?</h2>
+<p>If grep is the most intuitive keyword search, BM25 is a slightly more advanced version.</p>
+<p>grep mostly answers: “Does this word appear? On which line?” BM25 goes further: “<strong>Which passage is most likely relevant to the query?</strong>”</p>
+<p>It considers a few things:</p>
+<ol>
+<li>Whether the query terms appear (term presence)</li>
+<li>How many times — but with diminishing returns (term frequency, which <em>saturates</em>)</li>
+<li>Whether those terms are rare (IDF — rarer is more discriminative)</li>
+<li>Whether document length skews the judgment (length normalization)</li>
+</ol>
+<p>Here’s a detail many people overlook but is the soul of BM25: point 2’s “how many times” isn’t linear — it <em>saturates</em>.</p>
+<p>That is, a term’s 2nd occurrence adds a fair bit over the 1st; but the 20th adds almost nothing over the 19th. BM25 deliberately uses a saturation function to cap the contribution of high-frequency terms. This is exactly why BM25 beats naive TF-IDF: a passage that “stuffs the keyword 50 times” doesn’t get rocketed to the top. For the “cover page / keyword-farm page pollutes ranking” problem in section 6, this saturation already blocks part of it — but not all of it, which is why you still need data governance.</p>
+<p>For example, query “shared folder request” against two passages: passage A mentions “folder” once; passage B has “shared,” “folder,” “request,” and “permission.” BM25 usually ranks B first — not because B has more words, but because it hits more rare-and-relevant terms.</p>
+<p>So you can think of BM25 as: <strong>keyword search that ranks better than grep and isn’t fooled by keyword stuffing.</strong> It has no embedding-style semantic understanding, but it’s transparent, fast, cheap, and a great fit for term-dense, closed document sets.</p>
+<p>That’s why a lot of internal-doc retrieval doesn’t need a vector database from day one. SQLite FTS5 ships a built-in <code>bm25()</code> ranking function — a solid baseline with zero external dependencies.</p>
+<h2 id="5-the-hard-part-of-chinese-docs-its-not-search-that-fails-its-tokenization">5. The hard part of Chinese docs: it’s not search that fails, it’s tokenization</h2>
+<p>English search is easier because words are separated by spaces. <code>shared folder request</code> naturally splits into <code>shared / folder / request</code>.</p>
+<p>But Chinese has no spaces. How should <code>共用資料夾申請</code> (“shared folder request”) be split? It could be <code>共用 / 資料夾 / 申請</code>, or a system (e.g., SQLite’s default <code>unicode61</code> tokenizer) might mistakenly treat it as one long token <code>共用資料夾申請</code>.</p>
+<p>If the whole sentence becomes a single token, then a user searching for <code>資料夾</code> (“folder”) may fail to find <code>共用資料夾申請</code>. This is a classic pitfall of Chinese full-text search.</p>
+<h3 id="theres-more-than-one-solution">There’s more than one solution</h3>
+<p>To be clear: there are several routes for Chinese tokenization — there isn’t a single “correct answer”:</p>
+<ul>
+<li><strong>Word-level segmentation</strong>: plug in a Chinese segmenter like jieba or CKIP to split <code>共用資料夾</code> into <code>共用 / 資料夾</code>. Closest to the language, but adds a dependency, and segmenters make mistakes too.</li>
+<li><strong>n-gram</strong>: use FTS5’s built-in <code>trigram</code> tokenizer, or roll your own bigram. Somewhere in between.</li>
+<li><strong>unigram (character-by-character)</strong>: index Chinese one character at a time. The crudest, with the fewest dependencies.</li>
+</ul>
+<p>This post demonstrates the last one, because it best embodies the “grep spirit” — simple, controllable, zero external dependencies. The approach: insert a space between every Chinese character, indexing Chinese one character at a time.</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>共用資料夾  →  共 用 資 料 夾</span></span></code></pre>
+<p>So when a user searches <code>資料夾</code>, the system also turns the query into <code>資 料 夾</code>; both sides split the same way, making a hit much more likely.</p>
+<p>But note that English and codes must not be split blindly. <code>IP-MAC</code>, <code>ARES</code>, <code>API_KEY</code> should stay intact — they’re proper nouns, and breaking them up hurts precision. So a better approach is:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>Chinese: split per character</span></span>
+<span class="line"><span>English &#x26; codes: keep intact</span></span>
+<span class="line"><span>At Chinese↔English boundaries: insert a space</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>申請IP-MAC位址  →  申 請 IP-MAC 位 址</span></span></code></pre>
+<h3 id="be-clear-eyed-about-the-cost-of-unigram">Be clear-eyed about the cost of unigram</h3>
+<p>unigram is not a free lunch. Its biggest cost: <strong>recall widens, and false hits increase.</strong> Because <code>資 料 夾</code> will match any passage containing those three characters — even if they’re nowhere near each other and have nothing to do with “folder.”</p>
+<p>So unigram can’t be used alone; it needs two companions to be accurate:</p>
+<ol>
+<li><strong>AND-chunking</strong>: require the characters of a single term to hit adjacently / together as much as possible (the two-stage query in section 6).</li>
+<li><strong>BM25 ranking</strong>: use the saturation + IDF from section 4 to push the genuinely relevant passages up.</li>
+</ol>
+<p>In other words, unigram converts the “tokenization” problem into a “ranking and query-strategy” problem. In many closed-document scenarios that’s a worthwhile trade — but it <em>is</em> a trade-off, not “the way Chinese must be done.” Because what we’re after isn’t perfect language understanding, but: stable hits, easy debugging, explainable results, and low build cost.</p>
+<h3 id="an-irony-worth-naming-greps-best-virtue-is-weakest-exactly-here">An irony worth naming: grep’s best virtue is weakest exactly here</h3>
+<p>There’s a deeper tension this post should own rather than bury. grep’s headline selling point — the one sections 2 and 3 lean on — is transparency: clear, actionable failure. But that virtue is weakest precisely where this post’s main use case lives.</p>
+<p>On English and code, a zero-result is usually an actionable dead end: try a synonym, a different flag, a broader path. On Chinese natural language, a zero-result is ambiguous — it could be bad tokenization, a synonym mismatch, or a page that was never indexed — and unigram’s wide-recall / high-false-hit profile only muddies the signal further. So the honest takeaway is not “lexical search is cleanly debuggable, therefore use it for Chinese docs.” It’s the opposite gradient:</p>
+<blockquote>
+<p>The cleaner the corpus (code, English, dense proper nouns), the stronger the pure-lexical case. The messier and more semantic the language, the sooner you should reach for embeddings and a reranker.</p>
+</blockquote>
+<p>For Chinese enterprise docs specifically, “add embeddings” probably comes earlier than the English-centric source material — most of which is about code and English — would suggest. Worth keeping in mind before you commit to a lexical-only baseline for a Chinese corpus.</p>
+<h2 id="6-how-might-you-implement-this">6. How might you implement this?</h2>
+<p>Say we’re building an internal document search system; the sources might be PDFs, slides, Markdown, manuals, technical docs, internal FAQs. We can design a very lightweight pipeline.</p>
+<h3 id="1-process-documents-offline">1. Process documents offline</h3>
+<p>First, turn documents into structured data: document name, page number, section title, page text, and a page screenshot where needed. Slides or PDFs can be processed page by page. This step matters because later we want results to trace back to their original source.</p>
+<h3 id="2-clean-the-data-and-exclude-noise">2. Clean the data and exclude noise</h3>
+<p>Not all content belongs in the search index. Cover pages, table-of-contents pages, section dividers, pages with only a big heading and no content, pages that repeat lots of keywords with no real information. If indexed, even with BM25’s saturation, they tend to dilute ranking (they may still hit some rare terms). So a better approach:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>Main table keeps every page          → still searchable, can jump to a specific page</span></span>
+<span class="line"><span>FTS index only holds pages with real content → doesn't pollute BM25 ranking</span></span></code></pre>
+<p>This stage is also a good time to do <strong>PII redaction</strong>: scrub names, employee IDs, internal emails, and phone numbers before they hit the database. The engineering effort grep philosophy saves you is exactly what you spend on this kind of quality-affecting data governance.</p>
+<h3 id="3-handle-chinese-tokenization">3. Handle Chinese tokenization</h3>
+<p>Before writing to FTS5, process the text:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="python"><code><span class="line"><span style="color:#F97583">def</span><span style="color:#B392F0"> cjk_space</span><span style="color:#E1E4E8">(text: </span><span style="color:#79B8FF">str</span><span style="color:#E1E4E8">) -> </span><span style="color:#79B8FF">str</span><span style="color:#E1E4E8">:</span></span>
+<span class="line"><span style="color:#6A737D">    # Chinese: split per character</span></span>
+<span class="line"><span style="color:#6A737D">    # English &#x26; digits: keep intact</span></span>
+<span class="line"><span style="color:#6A737D">    # Insert a space at Chinese↔English boundaries</span></span>
+<span class="line"><span style="color:#79B8FF">    ...</span></span></code></pre>
+<p>Use this function when indexing, and use the <em>same</em> function for user queries. This is critical — if indexing and querying split differently, you get the “it’s clearly in the doc but search can’t find it” problem.</p>
+<h3 id="4-query-exact-first-then-loosen">4. Query exact first, then loosen</h3>
+<p>Search runs in two stages. Stage one uses stricter conditions (AND within a chunk, OR across chunks): the main tokens of the user’s input should all hit if possible. If found, return directly.</p>
+<p>If nothing is found (common with long Chinese sentences), loosen to a pure-OR query and let BM25 rank: candidates qualify by hitting some of the tokens. This balances precision, recall, and tolerance for long user inputs.</p>
+<p>More importantly, results can be tagged:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>matched_via = "and"          → exact hit, more reliable</span></span>
+<span class="line"><span>matched_via = "or-fallback"  → found after loosening, use more conservatively</span></span></code></pre>
+<p>This little field is useful to an agent: it tells the upper layer how reliable a result is, so it can decide whether to search again. This is precisely “actionable feedback.”</p>
+<h2 id="7-what-really-drives-rag-quality-is-often-not-the-retrieval-algorithm--its-how-results-are-presented">7. What really drives RAG quality is often not the retrieval algorithm — it’s how results are presented</h2>
+<p>People building RAG tend to pour all their attention into: which embedding model? what chunk size? how many top-k? reranker or not? Those matter. But in practice, something else matters just as much, often more: <strong>how do you hand the search results to the model?</strong></p>
+<p>This isn’t me talking off the cuff. Research that put grep and vector search head to head (Sen et al., 2026) found that how the tool output is fed to the model matters at least as much as which retrieval method you pick — with the same underlying data, returning results inline versus writing them to a file the model reads back yields very different accuracy. The paper’s own framing is careful: grep generally beat vector retrieval in their comparison, and overall scores depended strongly on the harness and tool-calling style, even on identical data. So the lesson isn’t “format beats method” as a clean ranking; it’s that presentation is a first-class variable that most RAG builders under-weight.</p>
+<p>One honest caveat, which I’ll return to in section 9: that study measured retrieval over long conversation memory (the LongMemEval benchmark), not a static enterprise document corpus like contracts, SOPs, or 10-Ks. The presentation lesson travels well across both. The raw “grep beats vector” headline, however, should be extrapolated to enterprise document search more cautiously — the document distribution is genuinely different.</p>
+<p>So don’t just dump a wall of text at the model. A better search result looks like this:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>Title: VPN request process</span></span>
+<span class="line"><span>Source: it_onboarding.pdf</span></span>
+<span class="line"><span>Page: 12</span></span>
+<span class="line"><span>Matched via: and</span></span>
+<span class="line"><span>Body:</span></span>
+<span class="line"><span>To request VPN access, first complete employee account activation...</span></span></code></pre>
+<p>For slides or PDFs, you can also attach a screenshot of the corresponding page. And the text and its matching image should be paired and locked on the retrieval side — always from the same result, never mismatched.</p>
+<p>This way the model gets not a chaotic blob, but a structured piece of evidence. It knows: which document and page this came from; whether it was an exact hit or a fallback; whether text and image are from the same page; which source to cite when answering. This dramatically lowers the odds the model makes something up.</p>
+<p>For enterprise document retrieval, traceability isn’t a bonus — it’s a baseline requirement. Because what users actually need isn’t “the AI looks good at answering,” but: <strong>can the AI’s answer be verified after the fact?</strong></p>
+<h2 id="8-when-should-you-use-grep--bm25-and-when-embeddings">8. When should you use grep / BM25, and when embeddings?</h2>
+<p>A simple test.</p>
+<p><strong>Favor grep / BM25 when:</strong></p>
+<ul>
+<li>The corpus is small and closed</li>
+<li>Users frequently search for exact nouns</li>
+<li>The docs are full of product codes, APIs, error messages, field names</li>
+<li>Answers need sources attached</li>
+<li>The data is mainly text</li>
+<li>You want the system to be easy to debug</li>
+</ul>
+<p>Then BM25 / FTS5 is probably already a great starting point.</p>
+<p><strong>Add embeddings when:</strong></p>
+<ul>
+<li>Users ask fuzzy, conceptual questions</li>
+<li>There are many synonyms</li>
+<li>The corpus is large and needs cross-document synthesis</li>
+<li>There are lots of images, tables, screenshots</li>
+<li>Keywords alone often fail</li>
+</ul>
+<p>Then embeddings / a reranker are well worth adding.</p>
+<h3 id="a-counter-signal-worth-stating-plainly-on-hard-code-tasks-semantic-retrieval-is-coming-back">A counter-signal worth stating plainly: on hard code tasks, semantic retrieval is coming back</h3>
+<p>Let me update a conclusion that’s often misread. “Coding agents all use grep” is a 2025-to-early-2026 observation, but it’s conditional — and the frontier is already shifting.</p>
+<p>In harder scenarios — multi-file, cross-language, changes that require understanding call relationships — pure grep hits a ceiling. A concrete data point: on harder benchmarks like SWE-Bench Pro, the average reference solution touches 4.1 files and changes ~107 lines — “you can’t grep your way through these,” as the Augment team put it. And leading code tools like Augment Code, even for seemingly rule-based code search, no longer rely on grep alone — they fine-tune dedicated embedding models for code semantics and build a semantic context engine.</p>
+<p>In other words, the right picture isn’t “grep replaced embeddings,” but:</p>
+<ul>
+<li>Simple, rule-based, term-dense search → grep / BM25 is enough, even better.</li>
+<li>Cross-file search that relies on structure and semantic relationships → semantic retrieval is coming back.</li>
+</ul>
+<h3 id="the-most-practical-approach">The most practical approach</h3>
+<p>Many systems end up not picking one side, but mixing:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>BM25 handles exact hits</span></span>
+<span class="line"><span>embeddings handle semantic recall</span></span>
+<span class="line"><span>a reranker handles final ranking</span></span>
+<span class="line"><span>the agent handles repeated querying, reading, and verification</span></span></code></pre>
+<p>That is, not <code>grep vs embedding</code>, but <code>grep + embedding + agentic loop</code>. One thing worth flagging in 2026 stacks: the reranker is frequently the real quality lever — more than the choice between BM25 and embeddings — so it deserves to be treated as a first-class component, not an afterthought you bolt on at the end. The only other rule: don’t assume from the start that a vector database must be the core.</p>
+<h2 id="9-the-bigger-picture-from-rag-to-context-engineering">9. The bigger picture: from RAG to context engineering</h2>
+<p>At this point, we can pull the camera back.</p>
+<p>“grep or embedding” is, by mid-2026, no longer the frontier of the conversation. The bigger shift underway: RAG was never the destination, only the start; entering the agent era, “retrieval” is being absorbed into a larger discipline — <strong>context engineering</strong>.</p>
+<p>What’s the difference?</p>
+<ul>
+<li>The old question: how do I fetch the most relevant top-k in one shot?</li>
+<li>The new question: at each reasoning step, which data, which tools, which memories should the agent put into context — and just as importantly, what should it drop?</li>
+</ul>
+<p>Retrieval (grep, BM25, or embeddings) only answers the “what data” part. Context engineering also handles three parts this post barely touched:</p>
+<p><strong>1. Memory.</strong> This is where the irony from section 7 comes home. The very study used to argue “grep beats vector” ran on LongMemEval — a benchmark that is entirely about long-conversation memory, not document search. That’s a reminder that the grep-vs-vector result was measured in the memory regime, not the enterprise-doc regime, and also that memory is its own layer. Modern agent systems commonly split it:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>Semantic memory: knowledge, facts — often vectors + knowledge graphs</span></span>
+<span class="line"><span>Episodic memory: past reasoning traces and outcomes, summarized and stored</span></span></code></pre>
+<p>so the agent learns from “how it solved this last time” instead of starting from zero every time. This is a dimension a pure-retrieval framing never touches.</p>
+<p><strong>2. Context assembly and compaction.</strong> This is arguably the heart of context engineering, and it’s the cell most teams underestimate. Even with perfect retrieval, stuffing everything into the window degrades reasoning — the “context rot” problem, where accuracy falls as the window fills with marginally-relevant material. So a real agent loop has to decide, every step, what to keep verbatim, what to summarize, what to evict, and when to compact the running history. Retrieval feeds this; it doesn’t solve it.</p>
+<p><strong>3. Structure and provenance (graph / provenance).</strong> GraphRAG and knowledge graphs bring “relationships between entities” into retrieval, so answers aren’t just “similar passages” but “evidence with a traceable chain of relationships.” For enterprise scenarios that need traceability and auditability, this is increasingly a hard requirement.</p>
+<p>So a fuller mental model is:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>Context Engineering</span></span>
+<span class="line"><span>├── Retrieval:        grep / BM25 / embedding / reranker   (mostly what this post covers)</span></span>
+<span class="line"><span>├── Memory:           episodic + semantic</span></span>
+<span class="line"><span>├── Context mgmt:     what to keep, summarize, evict, compact each step (context rot)</span></span>
+<span class="line"><span>└── Tools &#x26; Provenance: knowledge graphs, structured sources, verification hooks</span></span></code></pre>
+<p>The lexical baseline this post describes is the lightweight, solid way to do the “Retrieval” cell of that diagram. But don’t forget the other cells exist — when your agent starts needing to “remember context,” “manage a crowded window,” and “explain relationships,” retrieval alone isn’t enough.</p>
+<h2 id="10-what-this-means-for-ai-engineers">10. What this means for AI engineers</h2>
+<p>The real value of “Grep is all you need” isn’t telling everyone to abandon new tech. What it really reminds us: <strong>don’t over-complicate the problem too early.</strong></p>
+<p>Many RAG systems reach for a vector database, an embedding pipeline, a reranker, and a complex chunking strategy from the start — but the real problem ends up being: documents weren’t cleaned, metadata wasn’t designed, sources weren’t kept, Chinese tokenization wasn’t handled, the result format wasn’t model-friendly, there was no feedback on search failure, the agent didn’t know how to fix the next step.</p>
+<p>None of these is auto-solved by swapping in a different embedding model. Instead, a simple BM25 baseline often lets you see the system’s real bottleneck faster — because it’s transparent and debuggable, you can clearly tell:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>Why was this result found?</span></span>
+<span class="line"><span>Why was that result not found?</span></span>
+<span class="line"><span>Which keyword hit?</span></span>
+<span class="line"><span>Which page polluted the ranking?</span></span>
+<span class="line"><span>Was the user query too vague?</span></span></code></pre>
+<p>These are precious engineering signals.</p>
+<h2 id="11-conclusion-not-a-return-to-old-tech-but-a-re-understanding-of-retrieval">11. Conclusion: not a return to old tech, but a re-understanding of retrieval</h2>
+<p>So — is grep all you need? The answer is: <strong>not necessarily.</strong></p>
+<p>But if the question is “should I not assume every RAG must start from a vector database?” — the answer is: <strong>right, you shouldn’t.</strong> A better approach:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>Start with simple, transparent, traceable lexical search as a baseline.</span></span>
+<span class="line"><span>When you hit semantic queries, synonyms, multimodal data, large-scale ranking,</span></span>
+<span class="line"><span>or cross-file structural problems, add embeddings / a reranker / a knowledge graph.</span></span>
+<span class="line"><span>And treat "memory" and "how context is assembled" as problems just as important as retrieval.</span></span></code></pre>
+<p>In the age of AI agents, retrieval is no longer a “fetch top-k once” problem. It’s more like a workflow:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="text"><code><span class="line"><span>search → read → reason → verify → correct → search again</span></span></code></pre>
+<p>And tools like grep, BM25, and FTS5 — traditional as they are — fit beautifully into that workflow. Their value isn’t being flashy; it’s being reliable.</p>
+<p>To sum it up in one line:</p>
+<blockquote>
+<p>In the agent era, the best retrieval system isn’t necessarily the most complex one — it’s the one easiest to use, correct, verify, and trace. And retrieval itself is only the first cell of a larger context engineering.</p>
+</blockquote>
+<h2 id="references">References</h2>
+<ul>
+<li>Sahil Sen et al., <a href="https://arxiv.org/abs/2605.15184"><em>Is Grep All You Need? How Agent Harnesses Reshape Agentic Search</em></a>, arXiv:2605.15184 (May 2026) — the empirical grep-vs-vector comparison. Note its key finding is twofold: grep generally beat vector retrieval <em>and</em> the harness / tool-output format mattered strongly, even on identical data. Note also that its corpus is conversational memory (LongMemEval), not enterprise documents.</li>
+<li>Doug Turnbull, <a href="https://softwaredoug.com/blog/2026/04/06/agentic-search-is-having-a-grep-moment"><em>Is grep all you need for RAG?</em></a> — the “agents converging on the filesystem as their interface” framing, the argument that constraints force the agent to work smarter, plus the hooks verification loop.</li>
+<li>Jason Liu / Colin Flaherty (Augment), <a href="https://jxnl.co/writing/2025/09/11/why-grep-beat-embeddings-in-our-swe-bench-agent-lessons-from-augment/"><em>Why Grep Beat Embeddings in Our SWE-Bench Agent</em></a> — the experience that grep/find was enough on SWE-Bench, with the explicit “smaller repo” caveat.</li>
+<li>Augment Code, <a href="https://www.augmentcode.com/blog/auggie-tops-swe-bench-pro"><em>Auggie tops SWE-Bench Pro</em></a> — the counter-data: pure grep hits a ceiling on harder tasks (avg. 4.1 files / ~107 lines per fix) while a semantic context engine pulls ahead.</li>
+<li>RAGFlow, <a href="https://ragflow.io/blog/rag-review-2025-from-rag-to-context"><em>From RAG to Context — A 2025 year-end review of RAG</em></a> — context on index-free RAG, and “even for code search, leading products fine-tune code embeddings.”</li>
+<li><a href="https://towardsdatascience.com/beyond-rag/"><em>Is RAG Dead? The Rise of Context Engineering and Semantic Layers for Agentic AI</em></a> (Towards Data Science) — the framing shift from RAG to context engineering.</li>
+</ul>  </div> <a class="backlink" href="/writing">Writing</a> </article>  </main> <footer class="site-foot"> <div class="wrap"> <span>© 2026 Levi Lee</span> <div class="foot-links"> <a href="https://github.com/AluminumShark">GitHub</a> <a href="https://www.threads.com/@tensor0wl">Threads</a> <a href="https://www.instagram.com/tensor0wl">Instagram</a> <a href="mailto:levi@tensorowl.dev">Email</a> <a href="/rss.xml">RSS</a> <span>Built with Astro</span> </div> </div> </footer> <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a22ce3c2fa806680',t:'MTc4NTMzNjE0MQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body></html>

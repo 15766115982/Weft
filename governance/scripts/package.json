@@ -1,0 +1,11 @@
+{
+  "name": "kb-governance",
+  "version": "0.1.0",
+  "description": "Data governance service: raw/ → wiki/ curation (contract: ../../schema/contract.md)",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test test/ ../viewer/test/"
+  }
+}

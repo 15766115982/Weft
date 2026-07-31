@@ -1,0 +1,39 @@
+body { font-family: system-ui, sans-serif; margin: 0; color: #1a1a1a; background: #fafafa; }
+header { background: #1f2933; color: #fff; padding: 0.8rem 1.5rem; }
+header h1 { font-size: 1.1rem; margin: 0 0 0.4rem; }
+header nav a { color: #9ecbff; margin-right: 1.2rem; text-decoration: none; }
+header nav a:hover { text-decoration: underline; }
+header .hint { font-size: 0.78rem; color: #9aa5b1; margin: 0.4rem 0 0; }
+main { max-width: 60rem; margin: 1.2rem auto; padding: 0 1.5rem; }
+table { border-collapse: collapse; width: 100%; background: #fff; }
+th, td { text-align: left; padding: 0.45rem 0.7rem; border-bottom: 1px solid #e4e7eb; font-size: 0.9rem; }
+th { background: #f0f4f8; }
+.badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 0.7rem; font-size: 0.75rem; }
+.badge.candidate { background: #fff3c4; color: #8a6d00; }
+.badge.approved { background: #d3f9d8; color: #2b8a3e; }
+.badge.rejected { background: #ffe3e3; color: #c92a2a; }
+.badge.archived { background: #e9ecef; color: #495057; }
+.fm-panel { background: #fff; border: 1px solid #e4e7eb; border-radius: 6px; padding: 0.8rem 1rem; margin-bottom: 1rem; font-size: 0.85rem; }
+.fm-panel dt { font-weight: 600; color: #52606d; display: inline; }
+.fm-panel dd { display: inline; margin: 0 1.2rem 0 0.3rem; }
+article.body { background: #fff; border: 1px solid #e4e7eb; border-radius: 6px; padding: 1rem 1.4rem; line-height: 1.55; }
+article.body pre { background: #f0f4f8; padding: 0.7rem; overflow-x: auto; border-radius: 4px; }
+article.body code { background: #f0f4f8; padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.88em; }
+article.body pre code { background: none; padding: 0; }
+.actions { margin: 1rem 0; }
+button { font-size: 0.95rem; padding: 0.45rem 1.4rem; margin-right: 0.8rem; border: none; border-radius: 5px; cursor: pointer; }
+button.approve { background: #2b8a3e; color: #fff; }
+button.reject { background: #c92a2a; color: #fff; }
+button:disabled { opacity: 0.5; cursor: default; }
+.notice { padding: 0.7rem 1rem; border-radius: 5px; margin: 1rem 0; font-size: 0.9rem; }
+.notice.ok { background: #d3f9d8; }
+.notice.err { background: #ffe3e3; }
+details.evidence { margin: 1rem 0; background: #fff; border: 1px solid #e4e7eb; border-radius: 6px; padding: 0.6rem 1rem; }
+details.evidence summary { cursor: pointer; font-weight: 600; font-size: 0.9rem; }
+.empty { color: #52606d; font-style: italic; padding: 2rem 0; text-align: center; }
+.notice.candidate-reason { background: #fff3c4; color: #5f4b00; border-left: 4px solid #e0a800; }
+pre.diff { background: #fff; border: 1px solid #e4e7eb; border-radius: 4px; padding: 0.7rem; overflow-x: auto; font-size: 0.82rem; line-height: 1.4; }
+pre.diff span { display: block; white-space: pre-wrap; }
+pre.diff span.add { background: #d3f9d8; color: #2b8a3e; }
+pre.diff span.del { background: #ffe3e3; color: #c92a2a; text-decoration: line-through; }
+pre.diff span.ctx { color: #9aa5b1; }

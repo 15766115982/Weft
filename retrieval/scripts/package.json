@@ -1,0 +1,14 @@
+{
+  "name": "kb-retrieval",
+  "version": "0.1.0",
+  "description": "data retrieval service: hybrid retrieval over approved pages in wiki/ (contract: ../../schema/contract.md, design: ADR-0003)",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0"
+  }
+}
