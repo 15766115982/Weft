@@ -1,10 +1,10 @@
-# Development Log (as of 2026-08-01, M0-M5 complete)
+# Development Log (as of 2026-08-01, M0-M5 complete + M5 review-fix round)
 
 > Restart entry point after context compaction. Architecture decisions: `CONTEXT.md`;
 > three-party contract: `schema/contract.md` + `schema/governance.md` (§1 language
 > convention: wiki all-English, raw keeps source language); five ADRs in `docs/adr/`.
 
-## Current status: M0-M5 ✅, 103 tests all green (acquisition 15 / governance 52 / retrieval 36)
+## Current status: M0-M5 ✅, 108 tests all green (acquisition 19 / governance 52 / retrieval 37)
 
 | Milestone | Deliverables | Tests |
 |---|---|---|
@@ -17,6 +17,51 @@
 
 Run tests: per service `cd <service>/scripts && node --test test/` (governance also runs
 `../viewer/test/`; retrieval requires npm install first — better-sqlite3 already installed).
+
+## M5 review-fix round (2026-08-01, 108 tests all green: acquisition 19 / governance 52 / retrieval 37)
+
+External review of M5: 3 medium-low + 10 low + 2 engineering gaps. Confirmed and fixed:
+3 medium-low, L1-L6, L8, gap 1. Recorded without code change: L7/L9/L10.
+
+- **Finding 1 same-day blind spot (medium-low)**: the hashed body rendered `Updated:` at
+  day granularity and upsertRawDoc skips on content_hash alone, so a same-day second edit
+  left both the body and source_version stale until the next day (a fixVersions-only
+  change could stay invisible indefinitely). Fix: the body header now embeds full-precision
+  ISO timestamps (Jira bumps `updated` on every edit, so any edit changes the hash);
+  contract §2's incremental rule reworded to match reality — hash-only skip, with the
+  connector required to embed the source-system version at full precision in the hashed
+  body (CONTEXT.md synced per §7). Regression: same-day edit pinned as `updated`
+- **Finding 2 silent --max truncation (medium-low)**: searchAll read but never compared
+  the server's `total`. Fix: summary gains `truncated: [{jql, fetched, total}]`; SKILL.md
+  instructs always surfacing it (no-silent-caps lesson applied). Pinned
+- **Finding 3 one bad JQL aborted the whole batch (medium-low)**: per-issue failures had
+  an errors fallback but per-scope failures did not. Fix: per-scope try/catch records
+  `{jql, error}` and continues; auth failures (401/403) carry `err.authFailed` and still
+  fail fast (every scope would fail identically). Both behaviors pinned
+- **L1 mixed-offset date filter (latent, real)**: store.mjs indexed src_updated verbatim
+  and query.mjs compares lexicographically — a `+08:00` value would mis-sort against Z.
+  Fix: both date columns normalized to UTC at index time; regression pins a +08:00 page
+  crossing a UTC day boundary. Contract §2 example switched to Z with an explicit
+  "any ISO offset is legal, retrieval normalizes" note (folds in L3)
+- **L2 contract §2 wording**: "escape or hash-map" now also blesses "reject with an
+  error" (the jira connector's fail-closed skip)
+- **L4 check() duplicated config resolution**: shared `resolveAuth` extracted — the
+  same-drift class as review rounds 2-3
+- **L5 intranet TLS gap**: SKILL.md documents `NODE_EXTRA_CA_CERTS` (and warns against
+  `NODE_TLS_REJECT_UNAUTHORIZED=0`)
+- **L6 test gaps**: 403 mapping / truncation / per-scope failure / same-day edit / ADF
+  hardBreak+mention all pinned
+- **L8**: SKILL wording — `total` = unique issues matched, before per-issue write errors
+- **Recorded, no change**: L7 ADF fidelity (declared minimal fallback; hardBreak/mention
+  handled as a cheap win, tables stay concatenated); L9 exit code 0 with errors
+  (consistent with local; SKILL mandates reporting errors — script callers must not
+  judge success by exit code alone); L10 redirect:'follow' (Node 20 undici strips
+  Authorization on cross-origin redirects, so no leakage; 'manual' would break
+  legitimate intranet http→https redirects)
+- **Gap 1 (engineering)**: the code repo now has .gitignore (node_modules first),
+  git init, and an initial commit — the previous single biggest risk is closed
+- **Gap 2 (M6 prep, recorded)**: reuse the mock-node:http test pattern for Confluence;
+  storage XHTML→markdown is M6's main quality risk — prepare fixture corpora
 
 ## M5 delivered (2026-08-01, 103 tests all green: acquisition 15 / governance 52 / retrieval 36)
 
@@ -323,5 +368,7 @@ Review report hit 2 high + 2 medium, all fixed with pinned regressions:
 
 ## TODO
 
-- **M6 (next step)**: Confluence connector (PAT, storage XHTML→markdown)
-- Repo still has no .gitignore (must include node_modules) and no git init
+- **M6 (next step)**: Confluence connector (PAT, storage XHTML→markdown). Prep notes from
+  the M5 review: reuse the mock-node:http test pattern; XHTML conversion is the main
+  quality risk — prepare fixture corpora; page-ids are numeric (contract §2-compliant)
+- ~~Repo has no .gitignore / no git init~~ (done in the M5 review-fix round)
