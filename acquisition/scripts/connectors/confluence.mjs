@@ -108,26 +108,54 @@ function renderNodes(children, ctx) {
   return children.map((c) => renderNode(c, ctx)).join('');
 }
 
-/** Inline rendering: block structure collapsed away (table cells, list items). */
+// <br> is meaningful; pretty-print whitespace between tags is not. br renders
+// as a sentinel so the inline collapse eats only the meaningless newlines;
+// the sentinel becomes a real '\n' after the global cleanup.
+const HARD_BREAK = String.fromCharCode(1); // <br> sentinel, restored to newline after cleanup
+
+/** Inline rendering: block structure collapsed away (table cells, headings).
+ *  Marks ctx.inline so block-level constructs (tables) degrade to a visible
+ *  placeholder instead of pipe-escaped garbage. */
 function renderInline(children, ctx) {
-  return renderNodes(children, ctx).replace(/\s*\n\s*/g, ' ').trim();
+  return renderNodes(children, { ...ctx, inline: true }).replace(/[ \t]*\n[ \t]*/g, ' ').trim();
+}
+
+/** Fence length = longest backtick run in the content + 1 (min 3): a code
+ *  block whose content contains ``` must not burst its own fence (the
+ *  retrieval chunker already recognizes 4+ backtick fences — both sides of
+ *  the convention must agree). */
+function fenceFor(code) {
+  let max = 0;
+  for (const m of String(code).matchAll(/`+/g)) max = Math.max(max, m[0].length);
+  return '`'.repeat(Math.max(3, max + 1));
 }
 
 function renderTable(node, ctx) {
+  // nested in a cell/heading: a visible placeholder beats pipe-escaped garbage
+  // (same philosophy as unknown macros); collect() below stops at the first
+  // <tr>, so a nested table's rows never leak into the outer table either
+  if (ctx.inline) return '[table]';
   const rows = [];
   const collect = (n) => {
     if (n.tag === 'tr') rows.push(n);
     else (n.children || []).forEach(collect);
   };
   (node.children || []).forEach(collect);
-  const cells = rows.map((tr) =>
-    tr.children
-      .filter((c) => c.tag === 'th' || c.tag === 'td')
-      .map((c) => renderInline(c.children, ctx).replace(/\|/g, '\\|')),
-  ).filter((r) => r.length);
+  const cells = rows
+    .map((tr) => ({
+      isHeader: tr.children.some((c) => c.tag === 'th'),
+      cells: tr.children
+        .filter((c) => c.tag === 'th' || c.tag === 'td')
+        .map((c) => renderInline(c.children, ctx).replaceAll(HARD_BREAK, ' ').replace(/\|/g, '\\|')),
+    }))
+    .filter((r) => r.cells.length);
   if (!cells.length) return '';
-  const sep = cells[0].map(() => '---');
-  const lines = [cells[0], sep, ...cells.slice(1)].map((r) => `| ${r.join(' | ')} |`);
+  // markdown forces a header row; a table with no <th> gets an EMPTY header
+  // instead of promoting the first data row (that would distort the data)
+  const header = cells[0].isHeader ? cells[0].cells : cells[0].cells.map(() => '');
+  const bodyRows = cells[0].isHeader ? cells.slice(1) : cells;
+  const lines = [header, header.map(() => '---'), ...bodyRows.map((r) => r.cells)]
+    .map((r) => `| ${r.join(' | ')} |`);
   return `\n\n${lines.join('\n')}\n\n`;
 }
 
@@ -138,7 +166,8 @@ function renderMacro(node, ctx) {
       .map((c) => c.text || '').join('').trim();
     const bodyNode = findChild(node, 'ac:plain-text-body');
     const code = bodyNode ? rawText(bodyNode).replace(/\n+$/, '') : '';
-    return `\n\n\`\`\`${lang}\n${code}\n\`\`\`\n\n`;
+    const fence = fenceFor(code);
+    return `\n\n${fence}${lang}\n${code}\n${fence}\n\n`;
   }
   if (['info', 'note', 'warning', 'tip'].includes(name)) {
     const bodyNode = findChild(node, 'ac:rich-text-body');
@@ -165,12 +194,22 @@ function renderNode(node, ctx) {
     case 'h1': case 'h2': case 'h3': case 'h4': case 'h5': case 'h6':
       return `\n\n${'#'.repeat(Number(tag[1]))} ${renderInline(children, ctx)}\n\n`;
     case 'p': return `\n\n${renderInline(children, ctx)}\n\n`;
-    case 'br': return '\n';
+    case 'br': return HARD_BREAK;
     case 'hr': return '\n\n---\n\n';
     case 'strong': case 'b': return `**${renderInline(children, ctx)}**`;
     case 'em': case 'i': return `*${renderInline(children, ctx)}*`;
-    case 'code': return `\`${rawText(node).trim()}\``;
-    case 'pre': return `\n\n\`\`\`\n${rawText(node).replace(/\n+$/, '')}\n\`\`\`\n\n`;
+    case 'code': {
+      const raw = rawText(node).trim();
+      if (!raw.includes('`')) return `\`${raw}\``;
+      // content with backticks: CommonMark inline code with a longer run
+      const f = fenceFor(raw);
+      return `${f} ${raw} ${f}`;
+    }
+    case 'pre': {
+      const code = rawText(node).replace(/\n+$/, '');
+      const fence = fenceFor(code);
+      return `\n\n${fence}\n${code}\n${fence}\n\n`;
+    }
     case 'blockquote': {
       const inner = renderNodes(children, ctx).trim();
       return `\n\n${inner.split('\n').map((l) => `> ${l}`.trimEnd()).join('\n')}\n\n`;
@@ -227,8 +266,27 @@ function renderNode(node, ctx) {
 export function storageToMarkdown(xhtml, baseUrl = '') {
   const root = parseStorage(String(xhtml || ''));
   const md = renderNodes(root.children, { depth: 0, baseUrl });
-  return md.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  return cleanupOutsideFences(md).replaceAll(HARD_BREAK, '\n').trim();
 }
+
+// Whitespace cleanup must NOT touch fenced code: code macros/pre are the
+// highest-evidence content (config snippets, command examples) and raw/ is
+// the evidence layer — their blank lines and trailing spaces are content
+// (same lesson as the M4 reading-convention drift: the chunker is
+// fence-aware, so the converter must be too)
+const FENCE_RE = /(`{3,})[^\n]*\n[\s\S]*?\n\1(?=\n|$)/g;
+
+function cleanupOutsideFences(md) {
+  let out = '';
+  let last = 0;
+  for (const m of md.matchAll(FENCE_RE)) {
+    out += tidy(md.slice(last, m.index)) + m[0];
+    last = m.index + m[0].length;
+  }
+  return out + tidy(md.slice(last));
+}
+
+const tidy = (s) => s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n');
 
 // ---------------------------------------------------------------------------
 

@@ -1,10 +1,10 @@
-# Development Log (as of 2026-08-01, M0-M6 complete)
+# Development Log (as of 2026-08-01, M0-M6 complete + M6 review-fix round)
 
 > Restart entry point after context compaction. Architecture decisions: `CONTEXT.md`;
 > three-party contract: `schema/contract.md` + `schema/governance.md` (§1 language
 > convention: wiki all-English, raw keeps source language); five ADRs in `docs/adr/`.
 
-## Current status: M0-M6 ✅, 123 tests all green (acquisition 34 / governance 52 / retrieval 37)
+## Current status: M0-M6 ✅, 124 tests all green (acquisition 35 / governance 52 / retrieval 37)
 
 | Milestone | Deliverables | Tests |
 |---|---|---|
@@ -18,6 +18,49 @@
 
 Run tests: per service `cd <service>/scripts && node --test test/` (governance also runs
 `../viewer/test/`; retrieval requires npm install first — better-sqlite3 already installed).
+
+## M6 review-fix round (2026-08-01, 124 tests all green: acquisition 35 / governance 52 / retrieval 37)
+
+External review of M6: 5 converter findings (low-medium/low) + 3 contract/doc findings.
+All 8 confirmed (zero misjudgments); 6 fixed, 2 recorded as by-design.
+
+- **Finding 1 (low-medium): global whitespace cleanup rewrote fenced code** —
+  storageToMarkdown's `[ \t]+\n` / `\n{3,}` replacements ran over the whole document,
+  silently collapsing blank lines and stripping trailing spaces inside code-macro CDATA —
+  the highest-evidence content in the evidence layer. This is the M4 reading-convention
+  drift in a new guise: the retrieval chunker is fence-aware, the converter was not.
+  Fix: cleanup is now fence-aware (fenced spans are located first, tidy() applies only
+  outside them). Pinned: CDATA with 3 blank lines + trailing spaces survives verbatim
+- **Finding 2 (low-medium): fixed triple-backtick fence bursts on content containing ```** —
+  M3's fence rules recognize 4+ backticks, but the converter always emitted 3 (asymmetric
+  convention, same root cause class). Fix: fence length = longest backtick run in the
+  content + 1 (min 3), for code macros, pre blocks, and inline code. Pinned
+- **Finding 3 (low): nested table rendered as pipe-escaped garbage** — collect() correctly
+  stops at the first <tr> (inner rows never leak into the outer table — reviewer verified),
+  but the inner table rendered inline inside the cell as `\| ... \|` noise. Fix: in inline
+  contexts (cells/headings) tables degrade to a visible `[table]` placeholder — same
+  philosophy as unknown macros. Pinned
+- **Finding 4 (low): `<br>` inside `<p>` was dead code** — br emitted '\n', then p's
+  renderInline collapsed it to a space. Fix: br renders a sentinel char; the inline
+  collapse eats only meaningless (pretty-print) newlines; the sentinel becomes a real
+  newline after cleanup. Pinned
+- **Finding 5 (low): no-`<th>` tables promoted the first data row to header** — reviewer
+  accepted this as a declared tradeoff, but the fix was cheap: such tables now get an
+  EMPTY header row and the first row stays data. Pinned
+- **Contract §6 example missing the `cql` key (doc drift)** — the connector reads
+  connectors.confluence.cql and CONTEXT.md already specified "space key + optional CQL",
+  but the contract example showed only {base_url, pat_env, spaces}. Fix: §6 example now
+  includes `cql`, with a prose line documenting scope-key precedence (cql overrides
+  spaces). CONTEXT.md checked per §7 — already consistent, no edit needed
+- **Recorded by design (no code change)**: Confluence has no orphan reconcile — a CQL/space
+  scope is a query, not an inventory (same as Jira's M5 record); now written into DEVLOG +
+  SKILL.md. Attachment-only changes are invisible to the incremental skip (an attachment
+  upload neither bumps version.number nor changes the storage XHTML; attachments render as
+  placeholders anyway) — inherent boundary, recorded in SKILL.md
+
+Carried-forward lesson, third occurrence: **when two components share a format convention,
+check both sides whenever one changes** (M4: parser vs reader; M5 round 2: contract rule vs
+every implementer; now: chunker fence-awareness vs converter fence-emission).
 
 ## M6 delivered (2026-08-01): Confluence connector, 34 acquisition tests all green
 

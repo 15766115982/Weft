@@ -267,7 +267,8 @@ the backfilled form is written by the sweep for flips the viewer made without lo
     "confluence": {
       "base_url": "https://wiki.example.com",
       "pat_env": "CONFLUENCE_PAT",
-      "spaces": ["DEV", "REQ"]
+      "spaces": ["DEV", "REQ"],
+      "cql": "type = page AND label = kb"
     },
     "local": { "inbox": "inbox/" }
   },
@@ -280,6 +281,8 @@ the backfilled form is written by the sweep for flips the viewer made without lo
 
 Rules: **secrets go through environment variables only**; kb.json stores at most
 environment-variable names (`*_env`). The `KB_PATH` environment variable locates kb-root.
+Connector scope keys: jira `jql` (array); confluence `spaces` (array, one CQL scope per
+space key) or `cql` (string or array, optional — when set it overrides `spaces`).
 
 ## 7. Change Discipline
 

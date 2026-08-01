@@ -299,3 +299,32 @@ test('unit: normalizeConfluenceDate / storageToMarkdown / pageToMarkdown edge ca
   const md = pageToMarkdown(makePage('123456', { body: { storage: { value: '' } } }), 'https://wiki.example.com');
   assert.match(md, /\(empty page\)/);
 });
+
+test('unit: fenced code is evidence — cleanup, fences, and degradation rules respect it (review round 1)', () => {
+  // finding 1: blank lines and trailing spaces inside code survive the global cleanup
+  const withBlanks = storageToMarkdown(
+    '<ac:structured-macro ac:name="code"><ac:plain-text-body><![CDATA[line1\n\n\nline2  ]]></ac:plain-text-body></ac:structured-macro>',
+  );
+  assert.match(withBlanks, /line1\n\n\nline2 {2}\n```/);
+
+  // finding 2: code containing ``` gets a longer fence instead of bursting
+  const withFence = storageToMarkdown(
+    '<ac:structured-macro ac:name="code"><ac:plain-text-body><![CDATA[before\n```\nafter]]></ac:plain-text-body></ac:structured-macro>',
+  );
+  assert.equal(withFence, '````\nbefore\n```\nafter\n````');
+
+  // finding 3: a table nested in a cell degrades to a visible placeholder, not garbage
+  assert.match(
+    storageToMarkdown('<table><tr><th>a</th></tr><tr><td><table><tr><td>inner1</td></tr></table></td></tr></table>'),
+    /\| a \|\n\| --- \|\n\| \[table\] \|/,
+  );
+
+  // finding 4: <br> inside a paragraph is a real line break, not a collapsed space
+  assert.equal(storageToMarkdown('<p>line one<br>line two</p>'), 'line one\nline two');
+
+  // finding 5: a table without <th> gets an empty header; the first row stays data
+  assert.equal(
+    storageToMarkdown('<table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>'),
+    '|  |  |\n| --- | --- |\n| a | b |\n| c | d |',
+  );
+});

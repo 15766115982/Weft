@@ -69,6 +69,11 @@ Pages land in `raw/confluence/<page-id>.md`. The body is a **minimal** conversio
 of the storage-format XHTML: headings/lists/tables/code+panel macros/links are
 preserved, unknown macros degrade to a visible `[macro: name]` placeholder, and
 the original XHTML is discarded (contract §2). Comments are not pulled (v1).
+By design there is no orphan reconcile for Confluence (same as Jira): a CQL/space
+scope is a query, not an inventory — a page that falls out of scope is not
+reported orphaned. Also by design, attachment-only changes are invisible to the
+incremental skip (uploading an attachment neither bumps version.number nor
+changes the storage XHTML, and attachments render as placeholders anyway).
 
 The PAT itself lives **only** in the environment variable named by `pat_env` (default
 `JIRA_PAT` / `CONFLUENCE_PAT`) — never in kb.json (the KB is a Git repository; checked-in
