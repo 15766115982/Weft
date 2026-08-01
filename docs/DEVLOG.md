@@ -1,10 +1,10 @@
-# Development Log (as of 2026-08-01, M0-M5 complete + M5 review-fix round)
+# Development Log (as of 2026-08-01, M0-M6 complete)
 
 > Restart entry point after context compaction. Architecture decisions: `CONTEXT.md`;
 > three-party contract: `schema/contract.md` + `schema/governance.md` (§1 language
 > convention: wiki all-English, raw keeps source language); five ADRs in `docs/adr/`.
 
-## Current status: M0-M5 ✅, 108 tests all green (acquisition 19 / governance 52 / retrieval 37)
+## Current status: M0-M6 ✅, 123 tests all green (acquisition 34 / governance 52 / retrieval 37)
 
 | Milestone | Deliverables | Tests |
 |---|---|---|
@@ -14,9 +14,42 @@
 | M3 Retrieval | retrieval/{scripts,skills/search}: dual FTS5 tables (fts_latin=porter+unicode61 / fts_cjk=trigram), per-term routing (CJK<3 chars→LIKE fallback), structured query (type/source/tag/after/before, source-system-time preferred), ≤2 snippets per page, candidate space persisted to disk (capped at 20, cleanup excludes current run), wikilink graph expansion (top-10, supports #anchor), read #anchor (includes subsections, approved whitelist gate, path/archive checks share norm() case normalization), lazy incremental (skips table dual-key reconcile), fence recognition ~~~ / 4+ backticks / inline code excluded | 34+1 |
 | M4 Governance v2 | topic pages (apply-topic: slug=identity whitelist, sources union-merge, fail-closed provenance, --candidate), candidate state machine (plan review_queue, approve/reject/archive, sweep = log backfill + rejected→archive, idempotent, archive name-collision -N suffix), thin viewer (governance/viewer/: node:http 127.0.0.1 on-demand, no-build HTML/vanilla JS, queue/browse/page views, raw-evidence pane, approve/reject = flipStatus only, byte-preserving CRLF+BOM, 409 optimistic concurrency) | 8→31 |
 | M5 Jira connector | acquisition/scripts/connectors/jira.mjs (Node rewrite of the old Python jira.py): Server/DC PAT Bearer auth (env var named by kb.json pat_env, PAT never on disk/log/errors), JQL scopes from kb.json (CLI --jql override, --max cap, --check = myself), startAt/maxResults pagination, ADF→text fallback, issue→normalized markdown (English scaffold, content keeps source language), raw/jira/<KEY>.md via the shared upsertRawDoc framework (incremental skip by content_hash), non-compliant keys skipped with error (contract §2 whitelist) | 4→15 |
+| M6 Confluence connector | acquisition/scripts/connectors/confluence.mjs: same PAT/framework pattern as Jira; scopes = kb.json spaces (→ `space = "KEY" AND type = page`) or explicit cql (CLI --cql override); CQL search start/limit pagination with totalSize→truncated[]; storage XHTML→markdown = hand-rolled minimal converter (zero new deps): headings/lists/tables/code+panel macros/links/images/entities/CDATA preserved, unknown macros → visible [macro: name] placeholder (never silently dropped), original XHTML discarded per contract §2; version.number + full-precision timestamp in the hashed body (no same-day blind spot); comments not pulled (v1) | 19→34 |
 
 Run tests: per service `cd <service>/scripts && node --test test/` (governance also runs
 `../viewer/test/`; retrieval requires npm install first — better-sqlite3 already installed).
+
+## M6 delivered (2026-08-01): Confluence connector, 34 acquisition tests all green
+
+`connectors/confluence.mjs` follows the M5 Jira pattern line for line (resolveAuth shared by
+run/check, per-scope failure isolation + auth fail-fast, no-silent-caps truncation, reject-
+with-error on non-compliant ids, CLI e2e via async spawn). Zero contract amendment: the
+kb.json §6 shape already defined `connectors.confluence` {base_url, pat_env, spaces}.
+
+M6-specific decisions:
+
+- **Scope resolution**: CLI `--cql` > kb.json `cql` (string or array) > kb.json `spaces`
+  (each space key becomes `space = "KEY" AND type = page`). Empty scope list = config error
+- **XHTML→markdown is minimal by declaration** (same stance as the Jira ADF fallback):
+  a hand-rolled tolerant parser (zero new dependencies) + renderer covering headings,
+  p/br/hr, strong/em/code/pre, ul/ol (nested), tables (first row = header, `|` escaped),
+  external/relative links (relative resolved against base_url), attachments as
+  `[attachment: name]`, code/info/note/warning/tip/status macros, entities + CDATA.
+  Unknown macros render as `[macro: name]` — a visible placeholder instead of a silent
+  drop; `toc` is navigation chrome and is dropped. Page comments are not pulled (v1)
+- **No same-day blind spot**: the body header embeds `Version: <number>` AND the
+  full-precision `Last modified` timestamp; Confluence bumps version.number on every edit
+- **expand** = body.storage,version,space,metadata.labels,ancestors; ancestors render as a
+  `- Location: SPACE > Parent > …` breadcrumb; extra = {space, version, labels, content_type}
+- source_version = version.when normalized to Z; source_url = _links.webui (fallback
+  viewpage.action?pageId=); page ids are numeric → contract §2-compliant by construction,
+  still whitelist-checked
+
+Tests: 14 connector tests (mirror of the Jira suite + same-day-edit regression + a
+storageToMarkdown unit block: macros, entities, CDATA, ac:link/ri:page, tables, lists) +
+1 CLI e2e (kb.json + env PAT through the real acquire.mjs, --check round-trip, bool-flag
+trap). One fixture slip: frontmatter.mjs quotes numeric-looking source_ids
+(`source_id: "123456"`) — assertion fixed to match.
 
 ## M5 review-fix round 2 (2026-08-01, 108 tests all green)
 
@@ -384,7 +417,7 @@ Review report hit 2 high + 2 medium, all fixed with pinned regressions:
 
 ## TODO
 
-- **M6 (next step)**: Confluence connector (PAT, storage XHTML→markdown). Prep notes from
-  the M5 review: reuse the mock-node:http test pattern; XHTML conversion is the main
-  quality risk — prepare fixture corpora; page-ids are numeric (contract §2-compliant)
+- **M7 candidates**: SharePoint connector (v2, Graph API + MSAL — longest chain, deferred at
+  M0); vector retrieval leg (deferred until an intranet embedding endpoint exists);
+  Confluence comments pull (v2); XHTML fidelity upgrades only if real corpora demand them
 - ~~Repo has no .gitignore / no git init~~ (done in the M5 review-fix round)

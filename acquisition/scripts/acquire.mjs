@@ -52,14 +52,20 @@ async function main() {
       }
       break;
     }
-    case 'confluence':
-      summary = { errors: [{ error: `connector ${connector} not yet implemented (see CONTEXT.md milestone M6)` }] };
-      process.exitCode = 2;
+    case 'confluence': {
+      const { run, check } = await import('./connectors/confluence.mjs');
+      if (args.check !== undefined && boolFlag(args.check, '--check')) {
+        summary = { myself: await check(config) };
+      } else {
+        summary = await run(kbRoot, { kbConfig: config, cql: args.cql, maxResults: args.max });
+      }
       break;
+    }
     default:
       console.error('usage: node acquire.mjs <local|jira|confluence> [--kb <path>] [options]');
       console.error('  local: [--inbox <path>] [--prune]  --prune removes orphaned docs (default report-only)');
       console.error('  jira:  [--jql "<JQL>"] [--max <n>] [--check]  scope from kb.json connectors.jira.jql; PAT via env var');
+      console.error('  confluence: [--cql "<CQL>"] [--max <n>] [--check]  scope from kb.json connectors.confluence.spaces/.cql; PAT via env var');
       process.exitCode = 64;
       return;
   }

@@ -36,6 +36,12 @@ node <skill-dir>/../../scripts/acquire.mjs jira --kb <kb-root>
 # One-off scope override (does not edit kb.json) / result cap / PAT sanity check
 node <skill-dir>/../../scripts/acquire.mjs jira --kb <kb-root> --jql "project = PROJ ORDER BY updated DESC" --max 100
 node <skill-dir>/../../scripts/acquire.mjs jira --kb <kb-root> --check
+
+# Confluence connector (Server/DC, PAT auth): pull the spaces configured in kb.json
+node <skill-dir>/../../scripts/acquire.mjs confluence --kb <kb-root>
+# One-off CQL override (does not edit kb.json) / result cap / PAT sanity check
+node <skill-dir>/../../scripts/acquire.mjs confluence --kb <kb-root> --cql "space = DEV AND label = kb" --max 100
+node <skill-dir>/../../scripts/acquire.mjs confluence --kb <kb-root> --check
 ```
 
 Jira setup (contract §6): `kb.json` holds only non-sensitive config —
@@ -48,18 +54,32 @@ Jira setup (contract §6): `kb.json` holds only non-sensitive config —
 } } }
 ```
 
+Confluence setup is the same shape; the pull scope is `spaces` (one CQL scope per
+space key) or an explicit `cql` string/array, which overrides `spaces` —
+
+```json
+{ "connectors": { "confluence": {
+  "base_url": "https://wiki.example.com",
+  "pat_env": "CONFLUENCE_PAT",
+  "spaces": ["DEV", "REQ"]
+} } }
+```
+
+Pages land in `raw/confluence/<page-id>.md`. The body is a **minimal** conversion
+of the storage-format XHTML: headings/lists/tables/code+panel macros/links are
+preserved, unknown macros degrade to a visible `[macro: name]` placeholder, and
+the original XHTML is discarded (contract §2). Comments are not pulled (v1).
+
 The PAT itself lives **only** in the environment variable named by `pat_env` (default
-`JIRA_PAT`) — never in kb.json (the KB is a Git repository; checked-in secrets would enter
-history). Ask the user to set it in their shell before the first pull. Issues land in
-`raw/jira/<ISSUE-KEY>.md`; re-pulling skips unchanged documents by content_hash.
+`JIRA_PAT` / `CONFLUENCE_PAT`) — never in kb.json (the KB is a Git repository; checked-in
+secrets would enter history). Ask the user to set it in their shell before the first pull.
+Issues land in `raw/jira/<ISSUE-KEY>.md`; re-pulling skips unchanged documents by
+content_hash.
 
-Intranet deployment note: Node's fetch rejects self-signed certificates. If the Jira host
-uses an internal CA, set `NODE_EXTRA_CA_CERTS=<path-to-ca.pem>` in the environment before
-running — do NOT work around it with `NODE_TLS_REJECT_UNAUTHORIZED=0` (that disables
-certificate verification entirely).
-
-The confluence connector is not yet implemented (milestone M6); invoking it returns a clear
-not-implemented error.
+Intranet deployment note: Node's fetch rejects self-signed certificates. If the Jira or
+Confluence host uses an internal CA, set `NODE_EXTRA_CA_CERTS=<path-to-ca.pem>` in the
+environment before running — do NOT work around it with `NODE_TLS_REJECT_UNAUTHORIZED=0`
+(that disables certificate verification entirely).
 
 ## Interpreting the output
 
@@ -86,12 +106,13 @@ stdout is JSON:
 - `unsupported`: no converter for that extension yet (currently only md/markdown/txt).
   Explain to the user: when docx/pdf is needed, convert to markdown manually first and drop it
   into the inbox;
-- the jira summary has the same `created`/`updated`/`unchanged`/`errors` lists plus `total`
-  (unique issues matched across the JQL scopes, before per-issue write errors) and
-  `truncated` — a scope appears there when the server reported more hits than were fetched
-  (`--max` cap); **always surface truncation to the user**, a capped pull is not full
-  coverage. A failed scope (bad JQL, transient 500) lands in `errors` with its `jql` and
-  the remaining scopes still run; an auth failure (401/403) aborts the whole run loudly;
+- the jira and confluence summaries have the same `created`/`updated`/`unchanged`/`errors`
+  lists plus `total` (unique documents matched across the scopes, before per-document write
+  errors) and `truncated` — a scope appears there when the server reported more hits than
+  were fetched (`--max` cap); **always surface truncation to the user**, a capped pull is
+  not full coverage. A failed scope (bad JQL/CQL, transient 500) lands in `errors` with its
+  `jql`/`cql` and the remaining scopes still run; an auth failure (401/403) aborts the
+  whole run loudly;
 - When `errors` is non-empty you must report it to the user — never swallow it silently.
 
 ## Behavioral rules
