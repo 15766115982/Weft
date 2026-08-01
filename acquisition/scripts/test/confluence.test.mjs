@@ -328,3 +328,23 @@ test('unit: fenced code is evidence — cleanup, fences, and degradation rules r
     '|  |  |\n| --- | --- |\n| a | b |\n| c | d |',
   );
 });
+
+test('unit: br sentinel is a line boundary for every line-splitting consumer (review round 2)', () => {
+  // blockquote: the post-br line must stay inside the quote
+  assert.equal(
+    storageToMarkdown('<blockquote><p>first<br>second</p></blockquote>'),
+    '> first\n> second',
+  );
+  // panel macro: same
+  assert.equal(
+    storageToMarkdown('<ac:structured-macro ac:name="info"><ac:rich-text-body><p>first<br>second</p></ac:rich-text-body></ac:structured-macro>'),
+    '> **Info:**\n> first\n> second',
+  );
+  // list item: the post-br line keeps the continuation indent
+  assert.equal(
+    storageToMarkdown('<ul><li>first<br>second</li></ul>'),
+    '- first\n  second',
+  );
+  // heading is a single-line context: br degrades to a space
+  assert.equal(storageToMarkdown('<h2>one<br>two</h2>'), '## one two');
+});

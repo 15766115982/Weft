@@ -1,10 +1,10 @@
-# Development Log (as of 2026-08-01, M0-M6 complete + M6 review-fix round)
+# Development Log (as of 2026-08-01, M0-M6 complete + M6 review-fix rounds 1-2)
 
 > Restart entry point after context compaction. Architecture decisions: `CONTEXT.md`;
 > three-party contract: `schema/contract.md` + `schema/governance.md` (§1 language
 > convention: wiki all-English, raw keeps source language); five ADRs in `docs/adr/`.
 
-## Current status: M0-M6 ✅, 124 tests all green (acquisition 35 / governance 52 / retrieval 37)
+## Current status: M0-M6 ✅, 125 tests all green (acquisition 36 / governance 52 / retrieval 37)
 
 | Milestone | Deliverables | Tests |
 |---|---|---|
@@ -18,6 +18,27 @@
 
 Run tests: per service `cd <service>/scripts && node --test test/` (governance also runs
 `../viewer/test/`; retrieval requires npm install first — better-sqlite3 already installed).
+
+## M6 review-fix round 2 (2026-08-01, 125 tests all green: acquisition 36 / governance 52 / retrieval 37)
+
+Second-round review of the round-1 fixes: 1 regression + 3 record-only items. The
+regression is confirmed and fixed; the record-only items are agreed (no action).
+
+- **Regression (low-medium): the br sentinel inverted the bug instead of fixing it** —
+  round 1's HARD_BREAK is restored to '\n' only AFTER the global cleanup, but blockquote,
+  panel macros, and list items compute line structure AT RENDER TIME via split('\n'), and
+  headings are single-line contexts. None of the four consumers had been updated, so the
+  post-br line escaped its structure: `> first\nsecond` (out of the quote), `- first\nsecond`
+  (indent lost, list broken), `## one\ntwo` (heading split into heading + paragraph).
+  Exactly the N1/N3 lesson again: the round-1 fix audited only the COLLAPSING consumers
+  (renderInline, table cells) and missed the SPLITTING consumers. Fix: one shared
+  splitLines() helper that splits on both '\n' and the sentinel, used by blockquote /
+  panel macro / list continuation; headings flatten the sentinel to a space. Four
+  regression tests pin one case each
+- Recorded without change (agreed): blockquote multi-paragraph emits consecutive `>` blank
+  lines (pre-existing, render-equivalent); a standalone <br> between paragraphs may leave a
+  longer newline run (markdown-equivalent); FENCE_RE mismatch direction on pathological
+  inline backtick spans is fail-safe (it only skips cleanup, never corrupts content)
 
 ## M6 review-fix round (2026-08-01, 124 tests all green: acquisition 35 / governance 52 / retrieval 37)
 

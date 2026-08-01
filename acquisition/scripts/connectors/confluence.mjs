@@ -113,6 +113,12 @@ function renderNodes(children, ctx) {
 // the sentinel becomes a real '\n' after the global cleanup.
 const HARD_BREAK = String.fromCharCode(1); // <br> sentinel, restored to newline after cleanup
 
+// Line structure must be computed on BOTH real newlines and the br sentinel:
+// the sentinel is restored to '\n' only AFTER the global cleanup, so any
+// render-time line splitting (blockquote / panel macro / list items) that
+// looked only at '\n' would let the post-br line escape its structure
+const splitLines = (s) => s.split('\n').flatMap((l) => l.split(HARD_BREAK));
+
 /** Inline rendering: block structure collapsed away (table cells, headings).
  *  Marks ctx.inline so block-level constructs (tables) degrade to a visible
  *  placeholder instead of pipe-escaped garbage. */
@@ -173,7 +179,7 @@ function renderMacro(node, ctx) {
     const bodyNode = findChild(node, 'ac:rich-text-body');
     const inner = bodyNode ? renderNodes(bodyNode.children, ctx).trim() : '';
     const label = name[0].toUpperCase() + name.slice(1);
-    const quoted = inner.split('\n').map((l) => `> ${l}`.trimEnd()).join('\n');
+    const quoted = splitLines(inner).map((l) => `> ${l}`.trimEnd()).join('\n');
     return `\n\n> **${label}:**\n${quoted}\n\n`;
   }
   if (name === 'toc') return ''; // navigation chrome, not content
@@ -192,7 +198,8 @@ function renderNode(node, ctx) {
   switch (tag) {
     case '#root': return renderNodes(children, ctx);
     case 'h1': case 'h2': case 'h3': case 'h4': case 'h5': case 'h6':
-      return `\n\n${'#'.repeat(Number(tag[1]))} ${renderInline(children, ctx)}\n\n`;
+      // single-line context: a <br> in a heading degrades to a space
+      return `\n\n${'#'.repeat(Number(tag[1]))} ${renderInline(children, ctx).replaceAll(HARD_BREAK, ' ')}\n\n`;
     case 'p': return `\n\n${renderInline(children, ctx)}\n\n`;
     case 'br': return HARD_BREAK;
     case 'hr': return '\n\n---\n\n';
@@ -212,7 +219,7 @@ function renderNode(node, ctx) {
     }
     case 'blockquote': {
       const inner = renderNodes(children, ctx).trim();
-      return `\n\n${inner.split('\n').map((l) => `> ${l}`.trimEnd()).join('\n')}\n\n`;
+      return `\n\n${splitLines(inner).map((l) => `> ${l}`.trimEnd()).join('\n')}\n\n`;
     }
     case 'ul': case 'ol': {
       const items = children.filter((c) => c.tag === 'li');
@@ -220,7 +227,7 @@ function renderNode(node, ctx) {
         const marker = tag === 'ol' ? `${i + 1}. ` : '- ';
         const inner = renderNodes(li.children, { ...ctx, depth: ctx.depth + 1 }).trim();
         const indent = '  '.repeat(ctx.depth);
-        const body = inner.split('\n').map((l, k) => (k === 0 ? l : `${indent}  ${l}`)).join('\n');
+        const body = splitLines(inner).map((l, k) => (k === 0 ? l : `${indent}  ${l}`)).join('\n');
         return `${indent}${marker}${body}`;
       });
       return `\n${lines.join('\n')}\n`;
