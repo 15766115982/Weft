@@ -3,6 +3,8 @@
 > Restart entry point after context compaction. Architecture decisions: `CONTEXT.md`;
 > three-party contract: `schema/contract.md` + `schema/governance.md` (§1 language
 > convention: wiki all-English, raw keeps source language); five ADRs in `docs/adr/`.
+> **New-deployment entry: `docs/installation.md` (+ `installation.zh-CN.md` 中文版)** —
+> prerequisites, skill linking, kb.json/PAT/CA configuration, smoke test, troubleshooting.
 
 ## Current status: M0-M6 ✅, 125 tests all green (acquisition 36 / governance 52 / retrieval 37)
 
@@ -371,7 +373,7 @@ after the switch). Intentionally left as-is:
 - CJK regression fixture data in tests (trigram/LIKE routing, slugify) — required
   by governance.md §1; the CJK range regex in query.mjs is functional, not prose
 - `guide/` pre-M0 research notes (kept in Chinese by user decision)
-- `tensorowl.html` reference article, `node_modules/`
+- `guide/materials/` research raw materials (paper snapshots incl. `tensorowl.html`), `node_modules/`
 
 Hazard discovered during the switch: emitting the 6-char `\uXXXX` escape text in
 tool parameters gets decoded into the literal character before hitting disk —
@@ -481,6 +483,9 @@ Review report hit 2 high + 2 medium, all fixed with pinned regressions:
 
 ## TODO
 
+- **Real-environment acceptance** (next, before any M7 work): docs/real-env-test.md —
+  scratch-KB checklist against the real intranet Jira/Confluence (auth/cert drills, XHTML
+  fidelity audit, incremental-skip verification, governance+retrieval loop)
 - **M7 candidates**: SharePoint connector (v2, Graph API + MSAL — longest chain, deferred at
   M0); vector retrieval leg (deferred until an intranet embedding endpoint exists);
   Confluence comments pull (v2); XHTML fidelity upgrades only if real corpora demand them
