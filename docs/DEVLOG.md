@@ -1,4 +1,4 @@
-# Development Log (as of 2026-08-02, M0-M6 complete + cross-service test layer + M7a/M7b UI portal)
+# Development Log (as of 2026-08-02, M0-M6 complete + cross-service test layer + M7a/M7b/M7c UI portal + A7 graph)
 
 > Restart entry point after context compaction. Architecture decisions: `CONTEXT.md`;
 > three-party contract: `schema/contract.md` + `schema/governance.md` (§1 language
@@ -7,6 +7,53 @@
 > prerequisites, skill linking, kb.json/PAT/CA configuration, smoke test, troubleshooting.
 > **M7 UI portal: process + design docs in `docs/webui/`** (requirements frozen, option 1
 > no-build SPA selected, ADR-0006, contract §1 UI-portal column, S7 spike report).
+
+## A7 (2026-08-02, 36 UI tests green): relationship graph + backlinks over shared edges
+
+Scope: A7 关系图谱(user-ruled option B:wikilink 力导向图,≤2k nodes client-side
+layout,visual unity with the [[引用签]] signature)+ the reviewer's folded-in item —
+backlinks stop full-scanning the wiki and reuse retrieval outlinks.
+
+- **ui/lib/graph.mjs — two edge sources, one reading caliber**: ① approved pages'
+  edges come straight from the retrieval index (`docs.outlinks` after the same
+  `ensureFresh` the search read path runs — zero extra scan); ② pages retrieval
+  never indexes (candidates + wiki/index.md) are scanned UI-side with retrieval's
+  own fence-aware `extractWikilinks`. Target resolution replicates store.mjs
+  `resolveLinks` (not exported; calibers must match — the M4/M6 lesson).
+  Unresolved [[targets]] are dropped; dangling links stay plan()'s domain.
+- **backlinks() moved to the shared edge list** (browse.mjs's per-request full
+  scan + its private WIKILINK_RE/stripCode deleted). Return shape unchanged;
+  the M7a fence test passes untouched. Behavior delta (improvement): index.md's
+  links now count as backlinks. Inherited retrieval caveat, documented: an
+  approved page's outlinks freeze until the page itself changes — a link to a
+  page created later appears after the source is re-indexed (or rebuild-index).
+- **/api/graph** read endpoint (global loopback-Host gate applies); nodes carry
+  path/title/type/status/isIndex for client-side coloring.
+- **views/graph.js — hand-rolled force layout, zero new vendor deps**: uniform-grid
+  repulsion (cell = cutoff) keeps ticks ~O(n) at the ≤2k-node cap; golden-angle
+  spiral init + 180 synchronous pre-warm ticks so first paint is organized;
+  alpha-decay reheats on drag. Canvas with DPR scaling, pan/zoom-to-cursor,
+  node drag, hover = 1-hop neighborhood lit / rest ghosted, click navigates,
+  dblclick re-fits. Tooltip is the signature chip (`[[ title ]] · type · status ·
+  N 连接`); topics filled celadon, sources hollow, candidates dashed amber,
+  index double-ring — the status-chip semantics the rest of the app uses.
+  Toolbar: native-datalist page focus, candidate/isolated toggles, re-layout,
+  node/edge/candidate stats, legend. >2k nodes → guard overlay with explicit
+  "仍然渲染". SSE kb-change reloads (camera preserved), theme flip repaints
+  (canvas can't follow CSS vars), MutationObserver cleanup.
+- browse ctx 反链 tab gains "在图谱中查看 →" (`#/graph?focus=<rel>`); nav + hotkey
+  `g r` + palette entry wired.
+- Self-caught during Playwright verification: ① edges invisible at rest —
+  `--line` is a hairline by design, edges now draw in `--ink-dim`; ② toolbar
+  input crushed full-width — Pico's `input:not(...)` out-specifies a bare class,
+  selector scoped to `.graph-bar`; ③ click-on-node never navigated — any press
+  on a node armed drag mode and pointerup required "no drag", now click =
+  press/release within 6px regardless of where it began.
+- Playwright (demo KB, 17 nodes/20 edges): light+dark render ✓ tooltip chip ✓
+  neighborhood dimming ✓ click → page ✓ focus deep-link ✓ zero JS errors.
+
+**下一:M7d wiki 编辑(H2/H3 契约规则未议;进 M7d 前先落 P2-2 加固:
+allowedTools/permissions.deny 限定 agent 写路径)。**
 
 ## M7c review-fix round (2026-08-02, 32 tests green): external M7c review — 2 P2 confirmed, zero misjudgments (third round)
 

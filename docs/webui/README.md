@@ -33,10 +33,15 @@
   (注册无关)。31 测试全绿。**外部审核(M7c-review.zh-CN.md,零误判)2 P2 全处理**:
   D5 引导链接入治理台;skip-permissions 暴露面立项加固(ADR-0006,M7d 前);
   P3 批次含作业取消全管道(queued 跳过/running kill)。32 测试全绿
-- 🔵 **下一里程碑:A7 关系图谱**(小里程碑,用户拍板 B:wikilink 力导向图,
-  ≤2k 节点客户端布局,与 [[引用签]] 视觉统一;顺手解决 backlinks 全库扫描直用
-  retrieval outlinks)→ 然后 M7d wiki 编辑(H2/H3 契约规则未议;**进 M7d 前先落
-  P2-2 加固:allowedTools/permissions.deny 限定写路径**)
+- ✅ **A7 关系图谱 — 完成**(2026-08-02):graph.mjs 双源边表(retrieval outlinks
+  供给 approved 页 + 候选/index 页 UI 侧补扫,同一围栏口径;未解析目标丢弃归 plan
+  领域)+ **backlinks 顺手迁入共享边表,全库扫描消除**(返回形状不变,旧测试不动);
+  /api/graph 端点;views/graph.js 手写力导向(网格排斥 ~O(n)/tick,≤2k 节点零新依赖),
+  预热 180 tick 首帧即成图,悬停邻域高亮 + [[引用签]] tooltip,点击导航,候选虚线琥珀/
+  主题青瓷/来源空心/index 双环,g r 热键 + 浏览页"在图谱中查看"互链;36 测试全绿,
+  Playwright 明暗双主题 + 交互验证零 JS 错误
+- 🔵 **下一里程碑:M7d wiki 编辑**(H2/H3 契约规则未议;**进 M7d 前先落 P2-2 加固:
+  allowedTools/permissions.deny 限定写路径**)
 - ⬜ backlog:K 评测 / J9 闭环 / C5 批量 / B5 查询历史
 - ⬜ 并行欠账:真实环境验收 docs/real-env-test.md(全系统级,与 M7 无关)
 

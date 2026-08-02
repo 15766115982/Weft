@@ -11,10 +11,12 @@ import { render as searchView } from './views/search.js';
 import { render as queueView } from './views/queue.js';
 import { render as acquireView } from './views/acquire.js';
 import { render as governView } from './views/govern.js';
+import { render as graphView } from './views/graph.js';
 
 const ROUTES = {
   dashboard: dashboardView, browse: browseView, page: browseView,
   search: searchView, queue: queueView, acquire: acquireView, govern: governView,
+  graph: graphView,
 };
 let pageCache = { kb: null, pages: [] };
 let currentRoute = 'dashboard';
@@ -23,7 +25,7 @@ let currentRoute = 'dashboard';
 
 const SHORTCUTS = [
   ['Ctrl K / ⌘ K', '命令面板(搜页面 / 动作)'],
-  ['g d / g b / g s / g q / g a / g g', '前往 总览 / 浏览 / 检索 / 评审 / 采集 / 治理'],
+  ['g d / g b / g r / g s / g q / g a / g g', '前往 总览 / 浏览 / 图谱 / 检索 / 评审 / 采集 / 治理'],
   ['g t', '切换暗色 / 亮色'],
   ['/', '聚焦搜索框(检索页)/ 命令面板(其他页)'],
   ['j k 或 [ ]', '评审队列:上 / 下一条'],
@@ -152,6 +154,7 @@ async function paletteItems() {
   const actions = [
     { icon: 'layoutDashboard', label: '前往:总览', hint: 'g d', go: '#/dashboard' },
     { icon: 'library', label: '前往:浏览', hint: 'g b', go: '#/browse' },
+    { icon: 'network', label: '前往:图谱', hint: 'g r', go: '#/graph' },
     { icon: 'search', label: '前往:检索', hint: 'g s', go: '#/search' },
     { icon: 'listChecks', label: '前往:评审队列', hint: 'g q', go: '#/queue' },
     { icon: 'inbox', label: '前往:采集控制台', hint: 'g a', go: '#/acquire' },
@@ -179,6 +182,7 @@ function showPalette() {
 hotkeys('ctrl+k,command+k', (e) => { e.preventDefault(); showPalette(); });
 hotkeys('g d', () => { location.hash = '#/dashboard'; });
 hotkeys('g b', () => { location.hash = '#/browse'; });
+hotkeys('g r', () => { location.hash = '#/graph'; });
 hotkeys('g s', () => { location.hash = '#/search'; });
 hotkeys('g q', () => { location.hash = '#/queue'; });
 hotkeys('g a', () => { location.hash = '#/acquire'; });

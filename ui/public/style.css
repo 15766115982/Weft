@@ -388,3 +388,31 @@ button.danger-solid { background: var(--wine); border-color: var(--wine); color:
 .chip.cancelled { background: var(--gray); color: #fff; }
 #stale-banner:hover { text-decoration: underline; }
 .job summary .icon-btn { padding: 2px; margin-right: 4px; }
+
+/* ---- A7 relationship graph ---- */
+/* full-bleed: cancel #view padding so the canvas owns the viewport between
+   the 44px top bar and the 28px statusbar */
+.graph { display: flex; flex-direction: column; margin: -20px -24px -52px; height: calc(100vh - 72px); }
+.graph-bar { flex: none; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--paper-raise); }
+.graph-bar .graph-focus { flex: none; width: 190px; margin: 0; padding: 5px 10px; font-size: 13px;
+  border: 1px solid var(--line); border-radius: var(--r-btn); background: var(--paper); color: var(--ink); }
+.graph-toggle { margin: 0; padding: 3px 12px; font-size: 12px; border: 1px solid var(--line);
+  border-radius: 999px; background: none; color: var(--ink-dim); cursor: pointer; }
+.graph-toggle.on { color: var(--celadon); border-color: var(--celadon); background: var(--celadon-soft); }
+.graph-legend { font-size: 12px; display: inline-flex; align-items: center; gap: 5px; }
+.graph-legend .lg-topic, .graph-legend .lg-index { color: var(--celadon); }
+.graph-legend .lg-cand { color: var(--amber); }
+.graph-stats { margin-left: auto; font-family: var(--font-mono); font-size: 11px; }
+.graph-stage { position: relative; flex: 1; overflow: hidden; }
+.graph-stage canvas { position: absolute; inset: 0; cursor: grab; touch-action: none; }
+.graph-tip { position: absolute; z-index: 5; pointer-events: none; display: flex; align-items: baseline; gap: 8px;
+  padding: 5px 10px; font-size: 12.5px; background: var(--paper-raise); border: 1px solid var(--line);
+  border-radius: var(--r-chip); box-shadow: 0 8px 24px rgb(0 0 0 / .14); }
+.graph-tip .br { color: var(--ink-dim); font-family: var(--font-mono); font-size: 12px; }
+.graph-tip .dim { font-size: 11px; }
+.graph-guard { position: absolute; inset: 0; z-index: 4; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 12px; background: var(--paper); }
+.graph-guard p { max-width: 420px; text-align: center; color: var(--ink-dim); }
+.graph-stage .empty-hint { position: absolute; inset: 0; display: flex; align-items: center;
+  justify-content: center; color: var(--ink-dim); font-size: 13.5px; }

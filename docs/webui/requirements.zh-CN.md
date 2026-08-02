@@ -20,6 +20,9 @@
 > prompt 注入可写 KB 外(绕过 candidate 评审 + wiki 痕迹双保险);加固方向 =
 > --allowedTools/permissions.deny 限定写路径(与 skip-permissions 叠加),详见 ADR-0006;
 > ⑦ D5 引导链接入治理控制台(dashboard CTA + 顶栏 stale 横幅 → #/govern)。
+> **交付记录(2026-08-02):A7 关系图谱完成**——力导向图(≤2k 节点客户端布局,与
+> [[引用签]] 视觉统一);顺手项落地:backlinks 全库扫描消除,改走共享边表
+> (retrieval outlinks + 候选页 UI 补扫)。backlog 中 A7 条目关闭。
 > 每条标注来源:【用户】= 用户明确表达;【推导】= 从现有系统能力/调研推导,待用户确认。
 
 ## 已明确的边界(全程有效)

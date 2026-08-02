@@ -48,55 +48,9 @@ export function rawRefs(kbRoot, rawRel) {
   return out.sort((a, b) => a.path.localeCompare(b.path));
 }
 
-// Backlinks (A6): scan wiki bodies for [[target]] references. Cheap at the
-// expected scale (≤2k pages); fences/inline code are stripped first so code
-// samples don't become edges (same reading convention as retrieval/governance).
-const WIKILINK_RE = /\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/g;
-// Fenced blocks are dropped whole, inline code blanked; closing fence must use
-// the same character with length >= opening (retrieval chunker rules; a line of
-// inline-code-only backticks is not a fence — CommonMark info-string rule).
-function stripCode(text) {
-  const out = [];
-  let inFence = false, fenceCh = '', fenceLen = 0;
-  for (const line of text.split('\n')) {
-    const m = line.match(/^\s*(`{3,}|~{3,})/);
-    if (!inFence && m) {
-      const rest = line.slice(line.indexOf(m[1]) + m[1].length);
-      if (m[1][0] === '`' && rest.includes('`')) { out.push(line.replace(/`[^`\n]*`/g, '')); continue; }
-      inFence = true; fenceCh = m[1][0]; fenceLen = m[1].length; out.push(''); continue;
-    }
-    if (inFence) {
-      if (m && m[1][0] === fenceCh && m[1].length >= fenceLen) inFence = false;
-      out.push(''); continue;
-    }
-    out.push(line.replace(/`[^`\n]*`/g, ''));
-  }
-  return out.join('\n');
-}
-
-export function backlinks(kbRoot, pageRel) {
-  const base = path.basename(pageRel, '.md');
-  const out = [];
-  for (const sub of ['sources', 'topics']) {
-    for (const abs of walkMd(path.join(kbRoot, 'wiki', sub))) {
-      const rel = path.relative(kbRoot, abs).replace(/\\/g, '/');
-      if (rel === pageRel) continue;
-      const text = stripCode(fs.readFileSync(abs, 'utf8'));
-      WIKILINK_RE.lastIndex = 0;
-      let m;
-      while ((m = WIKILINK_RE.exec(text))) {
-        const target = m[1].trim().replace(/\.md$/, '');
-        // match by bare name, full relative form, or basename of a pathed link
-        if (target === base || target.endsWith('/' + base) || path.basename(target) === base) {
-          const { fields } = parseFrontmatter(fs.readFileSync(abs, 'utf8'));
-          out.push({ path: rel, title: fields.title || path.basename(rel, '.md') });
-          break;
-        }
-      }
-    }
-  }
-  return out.sort((a, b) => a.path.localeCompare(b.path));
-}
+// Backlinks (A6) moved to lib/graph.mjs (A7): they are now served from the
+// shared edge list (retrieval outlinks + candidate scan) instead of a
+// per-request full-wiki scan.
 
 // Dashboard health (D1/D3/D5): plan() six lists + page/status counts.
 export function health(kbRoot) {

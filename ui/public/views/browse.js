@@ -141,12 +141,14 @@ function infoTab(fields) {
   return box;
 }
 
-function backlinksTab(backlinks) {
+function backlinksTab(backlinks, rel) {
   const box = el('div');
-  if (!backlinks.length) { box.append(el('p', { class: 'dim' }, '没有页面引用这篇 — 它是知识图的一个端点。')); return box; }
+  if (!backlinks.length) box.append(el('p', { class: 'dim' }, '没有页面引用这篇 — 它是知识图的一个端点。'));
   for (const b of backlinks) {
     box.append(el('a', { href: `#/page?path=${encodeURIComponent(b.path)}`, style: 'display:block;padding:2px 0' }, b.title));
   }
+  // A7: jump into the graph centered on this page
+  box.append(el('a', { href: `#/graph?focus=${encodeURIComponent(rel)}`, class: 'dim', style: 'display:block;margin-top:10px;font-size:12px' }, '在图谱中查看 →'));
   return box;
 }
 
@@ -292,7 +294,7 @@ async function renderPage(content, rel, anchor) {
   const ctx = el('aside', { class: 'ctx' });
   ctxTabs(ctx, {
     信息: infoTab(page.fields),
-    反链: backlinksTab(back.pages),
+    反链: backlinksTab(back.pages, rel),
     大纲: tocTab(main),
   });
 
@@ -345,7 +347,7 @@ async function renderSplit(content, rel, page, backlinksPages) {
   const note = el('p', { class: 'dim', style: 'font-size:12px;margin-top:10px' },
     '左:治理后的 wiki 摘要。右:acquire 落地的 raw 原文。对照检查摘要是否忠实。');
   ctx.append(exit, note);
-  ctxTabs(ctx, { 信息: infoTab(page.fields), 反链: backlinksTab(backlinksPages), 大纲: tocTab(lmain) });
+  ctxTabs(ctx, { 信息: infoTab(page.fields), 反链: backlinksTab(backlinksPages, rel), 大纲: tocTab(lmain) });
 
   content.append(split, ctx);
 }
