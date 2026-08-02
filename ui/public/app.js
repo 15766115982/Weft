@@ -9,10 +9,11 @@ import { render as dashboardView } from './views/dashboard.js';
 import { render as browseView } from './views/browse.js';
 import { render as searchView } from './views/search.js';
 import { render as queueView } from './views/queue.js';
+import { render as acquireView } from './views/acquire.js';
 
 const ROUTES = {
   dashboard: dashboardView, browse: browseView, page: browseView,
-  search: searchView, queue: queueView,
+  search: searchView, queue: queueView, acquire: acquireView,
 };
 let pageCache = { kb: null, pages: [] };
 let currentRoute = 'dashboard';
@@ -21,7 +22,7 @@ let currentRoute = 'dashboard';
 
 const SHORTCUTS = [
   ['Ctrl K / ⌘ K', '命令面板(搜页面 / 动作)'],
-  ['g d / g b / g s / g q', '前往 总览 / 浏览 / 检索 / 评审'],
+  ['g d / g b / g s / g q / g a', '前往 总览 / 浏览 / 检索 / 评审 / 采集'],
   ['g t', '切换暗色 / 亮色'],
   ['/', '聚焦搜索框(检索页)/ 命令面板(其他页)'],
   ['j k 或 [ ]', '评审队列:上 / 下一条'],
@@ -147,6 +148,7 @@ async function paletteItems() {
     { icon: 'library', label: '前往:浏览', hint: 'g b', go: '#/browse' },
     { icon: 'search', label: '前往:检索', hint: 'g s', go: '#/search' },
     { icon: 'listChecks', label: '前往:评审队列', hint: 'g q', go: '#/queue' },
+    { icon: 'inbox', label: '前往:采集控制台', hint: 'g a', go: '#/acquire' },
     { icon: 'keyboard', label: '键盘快捷键', hint: '?', action: showShortcuts },
     { icon: 'moon', label: '切换暗色 / 亮色', hint: 'g t', action: toggleTheme },
   ];
@@ -172,6 +174,7 @@ hotkeys('g d', () => { location.hash = '#/dashboard'; });
 hotkeys('g b', () => { location.hash = '#/browse'; });
 hotkeys('g s', () => { location.hash = '#/search'; });
 hotkeys('g q', () => { location.hash = '#/queue'; });
+hotkeys('g a', () => { location.hash = '#/acquire'; });
 hotkeys('g t', toggleTheme);
 hotkeys('g k', () => document.getElementById('kb-select')?.focus()); // P2-3
 hotkeys('shift+/', (e) => { e.preventDefault(); showShortcuts(); }); // "?" (P1-2)
@@ -187,11 +190,32 @@ hotkeys('/', (e) => {
 
 window.addEventListener('hashchange', mount);
 window.addEventListener('ui:refresh-header', refreshHeader); // P2-1: views signal writes
+window.addEventListener('ui:remount', mount); // M7b: views ask for a full re-render after queued writes
 document.getElementById('hdr-refresh').addEventListener('click', () => { refreshHeader(); mount(); });
-// J3 transitional (review decision: full fs-watch deferred to M7b): write-refresh
-// (above) + 30s health polling (visibility-aware) + manual refresh button
+
+// J3 (M7b): SSE event stream replaces polling as the primary freshness signal.
+// 'change' → KB files changed on disk (fs.watch, .kb/ excluded, debounced);
+// 'job' → queue lifecycle. Views opt in via window events; the header always
+// refreshes. The 30s poll below stays as the SSE-down fallback.
+let events;
+function connectEvents() {
+  events?.close();
+  const qs = getKb() ? `?kb=${encodeURIComponent(getKb())}` : '';
+  events = new EventSource('/api/events' + qs);
+  events.addEventListener('change', () => {
+    refreshHeader();
+    window.dispatchEvent(new CustomEvent('ui:kb-change'));
+  });
+  events.addEventListener('job', (e) => {
+    refreshHeader();
+    window.dispatchEvent(new CustomEvent('ui:job', { detail: JSON.parse(e.data) }));
+  });
+}
 setInterval(() => { if (!document.hidden) refreshHeader(); }, 30_000);
 await initHeader();
+connectEvents();
+// KB switch re-targets the stream (the watcher is per-KB server-side)
+document.getElementById('kb-select').addEventListener('change', connectEvents);
 await refreshHeader();
 if (!location.hash) location.hash = '#/dashboard';
 await mount();

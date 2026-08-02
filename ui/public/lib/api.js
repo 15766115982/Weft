@@ -30,3 +30,28 @@ export async function apiPost(path, body) {
     body: JSON.stringify({ ...body, kb: currentKb }),
   }));
 }
+
+// E1 upload: raw bytes, no multipart; the filename rides in X-Filename
+// (encodeURIComponent — CJK names survive latin1-only headers).
+export async function apiUpload(file) {
+  const qs = withKb().toString();
+  return unwrap(await fetch('/api/upload' + (qs ? `?${qs}` : ''), {
+    method: 'POST',
+    headers: { 'content-type': 'application/octet-stream', 'x-ui-token': TOKEN, 'x-filename': encodeURIComponent(file.name) },
+    body: file,
+  }));
+}
+
+// Poll a queued job to completion (M7b ops are 202 + job record). Rejects
+// with the job's error so callers can surface it in place.
+export async function waitJob(id, { timeout = 120000 } = {}) {
+  const t0 = Date.now();
+  for (;;) {
+    const { jobs } = await api('/api/jobs');
+    const job = jobs.find((j) => j.id === id);
+    if (job && job.status === 'done') return job;
+    if (job && job.status === 'failed') throw new Error(job.error || 'job failed');
+    if (Date.now() - t0 > timeout) throw new Error('等待作业超时');
+    await new Promise((r) => setTimeout(r, 300));
+  }
+}

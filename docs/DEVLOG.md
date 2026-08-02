@@ -1,4 +1,4 @@
-# Development Log (as of 2026-08-02, M0-M6 complete + cross-service test layer + M7a UI portal slice 1)
+# Development Log (as of 2026-08-02, M0-M6 complete + cross-service test layer + M7a/M7b UI portal)
 
 > Restart entry point after context compaction. Architecture decisions: `CONTEXT.md`;
 > three-party contract: `schema/contract.md` + `schema/governance.md` (§1 language
@@ -7,6 +7,50 @@
 > prerequisites, skill linking, kb.json/PAT/CA configuration, smoke test, troubleshooting.
 > **M7 UI portal: process + design docs in `docs/webui/`** (requirements frozen, option 1
 > no-build SPA selected, ADR-0006, contract §1 UI-portal column, S7 spike report).
+
+## M7b (2026-08-02, 23+36+39 tests green): acquisition console — the portal's first real write surface
+
+Full scope delivered: jobs.mjs (S10) + E upload + F source pull + G raw delete/move
++ J3 fs-watch + J4 inbox + J5 auth check + J6 freshness (J3-5 formally moved here by
+M7a-review ruling). One sanctioned acquisition increment: `recordRun` appends
+`.kb/acquire_runs.jsonl` (contract §1 pre-defined; the only record of all-skipped
+incremental pulls — CLI-driven pulls covered too, a UI-side record would miss them).
+
+- **jobs.mjs**: per-KB serial chain (Map kb→promise tail; a failed job never poisons
+  the chain — unit-tested order first/second(fail)/third). Every job persisted as JSONL
+  to `.kb/ui/jobs.jsonl` (append full record per transition, readers take last line per
+  id); on load, queued/running leftovers from a dead process tombstoned to failed.
+  `waitFor(job)` lets endpoints keep sync request/response while writes stay serialized
+  (review flip now goes through the queue too — ADR discipline uniform). spawnJob
+  helper: bounded log tail (64KB), exit≠0 → throw.
+- **E upload**: POST /api/upload raw bytes + X-Filename (encodeURIComponent — CJK names
+  survive latin1 headers), 32MB cap separate from the 64KB JSON reader; the inbox file
+  is written INSIDE the queued job (inbox writes serialized with everything else), then
+  spawn acquire local — one job, two steps.
+- **F pull**: POST /api/pull {connector, jql?, cql?, max?} → spawn acquire CLI (max
+  clamped 1-500); J5 /api/authcheck spawns --check OFF-queue (read-only probe).
+- **G raw ops**: delete/move as queued jobs; move = new identity (target-exists guard,
+  both paths gated by normalizeRawRel — traversal to wiki/ refused, tested). G6 snapshot
+  FIRST: git repo → pathspec-scoped commit (`git commit -- <path>` so unrelated worktree
+  changes are NOT swept in; `-c user.name=kb-portal` fixed machine author — greppable,
+  and independent of the machine's git config); no git → copy to `.kb/ui/snapshots/
+  <ts>-<jobid>/`. G5 impact preview reuses /api/rawrefs (frontend modal lists tracing
+  wiki pages before confirm).
+- **J3**: lib/watch.mjs — lazy per-KB fs.watch recursive (Node 20 win32 OK), refcounted
+  by SSE clients; two storm guards: .kb/ excluded (portal's own derived writes must not
+  retrigger it) + 400ms debounce (one acquire = one refresh). SSE /api/events streams
+  change + job events; app.js EventSource dispatches ui:kb-change/ui:job; 30s poll kept
+  as SSE-down fallback.
+- **Frontend**: views/acquire.js (dropzone, three pull cards, freshness rows, inbox
+  list, job center with status chips + expandable log tails — live via SSE); raw ctx
+  panel gains 移动/删除 with impact-preview modal; 6 new icons; routes g a / #/acquire.
+  Playwright-verified on demo KB: real pull through the UI (job done chip + full acquire
+  JSON), freshness updated live, delete modal lists 2 tracing wiki pages, zero JS errors.
+- Frontend gotchas added: Pico styles bare `<button>` with a dark background — outline
+  variants must reset `background: none` explicitly; Windows full_page screenshots
+  duplicate the fixed header mid-image (capture artifact, not a layout bug).
+
+**M7a work committed (50aaab0 test layer + e75c198 M7a) before M7b started.**
 
 ## M7a slice 4 (2026-08-02, 14 tests green): quality-review fix batch — M7a COMPLETE
 

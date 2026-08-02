@@ -1,7 +1,7 @@
 // views/browse.js — A browsing: resizable/segmented tree + icon rail (P1-1/6/7/8),
 // centered reader (archive card), tabbed context panel (info · backlinks · TOC).
 // Filter input is OUTSIDE the re-render scope (P0-1: focus survives typing).
-import { api } from '../lib/api.js';
+import { api, apiPost, waitJob } from '../lib/api.js';
 import { html, esc, el } from '../lib/render.js';
 import { setKnownPages, renderMarkdown, anchorToId } from '../lib/md.js';
 import { icon } from '../lib/icons.js';
@@ -219,6 +219,57 @@ function wirePreviews(main) {
   });
 }
 
+// ---- G: raw delete / move (impact preview G5 = the rawrefs list already loaded) ----
+
+function rawOpsModal({ title, bodyNodes, confirmLabel, onConfirm }) {
+  const mask = el('div', { class: 'cmdk-mask' });
+  const box = el('div', { class: 'cmdk', style: 'padding:18px 22px; max-width:520px' });
+  box.append(el('h3', { style: 'margin:0 0 10px' }, title), ...bodyNodes);
+  const row = el('div', { style: 'display:flex;gap:10px;margin-top:14px;justify-content:flex-end' });
+  const cancel = el('button', {}, '取消');
+  const ok = el('button', { class: 'primary danger-solid' }, confirmLabel);
+  const note = el('p', { class: 'dim', style: 'font-size:12.5px;margin:10px 0 0' });
+  cancel.addEventListener('click', close);
+  ok.addEventListener('click', async () => {
+    ok.disabled = true;
+    note.textContent = '作业已入队,执行中…(同 KB 写操作串行)';
+    try {
+      const { job } = await onConfirm();
+      const done = await waitJob(job.id);
+      close();
+      window.dispatchEvent(new CustomEvent('ui:refresh-header'));
+      window.dispatchEvent(new CustomEvent('ui:remount'));
+      return done;
+    } catch (err) {
+      note.textContent = `失败:${err.message}`;
+      ok.disabled = false;
+    }
+  });
+  row.append(cancel, ok);
+  box.append(row, note);
+  mask.append(box);
+  mask.addEventListener('click', (e) => { if (e.target === mask) close(); });
+  function onKey(e) { if (e.key === 'Escape') { e.preventDefault(); close(); } }
+  function close() { mask.remove(); document.removeEventListener('keydown', onKey, true); }
+  document.addEventListener('keydown', onKey, true);
+  document.body.append(mask);
+}
+
+function impactPreview(refs) {
+  const box = el('div', { class: 'impact' });
+  if (!refs.pages.length) {
+    box.append(el('p', { class: 'dim' }, '没有 wiki 页溯源到这篇 raw — 删除不影响任何已治理内容。'));
+    return box;
+  }
+  box.append(el('p', {}, `以下 ${refs.pages.length} 篇 wiki 页溯源到它 — 删除后它们的 source_ref 将失效,治理会发现孤儿,由人裁决:`));
+  for (const p of refs.pages) {
+    const a = el('a', { href: `#/page?path=${encodeURIComponent(p.path)}`, style: 'display:block;padding:2px 0' }, p.title);
+    if (p.status && p.status !== 'approved') html(a, badge(p.status));
+    box.append(a);
+  }
+  return box;
+}
+
 // ============================== page renderers ==============================
 
 async function renderPage(content, rel, anchor) {
@@ -328,6 +379,39 @@ async function renderRaw(content, rel) {
     refBox.append(a);
   }
   ctx.append(refBox);
+
+  // G: raw 管理操作(删除 G1 / 移动 G2;影响预览 G5;快照由服务端作业先留,G6)
+  const ops = el('div', { class: 'raw-ops' });
+  const moveBtn = el('button', { class: 'sm' });
+  html(moveBtn, `${icon('folderInput', 13)} 移动`);
+  const delBtn = el('button', { class: 'sm danger' });
+  html(delBtn, `${icon('trash2', 13)} 删除`);
+  moveBtn.addEventListener('click', () => {
+    const input = el('input', { value: rel, style: 'width:100%;font-family:var(--font-mono);font-size:12.5px' });
+    rawOpsModal({
+      title: '移动 raw 文档(= 新身份)',
+      bodyNodes: [
+        el('p', { class: 'dim', style: 'font-size:13px' }, '移动后旧路径成为孤儿(契约语义),溯源到旧路径的 wiki 页需治理裁决。目标必须仍在 raw/ 下。'),
+        impactPreview(refs),
+        el('label', { style: 'display:block;font-size:12.5px;margin-top:8px' }, '目标路径', input),
+      ],
+      confirmLabel: '移动',
+      onConfirm: () => apiPost('/api/raw-move', { from: rel, to: input.value.trim() }),
+    });
+  });
+  delBtn.addEventListener('click', () => {
+    rawOpsModal({
+      title: `删除 ${rel.split('/').pop()}`,
+      bodyNodes: [
+        impactPreview(refs),
+        el('p', { class: 'dim', style: 'font-size:12.5px' }, '删除前服务端会先留可回滚快照(git 提交或 .kb/ui/snapshots/ 副本)。raw 内容不可修改,但可删除后重新采集。'),
+      ],
+      confirmLabel: '确认删除',
+      onConfirm: () => apiPost('/api/raw-delete', { path: rel }),
+    });
+  });
+  ops.append(moveBtn, delBtn);
+  ctx.append(ops);
   content.append(reader, ctx);
 }
 

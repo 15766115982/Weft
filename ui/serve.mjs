@@ -2,9 +2,8 @@
 // UI portal server (ADR-0006): on-demand localhost human console. Red lines:
 // launch on demand; no user system; whitelisted KB writes only (contract §1);
 // per-startup token + Origin/Host checks on every write request (S8).
-// Read-hot paths import service libs in-process; write operations go through
-// the per-KB serial queue (S10, jobs.mjs — wired in M7b; M7a's only write is
-// the statusflip review, serialized here by the same queue stub).
+// Read-hot paths import service libs in-process; every KB-mutating operation
+// goes through the per-KB serial write queue (S10, lib/jobs.mjs).
 //
 //   node serve.mjs [--kb <path>] [--port N]     (default port 8322, binds 127.0.0.1 only)
 import fs from 'node:fs';
@@ -18,6 +17,12 @@ import { resolveUnder, normalizeWikiRelRead, normalizeRawRel, walkMd } from './l
 import { listWikiPages, backlinks, rawRefs, health } from './lib/browse.mjs';
 import { runSearch } from './lib/search.mjs';
 import { flipStatus, normalizeWikiRel, parseFrontmatter } from './lib/review.mjs';
+import { createJobCenter } from './lib/jobs.mjs';
+import { createWatcher } from './lib/watch.mjs';
+import {
+  UPLOAD_MAX, uploadJob, pullJob, inboxDeleteJob, rawDeleteJob, rawMoveJob,
+  authCheck, sourceFreshness, listInbox,
+} from './lib/acquire.mjs';
 
 const UI_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(UI_DIR, 'public');
@@ -31,6 +36,8 @@ const MIME = {
 export function createPortal({ kb: cliKb, port = 8322 } = {}) {
   const auth = createAuth();
   const registry = createKbRegistry({ cliKb });
+  const jobs = createJobCenter();
+  const watcher = createWatcher();
 
   const json = (res, code, obj) => {
     res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' });
@@ -47,6 +54,20 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
     req.on('error', rejectBody);
   });
 
+  // Raw-bytes reader for the upload route (E: no multipart; X-Filename header
+  // carries the name). Separate cap from the JSON reader above.
+  const readBytes = (req, max) => new Promise((resolveBody, rejectBody) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > max) { rejectBody(Object.assign(new Error(`upload too large (${Math.round(max / 1024 / 1024)}MB max)`), { code: 413 })); req.destroy(); }
+      else chunks.push(c);
+    });
+    req.on('end', () => resolveBody(Buffer.concat(chunks)));
+    req.on('error', rejectBody);
+  });
+
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1');
     console.log(`${req.method} ${url.pathname}${url.search}`);
@@ -54,6 +75,23 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
       // ---- reads (GET, no token — local single-user tool) ----
       if (req.method === 'GET' && url.pathname === '/api/kbs') {
         return json(res, 200, { kbs: registry.list() });
+      }
+      // J3+I6: SSE event stream — KB change events (fs.watch, debounced) and
+      // job lifecycle events (queue transitions). Read-only; EventSource
+      // cannot send headers, so no token — it carries no secrets.
+      if (req.method === 'GET' && url.pathname === '/api/events') {
+        const kb = registry.resolve(url.searchParams.get('kb')).path;
+        res.writeHead(200, {
+          'content-type': 'text/event-stream; charset=utf-8',
+          'cache-control': 'no-cache', connection: 'keep-alive',
+        });
+        res.write(': connected\n\n');
+        const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        const unwatch = watcher.subscribe(kb, (e) => send('change', e));
+        const unjobs = jobs.subscribe((job) => { if (job.kb === kb) send('job', job); });
+        const keepalive = setInterval(() => res.write(': ping\n\n'), 25000);
+        req.on('close', () => { clearInterval(keepalive); unwatch(); unjobs(); });
+        return;
       }
       if (req.method === 'GET' && url.pathname.startsWith('/api/')) {
         const kb = registry.resolve(url.searchParams.get('kb')).path;
@@ -118,6 +156,10 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
           const limit = Math.min(Number(url.searchParams.get('limit')) || 50, 200);
           return json(res, 200, runSearch(kb, url.searchParams.get('q') || '', { limit }));
         }
+        // ---- M7b acquisition console reads ----
+        if (url.pathname === '/api/jobs') return json(res, 200, { jobs: jobs.list(kb) });
+        if (url.pathname === '/api/inbox') return json(res, 200, { files: listInbox(kb) });
+        if (url.pathname === '/api/sources') return json(res, 200, { sources: sourceFreshness(kb) });
         if (url.pathname === '/api/diff') {
           // Same as the thin viewer: read-only git show; graceful null baseline
           // when the KB is not a repository (version-management constraint, S4).
@@ -135,20 +177,79 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
         return json(res, 404, { error: 'not found' });
       }
 
-      // ---- writes (token + Origin/Host, S8) ----
-      if (req.method === 'POST' && url.pathname === '/api/review') {
+      // ---- writes (token + Origin/Host, S8; all KB mutations via the serial queue, S10) ----
+      if (req.method === 'POST' && url.pathname.startsWith('/api/')) {
         const refusal = auth.checkWrite(req);
         if (refusal) return json(res, refusal.code, { error: refusal.error });
-        const { path: p, action, kb: kbName } = JSON.parse(await readBody(req) || '{}');
-        if (action !== 'approve' && action !== 'reject') {
-          return json(res, 400, { error: `action must be approve|reject: ${action}` });
+
+        if (url.pathname === '/api/review') {
+          const { path: p, action, kb: kbName } = JSON.parse(await readBody(req) || '{}');
+          if (action !== 'approve' && action !== 'reject') {
+            return json(res, 400, { error: `action must be approve|reject: ${action}` });
+          }
+          const kb = registry.resolve(kbName).path;
+          const rel = normalizeWikiRel(p || '');
+          const abs = resolveUnder(kb, rel, 'wiki');
+          if (!fs.existsSync(abs)) return json(res, 404, { error: `page does not exist: ${rel}` });
+          const job = await jobs.waitFor(jobs.enqueue(kb, {
+            type: 'review', label: `${action} ${rel}`,
+            run: async () => flipStatus(abs, 'candidate', action === 'approve' ? 'approved' : 'rejected'),
+          }));
+          if (job.status === 'failed') throw new Error(job.error);
+          return json(res, 200, { page: rel, status: job.result.to });
         }
-        const kb = registry.resolve(kbName).path;
-        const rel = normalizeWikiRel(p || '');
-        const abs = resolveUnder(kb, rel, 'wiki');
-        if (!fs.existsSync(abs)) return json(res, 404, { error: `page does not exist: ${rel}` });
-        const { to } = flipStatus(abs, 'candidate', action === 'approve' ? 'approved' : 'rejected');
-        return json(res, 200, { page: rel, status: to });
+
+        // E1: upload raw bytes → inbox/ → acquire local (one queued job).
+        // X-Filename carries encodeURIComponent(name) so CJK names survive
+        // latin1-only HTTP headers.
+        if (url.pathname === '/api/upload') {
+          const kb = registry.resolve(url.searchParams.get('kb')).path;
+          const filename = decodeURIComponent(req.headers['x-filename'] || '');
+          const bytes = await readBytes(req, UPLOAD_MAX);
+          const spec = uploadJob(kb, { filename, bytes }); // factory validates → 400 on throw
+          return json(res, 202, { job: jobs.enqueue(kb, spec) });
+        }
+
+        // F1: source pull (jira/confluence/local), scope overrides optional.
+        if (url.pathname === '/api/pull') {
+          const body = JSON.parse(await readBody(req) || '{}');
+          const kb = registry.resolve(body.kb).path;
+          const spec = pullJob(kb, body);
+          return json(res, 202, { job: jobs.enqueue(kb, spec) });
+        }
+
+        // J5/F4: auth probe — read-only, so off-queue (no KB mutation).
+        if (url.pathname === '/api/authcheck') {
+          const body = JSON.parse(await readBody(req) || '{}');
+          const kb = registry.resolve(body.kb).path;
+          return json(res, 200, await authCheck(kb, body.connector));
+        }
+
+        // J4: remove a staged inbox file.
+        if (url.pathname === '/api/inbox-delete') {
+          const body = JSON.parse(await readBody(req) || '{}');
+          const kb = registry.resolve(body.kb).path;
+          const spec = inboxDeleteJob(kb, { filename: body.name });
+          return json(res, 202, { job: jobs.enqueue(kb, spec) });
+        }
+
+        // G1: delete raw (job snapshots first, G6; preview G5 is /api/rawrefs).
+        if (url.pathname === '/api/raw-delete') {
+          const body = JSON.parse(await readBody(req) || '{}');
+          const kb = registry.resolve(body.kb).path;
+          const spec = rawDeleteJob(kb, { path: body.path });
+          return json(res, 202, { job: jobs.enqueue(kb, spec) });
+        }
+
+        // G2: move raw (new identity; old doc becomes an orphan by design).
+        if (url.pathname === '/api/raw-move') {
+          const body = JSON.parse(await readBody(req) || '{}');
+          const kb = registry.resolve(body.kb).path;
+          const spec = rawMoveJob(kb, { from: body.from, to: body.to });
+          return json(res, 202, { job: jobs.enqueue(kb, spec) });
+        }
+
+        return json(res, 404, { error: 'not found' });
       }
 
       // ---- static (index.html gets the per-startup token injected) ----

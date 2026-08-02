@@ -16,10 +16,17 @@
 - ✅ **M7a 只读全套 — 完成**(2026-08-02):slice 1-4,14 测试全绿;质量审核
   (M7a-review.zh-CN.md,零误判)全部修复,三项裁决已记录(J3-5→M7b /
   A5 分屏对照+raw 反查现补 / Node 钉 20.x)
-- 🔵 **M7b 采集控制台**(下一里程碑):jobs.mjs + S10 串行写队列 + 上传(E)+
-  源拉取(F)+ raw 删除/移动(G,含 G5 影响预览——复用 rawrefs 扫描)+
-  J3 fs-watch / J4 inbox / J5 认证检查(自 M7a 挪入)
-- ⬜ M7c 治理可视化(权限姿态届时拍板)→ M7d wiki 编辑+版本管理
+- ✅ **M7b 采集控制台 — 完成**(2026-08-02):jobs.mjs(S10 per-KB 串行写队列,
+  jobs.jsonl 持久化 + 死进程墓碑)+ 上传 E(raw bytes + X-Filename,32MB,入队后
+  写 inbox → acquire 单作业)+ 源拉取 F(jql/cql/max 覆盖)+ raw 删除/移动 G
+  (G5 rawrefs 影响预览弹窗;G6 快照:git pathspec 提交 / .kb/ui/snapshots 副本)+
+  J3 fs-watch(.kb 排除 + 400ms 防抖,SSE /api/events)+ J4 inbox + J5 认证检查 +
+  J6 新鲜度(acquisition 补上契约预定的 acquire_runs.jsonl 追加);23 UI 测试全绿,
+  Playwright 行为验证零 JS 错误
+- 🔵 **M7c 治理可视化**(下一里程碑):I 机械步骤(sweep/plan/rebuild-index/merge)
+  + agent 执行器(startRun(spec)→事件流,I4 实时流式)+ I5 plan-as-preview;
+  权限姿态届时拍板(skip-permissions vs allowedTools)
+- ⬜ M7d wiki 编辑+版本管理(H2/H3 契约规则未议)
 - ⬜ backlog:K 评测 / J9 闭环 / C5 批量 / B5 查询历史 / A7 图谱
 - ⬜ 并行欠账:真实环境验收 docs/real-env-test.md(全系统级,与 M7 无关)
 
