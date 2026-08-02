@@ -1,0 +1,20 @@
+[
+  { "id": "q01", "q": "retry", "expect": ["payment-timeout-retry.md", "idempotency-design.md", "topic:retry-resilience"], "note": "bare term, AND semantics" },
+  { "id": "q02", "q": "retries", "expect": ["payment-timeout-retry.md", "idempotency-design.md"], "note": "porter stemming merges retries/retry" },
+  { "id": "q03", "q": "\"exponential backoff\"", "expect": ["payment-timeout-retry.md"], "note": "exact phrase" },
+  { "id": "q04", "q": "idempotency key", "expect": ["idempotency-design.md", "topic:payment-safety"], "note": "multi-term AND" },
+  { "id": "q05", "q": "token bucket", "expect": ["rate-limiting.md"] },
+  { "id": "q06", "q": "重试", "expect": ["订单超时关闭.md"], "routed": { "leg": "like", "term": "重试" }, "note": "CJK <3 chars → LIKE fallback" },
+  { "id": "q07", "q": "订单超时关闭", "expect": ["订单超时关闭.md"], "routed": { "leg": "cjk", "term": "订单超时关闭" }, "note": "CJK trigram leg" },
+  { "id": "q08", "q": "对账", "expect": ["支付对账流程.md"], "routed": { "leg": "like", "term": "对账" } },
+  { "id": "q09", "q": "settlement type:source", "expect": ["reconciliation.md"], "onlyType": "source", "note": "field filter excludes topics" },
+  { "id": "q10", "q": "retry type:topic", "expect": ["topic:retry-resilience"], "onlyType": "topic" },
+  { "id": "q11", "q": "compensation tag:saga", "expect": ["payment-compensation.md"], "note": "tag filter" },
+  { "id": "q12", "q": "retry after:2026-07-15", "expect": ["idempotency-design.md"], "absent": ["payment-timeout-retry.md"], "note": "date filter on source-system time (retry doc is 07-10, idempotency 07-20)" },
+  { "id": "q13", "q": "reconciliation before:2026-07-29", "expect": ["reconciliation.md"], "absent": ["notes.txt"], "note": "before: excludes notes.txt (07-30)" },
+  { "id": "q14", "q": "backoff", "expect": ["payment-timeout-retry.md", "topic:retry-resilience"], "expectViaLink": "topic:payment-safety", "note": "wikilink graph expansion: payment-safety joins via retry-resilience's outlink" },
+  { "id": "q15", "q": "INC-2041", "expect": ["mixed-locale.md"], "note": "ticket number anchor" },
+  { "id": "q16", "q": "kubernetes operator", "expectEmpty": true, "note": "negative query: no false hits, excluded from metrics" },
+  { "id": "q17", "q": "429", "expect": ["rate-limiting.md"], "note": "numeric term" },
+  { "id": "q18", "q": "对账流程", "expect": ["支付对账流程.md"], "routed": { "leg": "cjk", "term": "对账流程" } }
+]

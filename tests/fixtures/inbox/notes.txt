@@ -1,0 +1,6 @@
+Operations notes for the PayCore night shift.
+
+Check the retry dashboard before handover. If RETRY_BUDGET_EXHAUSTED fired
+more than twice, escalate to the payments on-call. Settlement files arrive
+around 00:30 UTC; do not restart the reconciliation job while a file is
+being ingested.
