@@ -25,11 +25,15 @@
   Playwright 行为验证零 JS 错误。**外部审核(M7b-review.zh-CN.md,零误判)4 P2 全修**:
   删/移后落地导航、全请求 Host 校验(DNS rebinding 读)、jobs.jsonl 压缩、settled 清理;
   P3 批次(J6 相对时间+逾期着色、I6 耗时、顶栏作业指示器、文案类)同步完成,25 测试全绿
-- 🔵 **M7c 治理可视化**(下一里程碑):I 机械步骤(sweep/plan/rebuild-index/merge)
-  + agent 执行器(startRun(spec)→事件流,I4 实时流式——复用 M7b SSE 管道)+ I5 plan-as-preview;
-  权限姿态届时拍板(skip-permissions vs allowedTools);A7 图谱可考虑并入(审核建议,与 I 相邻)
-- ⬜ M7d wiki 编辑+版本管理(H2/H3 契约规则未议)
-- ⬜ backlog:K 评测 / J9 闭环 / C5 批量 / B5 查询历史 / A7 图谱
+- ✅ **M7c 治理可视化 — 完成**(2026-08-02):executor.mjs(startRun→事件流 +
+  registerExecutor 公开插桩点;claude headless 实现,**提示词走 stdin**——spike 漏网:
+  多行 argv 经 .cmd 垫片零输出)+ I4 SSE run 通道流式转写 + I5 /api/plan 全清单预览
+  + I1 sweep/rebuild-index/merge-topic;**真实 agent e2e 通过**(UI 发起 → 流式 →
+  产出契约合规 candidate 源页+主题草稿+日志,队列 1→3);默认提示词改指 skill 文件
+  (注册无关)。31 测试全绿
+- 🔵 **下一里程碑:A7 关系图谱**(小里程碑,用户拍板 B:wikilink 力导向图,
+  ≤2k 节点客户端布局,与 [[引用签]] 视觉统一)→ 然后 M7d wiki 编辑(H2/H3 契约规则未议)
+- ⬜ backlog:K 评测 / J9 闭环 / C5 批量 / B5 查询历史
 - ⬜ 并行欠账:真实环境验收 docs/real-env-test.md(全系统级,与 M7 无关)
 
 硬约束(全程有效):现有三服务(acquisition/governance/retrieval)零改动、零反向依赖;

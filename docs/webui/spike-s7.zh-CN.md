@@ -42,4 +42,7 @@ Windows Node 会以 ENOENT 失败(一次测试误报由此产生)。executor 的
 
 - S7 事件模型:stream-json JSONL 子集(init / assistant / result),逐行解析;
 - spawn 方式:`spawn('claude.cmd', args, { cwd: <windows-kb-path> })`,无 shell;
-- 权限姿态:待用户在下两条已验证路径中拍板(见 options/README.md S7)。
+- 权限姿态:用户 2026-08-02 拍板 `--dangerously-skip-permissions`(M7c);
+- **修正(M7c e2e 发现):提示词必须走 stdin,不能占 argv**——claude.cmd 是
+  %* 批处理垫片,cmd.exe 把命令行里的字面换行当命令终止符;多行提示词在 argv
+  里产出零输出、无 result 事件(单行正常)。spike 当时只测了单行提示词,漏了这条。

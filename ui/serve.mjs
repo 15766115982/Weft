@@ -11,6 +11,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { EventEmitter } from 'node:events';
 import { createAuth } from './lib/auth.mjs';
 import { createKbRegistry } from './lib/kb.mjs';
 import { resolveUnder, normalizeWikiRelRead, normalizeRawRel, walkMd } from './lib/paths.mjs';
@@ -19,6 +20,8 @@ import { runSearch } from './lib/search.mjs';
 import { flipStatus, normalizeWikiRel, parseFrontmatter } from './lib/review.mjs';
 import { createJobCenter } from './lib/jobs.mjs';
 import { createWatcher } from './lib/watch.mjs';
+import { governJob, governRunJob } from './lib/govern.mjs';
+import { plan } from '../governance/scripts/lib/govern.mjs';
 import {
   UPLOAD_MAX, uploadJob, pullJob, inboxDeleteJob, rawDeleteJob, rawMoveJob,
   authCheck, sourceFreshness, listInbox,
@@ -38,6 +41,9 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
   const registry = createKbRegistry({ cliKb });
   const jobs = createJobCenter();
   const watcher = createWatcher();
+  // I4: granular agent-run chunks ride a bridge to the SSE 'run' channel —
+  // the job event stream stays coarse (queued/running/done transitions).
+  const runBridge = new EventEmitter();
 
   const json = (res, code, obj) => {
     res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' });
@@ -93,8 +99,10 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
         const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
         const unwatch = watcher.subscribe(kb, (e) => send('change', e));
         const unjobs = jobs.subscribe((job) => { if (job.kb === kb) send('job', job); });
+        const onRun = (d) => { if (d.kb === kb) send('run', d); };
+        runBridge.on('chunk', onRun);
         const keepalive = setInterval(() => res.write(': ping\n\n'), 25000);
-        req.on('close', () => { clearInterval(keepalive); unwatch(); unjobs(); });
+        req.on('close', () => { clearInterval(keepalive); unwatch(); unjobs(); runBridge.off('chunk', onRun); });
         return;
       }
       if (req.method === 'GET' && url.pathname.startsWith('/api/')) {
@@ -164,6 +172,17 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
         if (url.pathname === '/api/jobs') return json(res, 200, { jobs: jobs.list(kb) });
         if (url.pathname === '/api/inbox') return json(res, 200, { files: listInbox(kb) });
         if (url.pathname === '/api/sources') return json(res, 200, { sources: sourceFreshness(kb) });
+        // I5 plan-as-preview: the full six lists (paths + titles + reasons) —
+        // health() serves counts to the dashboard; this serves the confirm page.
+        if (url.pathname === '/api/plan') return json(res, 200, plan(kb));
+        // The govern skill's canonical path — the default agent prompt points
+        // at it so runs follow the real workflow EVEN when the skill is not
+        // registered in the executor's environment (e2e finding 2026-08-02).
+        if (url.pathname === '/api/govern-context') {
+          return json(res, 200, {
+            skillPath: path.resolve(UI_DIR, '..', 'governance', 'skills', 'govern', 'SKILL.md'),
+          });
+        }
         if (url.pathname === '/api/diff') {
           // Same as the thin viewer: read-only git show; graceful null baseline
           // when the KB is not a repository (version-management constraint, S4).
@@ -250,6 +269,24 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
           const body = JSON.parse(await readBody(req) || '{}');
           const kb = registry.resolve(body.kb).path;
           const spec = rawMoveJob(kb, { from: body.from, to: body.to });
+          return json(res, 202, { job: jobs.enqueue(kb, spec) });
+        }
+
+        // I1: mechanical governance steps (sweep / rebuild-index / merge-topic).
+        if (url.pathname === '/api/govern') {
+          const body = JSON.parse(await readBody(req) || '{}');
+          const kb = registry.resolve(body.kb).path;
+          const spec = governJob(kb, body);
+          return json(res, 202, { job: jobs.enqueue(kb, spec) });
+        }
+
+        // I2/I4: agent-driven governance. Executor events stream to the SSE
+        // 'run' channel live; the job record keeps the full transcript.
+        if (url.pathname === '/api/govern-run') {
+          const body = JSON.parse(await readBody(req) || '{}');
+          const kb = registry.resolve(body.kb).path;
+          const spec = governRunJob(kb, body, (job, kind, chunk) =>
+            runBridge.emit('chunk', { kb, jobId: job.id, kind, chunk }));
           return json(res, 202, { job: jobs.enqueue(kb, spec) });
         }
 

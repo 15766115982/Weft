@@ -8,6 +8,47 @@
 > **M7 UI portal: process + design docs in `docs/webui/`** (requirements frozen, option 1
 > no-build SPA selected, ADR-0006, contract §1 UI-portal column, S7 spike report).
 
+## M7c (2026-08-02, 31 tests green + real-agent e2e): governance console — agent executor live
+
+Scope: I1 mechanical steps + I2/I3 executor + I4 streaming + I5 plan-as-preview.
+User rulings before start: permission posture = --dangerously-skip-permissions;
+A7 graph NOT folded in (separate mini-milestone next).
+
+- **executor.mjs (I2/I3)**: `startRun(name, spec) → {events, kill}` + public
+  `registerExecutor` — the pluggability requirement is one function call
+  (tests register 'mock'/'mock-fail' through the same path; third-party
+  framework backends plug in identically). Claude impl: spawn claude.cmd
+  (no shell), stream-json JSONL parsed progressively (init/assistant/result;
+  tool_use shown as [tool: name]); verdict from the RESULT event
+  (is_error + subtype + blocked-write text pattern), never the exit code.
+- **The spike missed a killer, e2e caught it**: prompts must go via STDIN —
+  claude.cmd is a %* batch shim and cmd.exe treats a literal newline in the
+  command line as a command terminator. Multi-line prompt in argv → zero
+  output, no result event, silent hang/exit-0. Single-line works — which is
+  exactly what the S7 spike tested. Repro isolated with a bash-quoting-free
+  .mjs (two earlier "repros" were garbage: bash ate the backslashes, a
+  reminder to never probe Windows paths through bash -e strings).
+  spike-s7.zh-CN.md backfill amended.
+- **I4**: SSE gains a 'run' channel (runBridge EventEmitter) — job events stay
+  coarse (queued/running/done), executor chunks stream granularly with jobId
+  routing; frontend ui:run appends to a live transcript (auto-scroll).
+- **I5**: GET /api/plan returns the full six lists (titles+reasons) — health()
+  serves counts, this serves the confirm page; CTA disabled when plan empty,
+  "将要发生" summary sentence before launch.
+- **I1**: /api/govern whitelist sweep|rebuild-index|merge-topic (slug-validated),
+  spawned govern.mjs via the serial queue. approve/reject stay in the queue view.
+- **e2e with the REAL agent on the demo KB**: fresh raw uploaded → plan preview
+  showed it → run launched from the UI → transcript streamed live → agent
+  produced a contract-conformant source page + a topic draft WITH a review_note
+  flagging merge-vs-standalone + log.md entries + index update, all candidates.
+  Statusbar went 14 → 16 pages, queue pill 1 → 3. Agent reported "kb-govern
+  skill isn't registered in this environment" and improvised from repo
+  conventions (correctly!) — so the default prompt now points at the skill
+  FILE (/api/govern-context → governance/skills/govern/SKILL.md), making runs
+  registration-independent and more executor-agnostic.
+- 31 UI tests (6 new M7c: mock-executor chain, SSE run streaming, plan lists,
+  mechanical validation, security); Playwright: zero JS errors.
+
 ## M7b review-fix round (2026-08-02, 25 tests green): external M7b review — 4 P2 all confirmed, zero misjudgments
 
 Second consecutive zero-misjudgment external review (M7b-review.zh-CN.md). All 4 P2

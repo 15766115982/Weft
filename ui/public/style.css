@@ -364,3 +364,22 @@ button.danger-solid { background: var(--wine); border-color: var(--wine); color:
 .ago-stale { color: var(--amber); font-weight: 600; font-family: var(--font-mono); font-size: 11.5px; }
 #job-indicator { color: var(--celadon); font-size: 12px; gap: 3px; }
 #job-indicator.failed { color: var(--wine); }
+
+/* ---- M7c governance console ---- */
+.govern-cta { display: flex; align-items: center; gap: 14px; margin-top: 12px; padding: 12px 14px;
+  border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--paper-raise); flex-wrap: wrap; }
+.plan-list h3 { font-size: 13.5px; margin: 14px 0 6px; }
+.plan-item { display: flex; align-items: center; gap: 9px; padding: 4px 2px; font-size: 13px;
+  border-bottom: 1px dashed var(--line); }
+.plan-item .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.plan-item .mono { font-size: 11px; }
+.run-panel { margin-bottom: 30px; }
+.run-panel h2 { display: flex; align-items: center; gap: 8px; font-size: 17px; margin: 0 0 12px;
+  padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.run-panel h2 .dim { font-size: 11px; font-weight: 400; margin-left: auto; font-family: var(--font-mono); }
+.run-prompt { width: 100%; font-family: var(--font-mono); font-size: 12.5px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: var(--r-btn); background: var(--paper); color: var(--ink);
+  resize: vertical; margin-bottom: 10px; }
+.run-transcript { max-height: 380px; overflow: auto; margin-top: 12px; padding: 12px 14px;
+  background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-btn);
+  font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
