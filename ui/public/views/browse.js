@@ -221,7 +221,7 @@ function wirePreviews(main) {
 
 // ---- G: raw delete / move (impact preview G5 = the rawrefs list already loaded) ----
 
-function rawOpsModal({ title, bodyNodes, confirmLabel, onConfirm }) {
+function rawOpsModal({ title, bodyNodes, confirmLabel, onConfirm, navigate }) {
   const mask = el('div', { class: 'cmdk-mask' });
   const box = el('div', { class: 'cmdk', style: 'padding:18px 22px; max-width:520px' });
   box.append(el('h3', { style: 'margin:0 0 10px' }, title), ...bodyNodes);
@@ -238,7 +238,10 @@ function rawOpsModal({ title, bodyNodes, confirmLabel, onConfirm }) {
       const done = await waitJob(job.id);
       close();
       window.dispatchEvent(new CustomEvent('ui:refresh-header'));
-      window.dispatchEvent(new CustomEvent('ui:remount'));
+      // P2-1: the page the op was launched from is stale by definition after a
+      // delete/move — navigate to a valid landing instead of remounting on it.
+      if (navigate) location.hash = typeof navigate === 'function' ? navigate() : navigate;
+      else window.dispatchEvent(new CustomEvent('ui:remount'));
       return done;
     } catch (err) {
       note.textContent = `失败:${err.message}`;
@@ -397,6 +400,7 @@ async function renderRaw(content, rel) {
       ],
       confirmLabel: '移动',
       onConfirm: () => apiPost('/api/raw-move', { from: rel, to: input.value.trim() }),
+      navigate: () => `#/browse?raw=${encodeURIComponent(input.value.trim())}`, // land on the moved doc
     });
   });
   delBtn.addEventListener('click', () => {
@@ -408,6 +412,7 @@ async function renderRaw(content, rel) {
       ],
       confirmLabel: '确认删除',
       onConfirm: () => apiPost('/api/raw-delete', { path: rel }),
+      navigate: '#/browse', // the deleted doc's page is a guaranteed 404
     });
   });
   ops.append(moveBtn, delBtn);

@@ -22,10 +22,12 @@
   (G5 rawrefs 影响预览弹窗;G6 快照:git pathspec 提交 / .kb/ui/snapshots 副本)+
   J3 fs-watch(.kb 排除 + 400ms 防抖,SSE /api/events)+ J4 inbox + J5 认证检查 +
   J6 新鲜度(acquisition 补上契约预定的 acquire_runs.jsonl 追加);23 UI 测试全绿,
-  Playwright 行为验证零 JS 错误
+  Playwright 行为验证零 JS 错误。**外部审核(M7b-review.zh-CN.md,零误判)4 P2 全修**:
+  删/移后落地导航、全请求 Host 校验(DNS rebinding 读)、jobs.jsonl 压缩、settled 清理;
+  P3 批次(J6 相对时间+逾期着色、I6 耗时、顶栏作业指示器、文案类)同步完成,25 测试全绿
 - 🔵 **M7c 治理可视化**(下一里程碑):I 机械步骤(sweep/plan/rebuild-index/merge)
-  + agent 执行器(startRun(spec)→事件流,I4 实时流式)+ I5 plan-as-preview;
-  权限姿态届时拍板(skip-permissions vs allowedTools)
+  + agent 执行器(startRun(spec)→事件流,I4 实时流式——复用 M7b SSE 管道)+ I5 plan-as-preview;
+  权限姿态届时拍板(skip-permissions vs allowedTools);A7 图谱可考虑并入(审核建议,与 I 相邻)
 - ⬜ M7d wiki 编辑+版本管理(H2/H3 契约规则未议)
 - ⬜ backlog:K 评测 / J9 闭环 / C5 批量 / B5 查询历史 / A7 图谱
 - ⬜ 并行欠账:真实环境验收 docs/real-env-test.md(全系统级,与 M7 无关)

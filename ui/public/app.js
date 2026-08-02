@@ -197,6 +197,24 @@ document.getElementById('hdr-refresh').addEventListener('click', () => { refresh
 // 'change' → KB files changed on disk (fs.watch, .kb/ excluded, debounced);
 // 'job' → queue lifecycle. Views opt in via window events; the header always
 // refreshes. The 30s poll below stays as the SSE-down fallback.
+// I6 job indicator (M7b review P3): queued/running count in the header, red
+// dot for a recent failure — makes the job center visible from every view.
+const activeJobs = new Set();
+let recentFail = false;
+function syncJobIndicator() {
+  const btn = document.getElementById('job-indicator');
+  const active = activeJobs.size > 0;
+  btn.hidden = !active && !recentFail;
+  btn.classList.toggle('failed', !active && recentFail);
+  html(btn, active ? `${icon('activity', 14)} ${activeJobs.size}` : icon('circleAlert', 14));
+  btn.title = active ? `${activeJobs.size} 个作业运行中 — 点击去作业中心` : '有作业失败 — 点击去作业中心';
+}
+function trackJob(job) {
+  if (job.status === 'queued' || job.status === 'running') { activeJobs.add(job.id); recentFail = false; }
+  else { activeJobs.delete(job.id); if (job.status === 'failed') recentFail = true; }
+  syncJobIndicator();
+}
+
 let events;
 function connectEvents() {
   events?.close();
@@ -207,12 +225,24 @@ function connectEvents() {
     window.dispatchEvent(new CustomEvent('ui:kb-change'));
   });
   events.addEventListener('job', (e) => {
+    trackJob(JSON.parse(e.data));
     refreshHeader();
     window.dispatchEvent(new CustomEvent('ui:job', { detail: JSON.parse(e.data) }));
   });
 }
+document.getElementById('job-indicator').addEventListener('click', () => {
+  recentFail = false;
+  syncJobIndicator();
+  location.hash = '#/acquire';
+});
 setInterval(() => { if (!document.hidden) refreshHeader(); }, 30_000);
 await initHeader();
+// seed the indicator from persisted history (jobs finished while we were away)
+api('/api/jobs').then(({ jobs }) => {
+  for (const j of jobs) if (j.status === 'queued' || j.status === 'running') activeJobs.add(j.id);
+  if (jobs.some((j) => j.status === 'failed' && Date.now() - new Date(j.finishedAt) < 3600_000)) recentFail = true;
+  syncJobIndicator();
+}).catch(() => {});
 connectEvents();
 // KB switch re-targets the stream (the watcher is per-KB server-side)
 document.getElementById('kb-select').addEventListener('change', connectEvents);

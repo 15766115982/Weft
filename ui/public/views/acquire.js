@@ -9,6 +9,18 @@ import { icon } from '../lib/icons.js';
 
 const fmtBytes = (n) => n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${(n / 1024).toFixed(1)} KB` : `${n} B`;
 const fmtTime = (iso) => iso ? iso.slice(0, 16).replace('T', ' ') : '—';
+// J6 滞后信号:相对时间 + 逾期阈值(>7 天琥珀)
+const fmtAgo = (iso) => {
+  if (!iso) return { text: '—', stale: false };
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+  const text = days <= 0 ? '今天' : days === 1 ? '昨天' : `${days} 天前`;
+  return { text, stale: days > 7 };
+};
+const fmtDur = (a, b) => {
+  if (!a || !b) return '';
+  const s = (new Date(b) - new Date(a)) / 1000;
+  return s < 1 ? '<1s' : s < 60 ? `${s.toFixed(0)}s` : `${Math.floor(s / 60)}m${Math.round(s % 60)}s`;
+};
 
 export async function render(view) {
   const wrap = el('div', { class: 'acquire' });
@@ -35,13 +47,20 @@ export async function render(view) {
   const fileInput = el('input', { type: 'file', multiple: '', style: 'display:none' });
   const uploadNote = el('p', { class: 'dim', style: 'font-size:12.5px;margin:8px 0 0' });
   const uploadFiles = async (files) => {
+    let okCount = 0;
+    const failures = [];
     for (const f of files) {
       try {
-        uploadNote.textContent = `已入队:${f.name}(${fmtBytes(f.size)})…`;
-        const { job } = await apiUpload(f);
-        uploadNote.textContent = `已入队:${f.name} — 作业 ${job.id},见下方作业中心`;
-      } catch (err) { uploadNote.textContent = `上传失败:${err.message}`; }
+        uploadNote.textContent = `入队中:${f.name}(${fmtBytes(f.size)})…(${okCount}/${files.length})`;
+        await apiUpload(f);
+        okCount++;
+      } catch (err) { failures.push(`${f.name}: ${err.message}`); }
     }
+    // P3: one aggregate line — per-file notes used to overwrite each other
+    uploadNote.textContent = okCount
+      ? `${okCount} 个文件已入队 — 作业进展见下方作业中心${files.length > 1 ? '(同名文件会覆盖暂存区旧件)' : ''}`
+      : '';
+    if (failures.length) uploadNote.textContent += `;失败:${failures.join('; ')}`;
   };
   drop.addEventListener('click', () => fileInput.click());
   drop.addEventListener('keydown', (e) => { if (e.key === 'Enter') fileInput.click(); });
@@ -121,11 +140,12 @@ export async function render(view) {
     for (const s of sources) {
       const row = el('div', { class: 'src-row' });
       const r = s.lastRun;
+      const ago = r ? fmtAgo(r.ts) : null;
       const counts = r ? ['created', 'updated', 'unchanged', 'errors'].filter((k) => r[k]).map((k) => `${k} ${r[k]}`).join(' · ') : '';
       html(row, `<span class="via">${esc(s.connector)}</span>
         <span class="dim scope">${esc(s.scope || '(无 scope)')}</span>
         <span class="grow"></span>
-        ${r ? `<span class="mono">上次 ${esc(fmtTime(r.ts))}</span> <span class="dim">${esc(counts || '全部跳过')}</span>`
+        ${r ? `<span class="${ago.stale ? 'ago-stale' : 'mono'}">${esc(ago.text)}</span> <span class="dim">${esc(counts || '全部跳过')}</span>`
             : '<span class="dim">从未拉取</span>'}`);
       srcTable.append(row);
     }
@@ -141,7 +161,7 @@ export async function render(view) {
       const row = el('div', { class: 'inbox-row' });
       html(row, `${icon('fileText', 13)} <span class="t">${esc(f.name)}</span>
         <span class="dim">${fmtBytes(f.size)} · ${esc(fmtTime(f.mtime))}</span>`);
-      const del = el('button', { class: 'icon-btn danger', title: '从暂存区移除(未治理前可撤)' });
+      const del = el('button', { class: 'icon-btn danger', title: '从暂存区移除(物理删除,不可恢复)' });
       html(del, icon('trash2', 13));
       del.addEventListener('click', async () => {
         try { await apiPost('/api/inbox-delete', { name: f.name }); }
@@ -164,7 +184,8 @@ export async function render(view) {
       const sum = el('summary');
       html(sum, `<span class="chip ${esc(j.status)}">${STATUS_CHIP[j.status] || esc(j.status)}</span>
         <span class="t">${esc(j.label)}</span>
-        <span class="grow"></span><span class="mono dim">${esc(fmtTime(j.createdAt))}</span>`);
+        <span class="grow"></span><span class="mono dim">${esc(fmtDur(j.startedAt, j.finishedAt))}</span>
+        <span class="mono dim">${esc(fmtTime(j.createdAt))}</span>`);
       det.append(sum);
       const body = el('div', { class: 'job-body' });
       if (j.error) body.append(el('pre', { class: 'error' }, j.error));

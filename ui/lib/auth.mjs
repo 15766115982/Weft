@@ -20,10 +20,8 @@ export function createAuth() {
     if (req.headers['x-ui-token'] !== token) {
       return { code: 403, error: 'write requests require the per-startup token (x-ui-token)' };
     }
-    const host = req.headers.host || '';
-    if (!hostRe.test(host)) {
-      return { code: 403, error: `refused Host: ${host} (DNS-rebinding guard)` };
-    }
+    const badHost = checkHost(req);
+    if (badHost) return badHost;
     const origin = req.headers.origin;
     if (origin && !originRe.test(origin)) {
       return { code: 403, error: `refused cross-origin write (Origin: ${origin})` };
@@ -31,5 +29,18 @@ export function createAuth() {
     return null;
   }
 
-  return { token, checkWrite };
+  // P2-2 (M7b review): reads need the Host check too. CORS blocks cross-origin
+  // reads but NOT DNS rebinding — a malicious domain resolving to 127.0.0.1 is
+  // same-origin to the browser and could read the whole KB (and the injected
+  // token from index.html). Every request, read or write, must arrive with a
+  // loopback Host.
+  function checkHost(req) {
+    const host = req.headers.host || '';
+    if (!hostRe.test(host)) {
+      return { code: 403, error: `refused Host: ${host} (DNS-rebinding guard)` };
+    }
+    return null;
+  }
+
+  return { token, checkWrite, checkHost };
 }

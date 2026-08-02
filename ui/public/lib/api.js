@@ -51,7 +51,7 @@ export async function waitJob(id, { timeout = 120000 } = {}) {
     const job = jobs.find((j) => j.id === id);
     if (job && job.status === 'done') return job;
     if (job && job.status === 'failed') throw new Error(job.error || 'job failed');
-    if (Date.now() - t0 > timeout) throw new Error('等待作业超时');
+    if (Date.now() - t0 > timeout) throw new Error('作业仍在队列中执行,进展见采集页作业中心');
     await new Promise((r) => setTimeout(r, 300));
   }
 }

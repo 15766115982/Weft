@@ -15,6 +15,7 @@ import { spawn as defaultSpawn } from 'node:child_process';
 
 const KEEP = 200; // in-memory history bound per KB (job center display)
 const LOG_TAIL = 64 * 1024; // per-job captured output bound
+const FILE_MAX = 2 * 1024 * 1024; // jobs.jsonl compaction threshold (P2-3)
 
 export function createJobCenter() {
   const queues = new Map(); // kbRoot -> { tail: Promise, jobs: Job[] }
@@ -64,6 +65,11 @@ export function createJobCenter() {
       }
       job.finishedAt = new Date().toISOString();
       persist(kb, job); emit(job);
+      // P2-4: the settled promise has done its job — entries must not pile up
+      // for the portal's lifetime. waitFor after completion still works: a
+      // missing entry awaits `undefined` (resolves instantly) and the job
+      // record itself lives in the jobs array.
+      settled.delete(job.id);
     });
     // A failed job must not poison the chain — the next queued job still runs.
     s.tail = s.tail.catch(() => {});
@@ -98,8 +104,11 @@ function persist(kb, job) {
 
 function loadHistory(kb) {
   const byId = new Map();
+  let size = 0;
   try {
-    for (const line of fs.readFileSync(jobsFile(kb), 'utf8').split('\n')) {
+    const file = jobsFile(kb);
+    size = fs.statSync(file).size;
+    for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
       if (!line.trim()) continue;
       try {
         const j = JSON.parse(line);
@@ -112,7 +121,20 @@ function loadHistory(kb) {
         byId.set(j.id, j);
       } catch { /* skip a torn last line from a crashed append */ }
     }
-  } catch { /* no history yet */ }
+    // P2-3: the file is append-only (3 lines per job, done-lines carrying up
+    // to 64KB of log tail) — compact once it crosses the threshold: keep the
+    // final record of only the latest KEEP jobs (exactly what the in-memory
+    // slice shows — older history is invisible in the UI anyway) and trim each
+    // surviving log to a 4KB tail. Steady-state disk ≈ 200 × ~5KB. .kb/ is a
+    // rebuildable derived artifact (contract §1), so this loses nothing loadable.
+    if (size > FILE_MAX) {
+      const kept = [...byId.values()].slice(-KEEP)
+        .map((j) => JSON.stringify({ ...j, log: (j.log || '').slice(-4096) }));
+      const tmp = file + '.tmp';
+      fs.writeFileSync(tmp, kept.join('\n') + '\n', 'utf8');
+      fs.renameSync(tmp, file); // atomic on win32 for same-volume rename
+    }
+  } catch { /* no history yet / compaction is best-effort */ }
   return [...byId.values()].slice(-KEEP);
 }
 

@@ -160,6 +160,49 @@ test('M7b write security: new write endpoints refuse no-token and forged Origin'
   assert.equal((await post('/api/raw-move', { from: 'a', to: 'b' }, { 'x-ui-token': token, origin: 'https://10.0.0.9:8322' })).status, 403);
 });
 
+// P2-2 (M7b review): reads/SSE/static must pass the same loopback-Host gate —
+// CORS cannot stop DNS-rebinding reads. fetch/undici ignores a custom Host
+// header, so exercise it one level down via node:http.
+test('read-side Host gate: non-loopback Host → 403 on GET /api/*, SSE, and static', async () => {
+  const getWithHost = (p, host) => new Promise((resolve, reject) => {
+    const req = http.request(base + p, { headers: { host } },
+      (res) => { res.resume(); res.on('end', () => resolve(res.statusCode)); });
+    req.on('error', reject);
+    req.end();
+  });
+  for (const p of ['/api/health', '/api/jobs', '/api/events', '/', '/style.css']) {
+    assert.equal(await getWithHost(p, 'evil.example'), 403, `${p} refuses a rebound Host`);
+  }
+  // sanity: the loopback Host the browser actually sends still passes
+  assert.equal(await getWithHost('/api/health', new URL(base).host), 200);
+});
+
+// P2-3 (M7b review): jobs.jsonl is append-only — past the threshold the next
+// startup compacts it back to last-per-id, atomically.
+test('jobs.jsonl compacts on load when it crosses 2MB', async () => {
+  const kb3 = fs.mkdtempSync(path.join(os.tmpdir(), 'kb-portal-compact-'));
+  const dir = path.join(kb3, '.kb', 'ui');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'jobs.jsonl');
+  const job = (id, status, pad) => JSON.stringify({
+    id, kb: kb3, type: 'probe', label: id, status,
+    createdAt: '2026-08-02T00:00:00Z', startedAt: null, finishedAt: '2026-08-02T00:00:01Z',
+    error: null, result: null, log: pad || '',
+  });
+  const lines = [];
+  for (let i = 0; i < 40; i++) { // 40 jobs × 3 transitions × ~55KB log > 2MB
+    lines.push(job(`j${i}`, 'queued'), job(`j${i}`, 'running'), job(`j${i}`, 'done', 'x'.repeat(55 * 1024)));
+  }
+  fs.writeFileSync(file, lines.join('\n') + '\n', 'utf8');
+  assert.ok(fs.statSync(file).size > 2 * 1024 * 1024, 'fixture crosses the threshold');
+  const jc = createJobCenter();
+  const jobs = jc.list(kb3); // first access triggers loadHistory (+ compaction)
+  assert.equal(jobs.length, 40, 'last-per-id records all survive');
+  assert.ok(fs.statSync(file).size < 1024 * 1024, 'file compacted');
+  assert.equal(jobs.find((j) => j.id === 'j7').status, 'done');
+  fs.rmSync(kb3, { recursive: true, force: true });
+});
+
 test('SSE /api/events: wiki change fires (debounced), .kb writes are excluded (J3)', async () => {
   const events = [];
   const req = http.get(base + '/api/events', (res) => {

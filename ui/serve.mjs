@@ -72,6 +72,10 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
     const url = new URL(req.url, 'http://127.0.0.1');
     console.log(`${req.method} ${url.pathname}${url.search}`);
     try {
+      // P2-2: every request (reads, SSE, static included) must carry a
+      // loopback Host — CORS cannot stop DNS-rebinding reads.
+      const badHost = auth.checkHost(req);
+      if (badHost) return json(res, badHost.code, { error: badHost.error });
       // ---- reads (GET, no token — local single-user tool) ----
       if (req.method === 'GET' && url.pathname === '/api/kbs') {
         return json(res, 200, { kbs: registry.list() });
@@ -304,5 +308,8 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
   const port = Number(args.port) || 8322;
   createPortal({ kb: cliKb, port }).listen(port, '127.0.0.1', () => {
     console.log(`KB portal listening at http://127.0.0.1:${port}  (Ctrl+C to stop; review flips are logged by the next governance sweep)`);
+    // single-operator assumption: two portals on the same KB = two in-memory
+    // queues = the serial guarantee is gone. Say it where the operator looks.
+    console.log('note: run at most ONE portal per knowledge base (the serial write queue is per-process)');
   });
 }

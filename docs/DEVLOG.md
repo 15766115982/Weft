@@ -8,6 +8,44 @@
 > **M7 UI portal: process + design docs in `docs/webui/`** (requirements frozen, option 1
 > no-build SPA selected, ADR-0006, contract §1 UI-portal column, S7 spike report).
 
+## M7b review-fix round (2026-08-02, 25 tests green): external M7b review — 4 P2 all confirmed, zero misjudgments
+
+Second consecutive zero-misjudgment external review (M7b-review.zh-CN.md). All 4 P2
+fixed + verified, P3 batch done:
+
+- **P2-1 (journey bug)**: raw delete/move success used to remount on the stale hash →
+  guaranteed 404 page. rawOpsModal gains a `navigate` (function-aware) landing: delete
+  → `#/browse`, move → `#/browse?raw=<new path>` (evaluated at confirm time, not modal
+  creation — first attempt froze the input's initial value). Playwright: real delete
+  via UI lands on #/browse, no error page.
+- **P2-2 (read-side security posture)**: writes had token+Origin+Host but reads/SSE/
+  static had NO Host check — DNS rebinding is same-origin to the browser and could
+  read the whole KB (CORS only blocks cross-origin RESPONSE reads). Fix: auth.checkHost
+  applied to every request at the server entry; checkWrite keeps its own token+Origin
+  layers. Test: bad Host → 403 on /api/health, /api/jobs, /api/events, /, /style.css
+  (node:http again — fetch ignores custom Host).
+- **P2-3**: jobs.jsonl was append-only forever. Compaction at load past 2MB: keep
+  final records of the latest KEEP jobs only (matches the in-memory slice exactly) +
+  trim surviving logs to 4KB tails, atomic tmp+rename. First fix attempt kept
+  last-per-id for ALL jobs — still unbounded (each done-line carries ≤64KB log);
+  the self-written test caught it (2.2MB → still 2.2MB). Bounded now: ~200 × 5KB.
+- **P2-4**: settled Map leaked one Promise per job for the portal's lifetime. Deleted
+  at job terminal; waitFor tolerates a missing entry (awaits undefined → the job
+  record itself is the source of truth).
+- **P3 batch**: J6 relative time (今天/昨天/N 天前) + >7d amber stale signal; I6 job
+  duration chip; header job indicator (running count celadon / recent-failure red dot,
+  seeded from /api/jobs at startup, click → #/acquire, clears) — I6's first step from
+  acquire-view panel to app-wide hub, exactly where M7c governance jobs will surface;
+  waitJob timeout wording ("作业仍在队列中执行" — the job DOES run later, retrying
+  would double-execute); upload aggregate note (per-file notes overwrote each other);
+  inbox delete title honest (物理删除不可恢复); dual-portal warning in startup banner
+  (two processes = two in-memory queues = serial guarantee gone).
+- Frontend gotcha worth remembering: a 52ms local pull makes queued→done arrive in
+  one burst — the running indicator is correct-but-invisible for fast jobs; verify
+  indicator logic via the failure-seed path instead.
+
+**M7b status: accepted by reviewer pending these fixes — now complete, no blockers. Next: M7c.**
+
 ## M7b (2026-08-02, 23+36+39 tests green): acquisition console — the portal's first real write surface
 
 Full scope delivered: jobs.mjs (S10) + E upload + F source pull + G raw delete/move
