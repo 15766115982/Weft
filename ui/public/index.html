@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="ui-token" content="%%UI_TOKEN%%">
+<title>KB Portal</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230d7a6f' stroke-width='2'%3E%3Cpath d='M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="vendor/pico.min.css">
+<link rel="stylesheet" href="vendor/tippy.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="route-loader"></div>
+<header id="top">
+  <a class="brand" href="#/dashboard"><span id="brand-icon"></span>KB Portal</a>
+  <select id="kb-select" title="KB 切换 (g k)"></select>
+  <nav>
+    <a href="#/dashboard" data-route="dashboard"><span data-ic="layoutDashboard"></span>总览</a>
+    <a href="#/browse" data-route="browse"><span data-ic="library"></span>浏览</a>
+    <a href="#/search" data-route="search"><span data-ic="search"></span>检索</a>
+    <a href="#/queue" data-route="queue"><span data-ic="listChecks"></span>评审 <span id="queue-count" class="pill" hidden></span></a>
+  </nav>
+  <span class="spacer"></span>
+  <span id="stale-banner" class="stale" hidden title="有新的 raw 或未完成的治理动作"></span>
+  <button id="cmdk-btn" title="命令面板"><span data-ic="command"></span><span class="dim">搜索页面 / 动作</span><kbd>Ctrl K</kbd></button>
+  <button id="hdr-refresh" class="icon-btn" title="刷新 (30s 自动)"><span data-ic="history"></span></button>
+  <button id="theme-toggle" class="icon-btn" title="暗色模式 (g t)"></button>
+</header>
+<main id="view"></main>
+<footer id="statusbar">
+  <span id="sb-kb"></span>
+  <span id="sb-pages"></span>
+  <span class="grow"></span>
+  <span id="sb-hint">Ctrl+K 面板 · g d/b/s/q 导航 · <a href="#" id="sb-help" style="color:inherit">? 快捷键</a></span>
+</footer>
+<script src="vendor/marked.min.js"></script>
+<script src="vendor/purify.min.js"></script>
+<script src="vendor/hotkeys.min.js"></script>
+<script src="vendor/popper.min.js"></script>
+<script src="vendor/tippy-bundle.umd.min.js"></script>
+<!-- alpine.min.js kept vendored as the P2-1 pressure valve (ADR), but not loaded:
+     zero x-data usage. Uncomment to activate. <script defer src="vendor/alpine.min.js"></script> -->
+<script type="module" src="app.js"></script>
+</body>
+</html>

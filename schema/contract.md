@@ -28,18 +28,20 @@ A knowledge base instance is a directory on disk, itself an independent Git repo
 └── .kb/                     # derived-artifacts directory (not checked in, .gitignore)
     ├── index.sqlite         # retrieval index (dual FTS5 tables + optional vectors), exclusive write by the retrieval service
     ├── search_state.json    # incremental hash state of the index
-    └── candidates/          # query candidate spaces persisted to disk by the retrieval script (temporary)
+    ├── candidates/          # query candidate spaces persisted to disk by the retrieval script (temporary)
+    ├── acquire_runs.jsonl   # per-source pull records appended by the acquisition service (one JSON line per run; the only record of all-skipped incremental pulls)
+    └── ui/                  # UI portal derived artifacts (jobs.db, eval scores, snapshots/), exclusive write by the UI portal
 ```
 
 ### Write Permission Matrix (single-responsibility principle)
 
-| Path | Acquisition | Governance | Retrieval | Thin viewer |
-|---|---|---|---|---|
-| `raw/` | **write** | read | forbidden | read |
-| `wiki/` | forbidden | **write** | read | only frontmatter `status` (candidate → approved / rejected) |
-| `log.md` | **append** | **append** | read | forbidden |
-| `.kb/` | forbidden | forbidden | **write** | read |
-| `kb.json` | read | read | read | read |
+| Path | Acquisition | Governance | Retrieval | Thin viewer | UI portal |
+|---|---|---|---|---|---|
+| `raw/` | **write** | read | forbidden | read | read + **delete/move only** (see rules) |
+| `wiki/` | forbidden | **write** | read | only frontmatter `status` (candidate → approved / rejected) | same as thin viewer (same flip primitive) |
+| `log.md` | **append** | **append** | read | forbidden | read |
+| `.kb/` | only `acquire_runs.jsonl` append | forbidden | **write** | read | only `.kb/ui/` **write**, rest read |
+| `kb.json` | read | read | read | read | read |
 
 Rules:
 - No layer may write to paths exclusively owned by another layer;
@@ -47,8 +49,19 @@ Rules:
   field of a wiki page's frontmatter (candidate → approved / rejected); `rejected` is a
   transient outcome — the governance service's sweep moves rejected pages into
   `wiki/archive/` and flips them to `archived` (see §4);
-- Everything inside `.kb/` can be fully rebuilt from `wiki/`; deleting it does not affect
-  correctness.
+- The **UI portal** (ADR-0006, `ui/`) is an on-demand localhost human console under the
+  same red lines as the thin viewer (launch on demand; no user system), with its KB
+  writes confined to an explicit whitelist: ① inbox/ uploads (staging area of the local
+  connector — never raw/ directly), ② raw/ delete & move (snapshot first, impact preview
+  first, executed via its per-KB serial write queue; move = new identity — the old
+  document becomes an orphan, as with any rename), ③ frontmatter `status` flips via the
+  governance statusflip primitive,
+  ④ `.kb/ui/` derived artifacts. Everything else is read-only. Its write operations go
+  through a per-KB serial queue; its destructive operations preserve a restorable
+  snapshot (git commit when the KB is a repository, file-copy snapshot otherwise);
+- Everything inside `.kb/` can be fully rebuilt from `wiki/` (plus, for
+  `acquire_runs.jsonl` and `.kb/ui/`, re-derived from operational use); deleting it does
+  not affect correctness.
 
 ## 2. raw/ Original Document Spec
 

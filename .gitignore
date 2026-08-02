@@ -4,3 +4,4 @@ node_modules/
 *.sqlite-journal
 Thumbs.db
 .DS_Store
+ui/kbs.json

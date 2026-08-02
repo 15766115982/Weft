@@ -40,6 +40,7 @@ Full smoke-test commands: [docs/installation.md](docs/installation.md) §7.
 | `acquisition/` | Acquisition service: `scripts/` (connectors: local, jira, confluence) + `skills/acquire/` |
 | `governance/` | Governance service: `scripts/` (plan/apply/review/sweep) + `skills/govern/` + `viewer/` (thin review UI) |
 | `retrieval/` | Retrieval service: `scripts/` (dual FTS5 + graph expansion) + `skills/search/` |
+| `ui/` | UI portal (M7, ADR-0006): on-demand localhost human console — pure consumer, zero reverse dependency (design: [docs/webui/](docs/webui/README.md)) |
 | `schema/` | The frozen contract (`contract.md`) + governance conventions (`governance.md`) |
 | `docs/` | Installation guides (EN/中文), real-env acceptance checklist, DEVLOG, ADRs |
 | `guide/` | Pre-M0 research notes (Chinese) + `materials/` (paper/article snapshots) |
@@ -50,10 +51,20 @@ through the knowledge base directory per `schema/contract.md`.
 
 ## Tests / 测试
 
-125 tests, all mocked (no network, no PATs):
+125 unit tests (all mocked, no network, no PATs) + a cross-service layer
+(scratch-KB pipeline regression + retrieval effectiveness eval):
 
 ```bash
 cd acquisition/scripts && npm test     # 36
 cd governance/scripts && npm test      # 52 (includes viewer)
 cd retrieval/scripts  && npm test      # 37 (npm install first)
+
+node --test tests/                     # 39: e2e pipeline (20) + retrieval eval (19)
 ```
+
+`tests/` builds a scratch KB from a fixture corpus (`tests/fixtures/inbox/`) and
+drives the real CLIs through every function except the live Jira/Confluence
+connections; the eval scores Hit@1/Hit@5/MRR against a golden query set and
+writes `docs/test-reports/retrieval-eval-latest.md`. Manual (human-in-the-loop)
+testing guide: [docs/manual-test-guide.zh-CN.md](docs/manual-test-guide.zh-CN.md);
+live Jira/Confluence acceptance: [docs/real-env-test.md](docs/real-env-test.md).

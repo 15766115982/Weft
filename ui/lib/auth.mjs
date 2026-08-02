@@ -1,0 +1,35 @@
+// Localhost write security (S8 second half, ADR-0006; review finding P0-2).
+// Binding 127.0.0.1 does NOT stop a malicious web page from POSTing to this
+// server (simple requests are not CORS-preflighted; CORS only blocks reading
+// the response) — so every write request must carry the per-startup token and
+// pass Origin/Host checks. The token is generated per launch, injected into the
+// first-page HTML meta, never written to disk, never logged.
+import crypto from 'node:crypto';
+
+export function createAuth() {
+  const token = crypto.randomBytes(24).toString('base64url');
+  // Port-agnostic on purpose: the process binds 127.0.0.1 only, so any port on
+  // a loopback host is this server; the check exists against DNS rebinding
+  // (a non-loopback Host), not against port numbers (which also breaks tests
+  // on ephemeral port 0).
+  const hostRe = /^(127\.0\.0\.1|localhost)(:\d+)?$/;
+  const originRe = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/;
+
+  // Returns null when the request may proceed, or {code, error} to refuse.
+  function checkWrite(req) {
+    if (req.headers['x-ui-token'] !== token) {
+      return { code: 403, error: 'write requests require the per-startup token (x-ui-token)' };
+    }
+    const host = req.headers.host || '';
+    if (!hostRe.test(host)) {
+      return { code: 403, error: `refused Host: ${host} (DNS-rebinding guard)` };
+    }
+    const origin = req.headers.origin;
+    if (origin && !originRe.test(origin)) {
+      return { code: 403, error: `refused cross-origin write (Origin: ${origin})` };
+    }
+    return null;
+  }
+
+  return { token, checkWrite };
+}

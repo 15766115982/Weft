@@ -1,0 +1,207 @@
+#!/usr/bin/env node
+// UI portal server (ADR-0006): on-demand localhost human console. Red lines:
+// launch on demand; no user system; whitelisted KB writes only (contract §1);
+// per-startup token + Origin/Host checks on every write request (S8).
+// Read-hot paths import service libs in-process; write operations go through
+// the per-KB serial queue (S10, jobs.mjs — wired in M7b; M7a's only write is
+// the statusflip review, serialized here by the same queue stub).
+//
+//   node serve.mjs [--kb <path>] [--port N]     (default port 8322, binds 127.0.0.1 only)
+import fs from 'node:fs';
+import path from 'node:path';
+import http from 'node:http';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { createAuth } from './lib/auth.mjs';
+import { createKbRegistry } from './lib/kb.mjs';
+import { resolveUnder, normalizeWikiRelRead, normalizeRawRel, walkMd } from './lib/paths.mjs';
+import { listWikiPages, backlinks, rawRefs, health } from './lib/browse.mjs';
+import { runSearch } from './lib/search.mjs';
+import { flipStatus, normalizeWikiRel, parseFrontmatter } from './lib/review.mjs';
+
+const UI_DIR = path.dirname(fileURLToPath(import.meta.url));
+const PUBLIC_DIR = path.join(UI_DIR, 'public');
+const MIME = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
+};
+
+export function createPortal({ kb: cliKb, port = 8322 } = {}) {
+  const auth = createAuth();
+  const registry = createKbRegistry({ cliKb });
+
+  const json = (res, code, obj) => {
+    res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify(obj));
+  };
+
+  const readBody = (req) => new Promise((resolveBody, rejectBody) => {
+    let body = '';
+    req.on('data', (c) => {
+      body += c;
+      if (body.length > 64 * 1024) { rejectBody(Object.assign(new Error('request body too large (64KB max)'), { code: 413 })); req.destroy(); }
+    });
+    req.on('end', () => resolveBody(body));
+    req.on('error', rejectBody);
+  });
+
+  const server = http.createServer(async (req, res) => {
+    const url = new URL(req.url, 'http://127.0.0.1');
+    console.log(`${req.method} ${url.pathname}${url.search}`);
+    try {
+      // ---- reads (GET, no token — local single-user tool) ----
+      if (req.method === 'GET' && url.pathname === '/api/kbs') {
+        return json(res, 200, { kbs: registry.list() });
+      }
+      if (req.method === 'GET' && url.pathname.startsWith('/api/')) {
+        const kb = registry.resolve(url.searchParams.get('kb')).path;
+
+        if (url.pathname === '/api/tree') return json(res, 200, { pages: listWikiPages(kb) });
+        if (url.pathname === '/api/queue') {
+          return json(res, 200, { pages: listWikiPages(kb).filter((p) => p.status === 'candidate') });
+        }
+        if (url.pathname === '/api/health') return json(res, 200, health(kb));
+        if (url.pathname === '/api/log') {
+          // D2 governance timeline: parse log.md's uniform prefix
+          // (## [ts] actor | action | target | note), newest first.
+          const limit = Math.min(Number(url.searchParams.get('limit')) || 30, 200);
+          const logPath = path.join(kb, 'log.md');
+          const entries = [];
+          if (fs.existsSync(logPath)) {
+            const re = /^## \[(.+?)\] (\S+) \| ([^|]+) \| ([^|]+)(?: \| (.*))?$/;
+            for (const line of fs.readFileSync(logPath, 'utf8').split('\n')) {
+              const m = line.match(re);
+              if (m) entries.push({ ts: m[1], actor: m[2], action: m[3].trim(), target: m[4].trim(), note: (m[5] || '').trim() });
+            }
+          }
+          return json(res, 200, { entries: entries.reverse().slice(0, limit) });
+        }
+        if (url.pathname === '/api/page') {
+          const rel = normalizeWikiRelRead(url.searchParams.get('path') || '');
+          const abs = resolveUnder(kb, rel, 'wiki');
+          if (!fs.existsSync(abs)) return json(res, 404, { error: `page does not exist: ${rel}` });
+          return json(res, 200, { path: rel, ...parseFrontmatter(fs.readFileSync(abs, 'utf8')) });
+        }
+        if (url.pathname === '/api/raw') {
+          const rel = normalizeRawRel(url.searchParams.get('path') || '');
+          const abs = resolveUnder(kb, rel, 'raw');
+          if (!fs.existsSync(abs)) return json(res, 404, { error: `raw doc does not exist: ${rel}` });
+          return json(res, 200, { path: rel, ...parseFrontmatter(fs.readFileSync(abs, 'utf8')) });
+        }
+        if (url.pathname === '/api/rawlist') {
+          // raw-layer browse (C9): every raw doc with its identity quintuple,
+          // grouped by source system on the client.
+          const docs = [];
+          for (const abs of walkMd(path.join(kb, 'raw'))) {
+            const rel = path.relative(kb, abs).replace(/\\/g, '/');
+            const { fields } = parseFrontmatter(fs.readFileSync(abs, 'utf8'));
+            docs.push({
+              path: rel, source: fields.source, source_id: fields.source_id,
+              title: fields.title || path.basename(rel, '.md'),
+              source_version: fields.source_version, pulled_at: fields.pulled_at,
+            });
+          }
+          return json(res, 200, { docs: docs.sort((a, b) => a.path.localeCompare(b.path)) });
+        }
+        if (url.pathname === '/api/backlinks') {
+          const rel = normalizeWikiRelRead(url.searchParams.get('path') || '');
+          return json(res, 200, { pages: backlinks(kb, rel) });
+        }
+        if (url.pathname === '/api/rawrefs') {
+          // A5: which wiki pages trace to this raw doc (source_ref / sources[])
+          const rel = normalizeRawRel(url.searchParams.get('path') || '');
+          return json(res, 200, { pages: rawRefs(kb, rel) });
+        }
+        if (url.pathname === '/api/search') {
+          const limit = Math.min(Number(url.searchParams.get('limit')) || 50, 200);
+          return json(res, 200, runSearch(kb, url.searchParams.get('q') || '', { limit }));
+        }
+        if (url.pathname === '/api/diff') {
+          // Same as the thin viewer: read-only git show; graceful null baseline
+          // when the KB is not a repository (version-management constraint, S4).
+          const rel = normalizeWikiRel(url.searchParams.get('path') || '');
+          const abs = resolveUnder(kb, rel, 'wiki');
+          if (!fs.existsSync(abs)) return json(res, 404, { error: `page does not exist: ${rel}` });
+          let baseline = null;
+          try {
+            baseline = execFileSync('git', ['-C', kb, 'show', `HEAD:${rel}`],
+              { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 8 * 1024 * 1024 });
+          } catch { baseline = null; }
+          const current = fs.readFileSync(abs, 'utf8');
+          return json(res, 200, { baseline, current, changed: baseline !== null && baseline !== current });
+        }
+        return json(res, 404, { error: 'not found' });
+      }
+
+      // ---- writes (token + Origin/Host, S8) ----
+      if (req.method === 'POST' && url.pathname === '/api/review') {
+        const refusal = auth.checkWrite(req);
+        if (refusal) return json(res, refusal.code, { error: refusal.error });
+        const { path: p, action, kb: kbName } = JSON.parse(await readBody(req) || '{}');
+        if (action !== 'approve' && action !== 'reject') {
+          return json(res, 400, { error: `action must be approve|reject: ${action}` });
+        }
+        const kb = registry.resolve(kbName).path;
+        const rel = normalizeWikiRel(p || '');
+        const abs = resolveUnder(kb, rel, 'wiki');
+        if (!fs.existsSync(abs)) return json(res, 404, { error: `page does not exist: ${rel}` });
+        const { to } = flipStatus(abs, 'candidate', action === 'approve' ? 'approved' : 'rejected');
+        return json(res, 200, { page: rel, status: to });
+      }
+
+      // ---- static (index.html gets the per-startup token injected) ----
+      if (req.method === 'GET' && url.pathname === '/favicon.ico') {
+        // index.html carries a data-URI icon; silence the automatic request
+        res.writeHead(204);
+        return res.end();
+      }
+      if (req.method === 'GET' && (url.pathname === '/' || MIME[path.extname(url.pathname)])) {
+        const name = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
+        const abs = path.resolve(PUBLIC_DIR, name);
+        if (!abs.startsWith(path.resolve(PUBLIC_DIR) + path.sep)) return json(res, 400, { error: 'bad static path' });
+        if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) return json(res, 404, { error: 'not found' });
+        const ext = path.extname(abs);
+        res.writeHead(200, { 'content-type': MIME[ext] });
+        if (ext === '.html') {
+          return res.end(fs.readFileSync(abs, 'utf8').replace('%%UI_TOKEN%%', auth.token));
+        }
+        return res.end(fs.readFileSync(abs));
+      }
+      return json(res, 404, { error: 'not found' });
+    } catch (err) {
+      if (!res.headersSent) {
+        const code = err.code === 404 || err.code === 413 ? err.code : /page status is/.test(err.message) ? 409 : 400;
+        return json(res, code, { error: err.message });
+      }
+      res.end();
+    }
+  });
+  return server;
+}
+
+function parseArgs(argv) {
+  const args = { _: [] };
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i].startsWith('--')) {
+      const key = argv[i].slice(2);
+      args[key] = (i + 1 >= argv.length || argv[i + 1].startsWith('--')) ? true : argv[++i];
+    } else args._.push(argv[i]);
+  }
+  return args;
+}
+
+// Direct launch only (importing this file from tests does not start a server)
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+  const args = parseArgs(process.argv.slice(2));
+  const cliKb = args.kb || process.env.KB_PATH;
+  if (!cliKb && !fs.existsSync(path.join(UI_DIR, 'kbs.json'))) {
+    console.error(JSON.stringify({ error: 'no knowledge base: pass --kb <path>, set KB_PATH, or create ui/kbs.json' }));
+    process.exit(64);
+  }
+  const port = Number(args.port) || 8322;
+  createPortal({ kb: cliKb, port }).listen(port, '127.0.0.1', () => {
+    console.log(`KB portal listening at http://127.0.0.1:${port}  (Ctrl+C to stop; review flips are logged by the next governance sweep)`);
+  });
+}

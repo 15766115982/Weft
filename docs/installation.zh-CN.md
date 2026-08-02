@@ -11,7 +11,7 @@ Node.js 脚本形态分发。本教程从零开始，带你装到能连内网 Ji
 
 | 要求 | 版本 | 原因 |
 |---|---|---|
-| Node.js | **≥ 20** | 用到 global `fetch`、`AbortSignal.timeout`、`node --test` |
+| Node.js | **20.x(钉版)** | 用到 global `fetch`、`AbortSignal.timeout`、`node --test`。**不要换主版本**:`better-sqlite3` 是全仓唯一原生依赖,预编译二进制按 ABI 锁定——Node 21+ 会 `ERR_DLOPEN_FAILED`,检索静默坏掉(UI 搜索变 HTTP 400)。必须用其他主版本时,需在该 Node 下重装 better-sqlite3 |
 | npm | 随 Node 自带 | 安装唯一的原生依赖（`better-sqlite3`，预编译二进制——不需要编译器） |
 | Git | 任意近期版本 | 知识库本身是 Git 仓库 |
 | Claude Code | 任意近期版本 | 三个服务以 skill 形态被调用 |

@@ -1,10 +1,173 @@
-# Development Log (as of 2026-08-01, M0-M6 complete + M6 review-fix rounds 1-2)
+# Development Log (as of 2026-08-02, M0-M6 complete + cross-service test layer + M7a UI portal slice 1)
 
 > Restart entry point after context compaction. Architecture decisions: `CONTEXT.md`;
 > three-party contract: `schema/contract.md` + `schema/governance.md` (§1 language
-> convention: wiki all-English, raw keeps source language); five ADRs in `docs/adr/`.
+> convention: wiki all-English, raw keeps source language); six ADRs in `docs/adr/`.
 > **New-deployment entry: `docs/installation.md` (+ `installation.zh-CN.md` 中文版)** —
 > prerequisites, skill linking, kb.json/PAT/CA configuration, smoke test, troubleshooting.
+> **M7 UI portal: process + design docs in `docs/webui/`** (requirements frozen, option 1
+> no-build SPA selected, ADR-0006, contract §1 UI-portal column, S7 spike report).
+
+## M7a slice 4 (2026-08-02, 14 tests green): quality-review fix batch — M7a COMPLETE
+
+External quality review (M7a-review.zh-CN.md, verified **zero misjudgments** — every
+claim confirmed against code): 1 scope ruling, 2 requirement deviations, 1 test-env
+issue, 5 P2 consistency leaks, 6 P3 polish items. All handled:
+
+- **Scope ruling (user-decided)**: J3/J4/J5 formally moved M7a → M7b (fs-watch belongs
+  with jobs.mjs design); J3 delivered in transitional form NOW (write-refresh via
+  ui:refresh-header event + 30s visibility-aware health polling + manual refresh button)
+- **A5 delivered full-strength (user-decided)**: side-by-side wiki⇄raw split view
+  (compare button on source pages) + raw → wiki reverse references (/api/rawrefs,
+  frontmatter scan shared with M7b's G5 impact preview — one investment, two payoffs)
+- **Node pinned to 20.x (user-decided)**: better-sqlite3 (11.10.0) is ABI-locked —
+  reviewer's node 24 run failed ERR_DLOPEN_FAILED with the error masked by a body-first
+  assertion. Fixed: test asserts status before body (with "native module healthy?"
+  message), engines ^20 ×3, installation.md(+zh-CN) pinning with the failure mode named
+- **P2 ×5**: header counts refresh after review (CustomEvent); queue hotkeys unbind
+  before bind (hotkeys-js stacks duplicates); g k bound (ghost shortcut); queue view
+  uses /api/queue (endpoint no longer dead surface); alpine script tag commented out
+  (file kept as P2-1 pressure valve — zero x-data usage)
+- **P3 ×8**: 409 conflict card gains a refresh button; score tooltip (BM25 heuristic
+  explained); palette mousemove swaps class only (no 12-row rebuild); slugify dedupes
+  heading ids per document; fold memory immune to filter-force-open; index.md in the
+  tree (A4 — it was unreachable from tree/palette); dashboard timeline targets
+  clickable (demo journey); D1 source-system distribution line (was page-type)
+- A4 addendum: /api/tree includes index.md flagged isIndex; health counts exclude it
+
+**M7a is now feature-complete per the frozen requirements (+ ruling).** Next: M7b
+(jobs.mjs + S10 serial write queue + upload/raw management) — or the long-pending
+real-environment acceptance (docs/real-env-test.md), still unscheduled.
+
+## M7a slice 3 (2026-08-02, 13 tests green): UI audit round 2 — all findings fixed
+
+Full-site UI audit (docs/webui/ui-audit-round2.zh-CN.md, 2 P0 + 8 P1 + 10 P2), all fixed:
+
+- **P0-2 review hotkeys leaked globally** — pressing 'a' on ANY page could silently
+  approve a candidate (detached button, invisible feedback). Fix: hotkeys-js scopes
+  ('queue' scope dies on route change; app.js resets 'all' per mount). Behavior-verified:
+  zero POST after leaving queue. Also j/k navigation added in queue
+- **P0-1 tree filter lost focus per keystroke** — renderTree rebuilt the input itself;
+  filter is now outside the re-render scope (verified: activeElement survives typing);
+  Esc clears
+- **Tree/layout overhaul** — drag-resizable tree (180–400px, persisted); segmented
+  [wiki|raw] control (raw duplicates gone); true icon rail in collapsed mode
+  (expand/wiki/raw entries, instant tooltips — collapsed was a navigation dead end);
+  collapsed grid drops the 366px ghost column (3-col template, reader widens to 800px);
+  group headers with icons+count pills, indent guides, celadon current-item bar, 30px rows
+- P1: '?' shortcuts overlay (statusbar link + palette entry); snippet markdown tokens
+  stripped; score<0.001 hidden; KB selector dedupes by resolved path (kbs.json name wins)
+- P2: TOC javascript:void → preventDefault; dashboard stat-top icon row + timeline
+  day grouping; route loading bar; /favicon.ico → 204; '/' focuses search input on the
+  search view; chips source from frontmatter (server tree gains `source`); preview
+  loading state; raw items meta tooltip; dark --ink-dim contrast bump
+
+Gotcha recorded: Playwright probes (getBoundingClientRect/computed style) beat
+eyeballing downscaled screenshots — two "missing icons" were actually rendering fine.
+
+## M7a slice 2 delivered (2026-08-02, ui/ 12 tests green): full visual/interaction redesign
+
+
+User feedback on slice 1: "太丑、交互差". Process: two research rounds
+(docs/webui/research-design.zh-CN.md — vendorable CSS/JS libs with live stars+sizes;
+research-design-skills.zh-CN.md — AI-design skill resources) → design plan approved
+(docs/webui/design-plan.zh-CN.md, "Archival Editorial" direction) → implemented via the
+official frontend-design skill's two-phase flow.
+
+- **Theme**: celadon signature color (#0d7a6f) + ink/paper neutrals (NOT cream+terracotta
+  or purple-gradient — the named AI-slop defaults); Newsreader serif display + system
+  body (CJK) + IBM Plex Mono metadata (all vendored woff2 subsets); signature element =
+  `[[ reference chips ]]` for wikilinks site-wide (dashed dead links)
+- **Vendored** (still zero npm, zero build): Pico CSS 2.1.1 (classless base), Alpine.js,
+  hotkeys-js, tippy.js + **Popper UMD** (the jsDelivr "tippy-bundle" is NOT actually
+  bundled — it expects window.Popper; missing this = "tippy is not defined"),
+  34 lucide SVGs inlined into lib/icons.js
+- **New UX**: slim 40px header + 28px mono statusbar; Ctrl+K command palette (fuzzy
+  pages+actions, full keyboard); collapsible tree with filter + fold memory; centered
+  720px reader with archive card; tabbed context panel (info/backlinks/**TOC scroll-spy**);
+  wikilink hover previews; heading-anchor copy; live debounced search with filter chips
+  + term highlighting + skeletons; sticky review bar with a/r/[/] hotkeys + explicit 409
+  conflict card; dashboard dossier strip + /api/log governance timeline (D2); empty
+  states as action invitations
+- **Bugs found by self-screenshotting** (Playwright + system Edge, cdn.playwright.dev is
+  network-blocked — use `channel='msedge'`, and Windows python resolves /tmp to D:\tmp):
+  ① icons.js generator folded SVG newlines to nothing, fusing attributes into invalid
+  HTML — DOMPurify stripped everything (empty CTA, missing icons); ② Pico styles bare
+  `<nav>` as flex — the tree's two details became overlapping flex items (fix: display:block);
+  ③ grid had 3 columns for 4 items (rail/tree/reader/ctx); ④ flex ellipsis needs
+  min-width:0 or the title shrinks to zero next to a badge; ⑤ .woff2 missing from the
+  static MIME map; ⑥ hash-only navigation doesn't re-run init code (theme test artifact)
+- Added /api/log (log.md prefix parse, newest first) + test; 12 tests all green
+- Addendum: **raw-layer browse** (C9 scenario had been folded into M7b by mistake) —
+  /api/rawlist (identity quintuple per doc) + tree "raw" group with source labels;
+  read-only, no S10 queue needed (delete/move still M7b); 13 tests green
+
+## M7a slice 1 delivered (2026-08-02, ui/ 11 tests green)
+
+First vertical slice of the UI portal (ADR-0006, option 1 no-build SPA):
+
+- `ui/serve.mjs` — node:http 127.0.0.1:8322 on demand; read-hot paths import service
+  libs in-process (S2); the only write is POST /api/review → governance statusflip
+- `ui/lib/` — paths (shared norm, wiki/raw read gates), auth (**per-startup token +
+  Origin/Host checks on writes** — localhost POST is not CORS-protected), kb registry
+  (ui/kbs.json, gitignored), search (in-process ensureFresh+search; `routed` from
+  search()'s return — B4 needs no CLI change; candidates_file read immediately,
+  never referenced later — KEEP=20 churn), review (statusflip re-export), browse
+  (tree/backlinks with fence-aware stripCode/health via governance plan — D3/D5)
+- `ui/public/` — no-build ES modules: hash-router app.js + four views (dashboard /
+  browse / search / queue) + lib (api.js only request exit, render.js **only
+  innerHTML exit, DOMPurify default** — pinned by a grep test), md.js (marked +
+  wikilink tokenizer, dead-link styling), diff.js (LCS); vendored marked 15.0.12 +
+  DOMPurify 3.4.12; **zero npm dependencies**
+- Contract §1 amendment (increment-compatible): UI portal column in the write matrix,
+  `.kb/ui/` + `acquire_runs.jsonl` entries, write whitelist; CONTEXT "no Web UI" →
+  "no web platform"; ADR-0006
+- S7 spike (docs/webui/spike-s7.zh-CN.md): stream-json is genuinely progressive;
+  `spawn('claude.cmd')` direct (no shell); headless default blocks tool writes with
+  **exit 0** (exit code is not an error signal — parse result events);
+  permission posture deferred to M7c by user decision
+- Gotchas pinned by tests: fetch/undici **ignores a user-set Host header** (the
+  DNS-rebinding test must use node:http); auth Host regex must be port-agnostic
+  (ephemeral port 0 in tests); frontend syntax verified via `node --input-type=module
+  --check` (browser modules are outside node:test's reach)
+
+Deferred to later slices: J3 fs-watch auto-refresh, J4 inbox management, J5 auth
+check, M7b upload/raw-management (needs jobs.mjs + S10 queue), M7c executor.
+
+Run tests: `cd ui && node --test test/` (11).
+
+
+## Cross-service test layer (2026-08-01): 39 tests green, eval Hit@5 = 1.000
+
+New top-level `tests/` closes the gap between the mocked unit suites and the
+real-environment acceptance checklist — everything except the live Jira/Confluence
+connections, driven through the real CLIs on a scratch KB:
+
+- `tests/fixtures/inbox/` — fictional payment-system corpus (EN×5, CJK×2, mixed,
+  txt, unsupported docx, empty, deep/structured long-doc), deterministic mtimes
+  (date-filter tests depend on them); `tests/fixtures/summaries/` — pre-written
+  apply-source summaries (CJK summaries carry original-form anchors, the only way
+  CJK terms can be retrievable — wiki is English-only per governance.md §1)
+- `tests/e2e/pipeline.test.mjs` (20) — acquire (create/skip/update/orphan/prune,
+  frontmatter quintuple, no wiki writes) → govern (plan drain, stale, anomaly via
+  content-change-with-reset-mtime, contract-violation errors, topic candidate
+  protection, CLI approve/reject, real viewer over HTTP incl. 409 + unlogged-flip
+  guard + idempotent sweep backfill, merge-topic backlink rewrite, orphan archive,
+  dangling links, index format, log.md §5 audit) → retrieval gates (candidate/
+  archived invisible to search and read, ARCHIVE case bypass, anchor read, fence
+  fidelity)
+- `tests/eval/retrieval-eval.test.mjs` + `queries.json` (19) — golden query set
+  (stemming, phrase, CJK LIKE/trigram routing, type:/tag:/date filters on
+  source-system time, graph expansion via:link, negative query) scored Hit@1 =
+  0.706, **Hit@5 = 1.000**, MRR = 0.819; threshold Hit@5 ≥ 0.85 is pinned as a
+  regression gate; report regenerated at `docs/test-reports/retrieval-eval-latest.md`
+- Gotcha recorded: `node --test <dir>` only picks up `*.test.mjs` — the eval file
+  had to be named `retrieval-eval.test.mjs` to be discovered
+- Human-in-the-loop layer: `docs/manual-test-guide.zh-CN.md` (skill conversation
+  flow, summary/synthesis quality scoring, review dual-channel, retrieval Q&A,
+  failure drills)
+
+Run: `node --test tests/` from the repo root.
 
 ## Current status: M0-M6 ✅, 125 tests all green (acquisition 36 / governance 52 / retrieval 37)
 

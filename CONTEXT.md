@@ -8,7 +8,8 @@ knowledge base (wiki tree), and serves efficient, precise queries through a retr
 
 **The primary user is Claude Code (an LLM agent)**, with human users browsing by eye as the
 secondary audience. This is not a multi-user collaboration platform — no always-on services,
-no Web UI, no user permission system.
+**no web platform** (human interfaces are on-demand localhost tools, see below), no user
+permission system.
 
 ## Glossary
 
@@ -48,32 +49,38 @@ Karpathy LLM Wiki paradigm: raw / wiki / schema):
   at the same time (contract §4); the retrieval service indexes only approved pages and skips
   the archive/ directory wholesale (double insurance).
 
-### Human interaction surface: the thin viewer
+### Human interaction surface: thin localhost tools
 
-The intranet forbids installing Obsidian, so a **self-built thin viewer is the only interface
-for human review**, delivered together with the candidate state machine (M4:
-`governance/viewer/`). Three red lines
-(to prevent a relapse of platform bloat disease):
+The intranet forbids installing Obsidian, so **self-built thin tools are the only interface
+for humans**. Two exist: the M4 **thin viewer** (`governance/viewer/`, review-only) and the
+M7 **UI portal** (`ui/`, ADR-0006 — a console for browsing, search, review, acquisition
+operations, raw management, and agent-driven governance with live streaming). Shared red
+lines (to prevent a relapse of platform bloat disease):
 
 1. **Launch on demand, no resident service** — a Node script starts localhost; shut down
    when done;
 2. **No user system, no permissions, no configuration UI** — a single-user local tool;
-3. **Dumb consumer, zero governance logic** — only renders for reading, lists the candidate
-   queue, presents conflict diffs, and offers approve/reject buttons; the buttons' substantive
-   action is nothing more than rewriting frontmatter `status` (candidate → approved /
-   rejected); governance rules live forever only in the skills/scripts.
+   localhost write requests still carry a startup-generated token + Origin/Host checks
+   (binding 127.0.0.1 does not stop a malicious web page from POSTing to it);
+3. **Whitelisted writes only** — the viewer's only write is flipping frontmatter `status`
+   (candidate → approved / rejected); the portal's KB writes are confined to the contract
+   §1 whitelist (inbox uploads / raw delete+move with snapshot-first / statusflip /
+   `.kb/ui/` artifacts), executed through a **per-KB serial write queue** that enforces
+   the single-operator assumption at the tool layer. Governance rules live forever only
+   in the skills/scripts.
 
 Tech stack: a Node script serving localhost static files + a no-build HTML page (no framework
 build chain on the frontend — the old frontend's build chain was one of the maintenance
-burdens). Logging of review outcomes: the viewer flips only `status` and never writes log.md;
-the governance service's **`sweep`** (run first in every governance session) backfills the
-missing `review |` log lines by diffing log.md against current page statuses, and moves
+burdens). Logging of review outcomes: the viewer/portal flips only `status` and never writes
+log.md; the governance service's **`sweep`** (run first in every governance session) backfills
+the missing `review |` log lines by diffing log.md against current page statuses, and moves
 `rejected` pages into `wiki/archive/` (flipping them to `archived`).
 
 ### Repository and deployment shape
 
 - **Single code repo**: the three services are top-level packages (acquisition/ governance/
-  retrieval/, each containing SKILL.md + scripts/), not split into per-service repos —
+  retrieval/, each containing SKILL.md + scripts/) plus the M7 `ui/` portal package
+  (ADR-0006, a pure consumer — zero reverse dependency), not split into per-service repos —
   decoupling is guaranteed by "communicate only through the KB directory"; splitting repos
   would instead require syncing three copies of the contract.
 - **The rules layer is materialized as `schema/`**: contract.md (directory structure +
