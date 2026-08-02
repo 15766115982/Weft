@@ -37,6 +37,10 @@ export async function render(view) {
   async function loadPlan() {
     lastPlan = await api('/api/plan');
     planBox.textContent = '';
+    // I5 freshness (M7c review): the preview is a confirm page — say how old it is
+    const stamp = el('p', { class: 'dim', style: 'font-size:11.5px;margin:0 0 4px;text-align:right' },
+      `计划清单刷新于 ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}(KB 有变更时自动刷新)`);
+    planBox.append(stamp);
     const item = (primary, secondaryHtml) => {
       const row = el('div', { class: 'plan-item' });
       html(row, `<span class="t">${esc(primary)}</span>${secondaryHtml || ''}`);
@@ -109,6 +113,8 @@ export async function render(view) {
   function buildRunPanel() {
     const head = el('h2');
     html(head, `${icon('sparkles', 16)} agent 治理运行 <span class="dim">I2 · 执行器:headless claude(skip-permissions,已拍板)· 全程串行入队</span>`);
+    const helper = el('p', { class: 'dim', style: 'font-size:12px;margin:0 0 6px' },
+      '下面是给 agent 的完整指令(已含计划快照与"全部留 candidate"约束),通常不用改。');
     const ta = el('textarea', { rows: '10', class: 'run-prompt' });
     const row = el('div', { class: 'pull-actions' });
     const go = el('button', { class: 'primary sm' });
@@ -132,16 +138,22 @@ export async function render(view) {
     on('ui:run', (e) => {
       const d = e.detail;
       if (!currentRunId || d.jobId !== currentRunId) return;
-      transcript.textContent += d.chunk;
+      // P3: bound the DOM growth the way the server bounds job.log (64KB)
+      transcript.textContent = (transcript.textContent + d.chunk).slice(-64 * 1024);
       transcript.scrollTop = transcript.scrollHeight;
     });
     on('ui:job', (e) => {
       const j = e.detail;
       if (!currentRunId || j.id !== currentRunId) return;
-      if (j.status === 'done') { note.textContent = '运行完成 — wiki 变化见浏览页,候选页进评审队列'; go.disabled = false; }
+      if (j.status === 'done') {
+        html(note, `运行完成 — <a href="#/queue">去评审队列</a> 批准候选页,wiki 变化见浏览页`);
+        go.disabled = false;
+        loadPlan(); // P3: close the loop — pending should read zero now
+      }
       if (j.status === 'failed') { note.textContent = `运行失败:${j.error || ''}`; go.disabled = false; }
+      if (j.status === 'cancelled') { note.textContent = '运行已取消'; go.disabled = false; }
     });
-    runPanel.append(head, ta, row, transcript);
+    runPanel.append(head, helper, ta, row, transcript);
     row.append(go, note);
   }
   buildRunPanel();
@@ -176,8 +188,19 @@ export async function render(view) {
   const toIn = el('input', { placeholder: 'to slug' });
   const mergeBtn = el('button', { class: 'primary sm' });
   html(mergeBtn, `${icon('play', 13)} 合并`);
+  // M7c review P3: merge is as irreversible as raw delete — same confirmation
+  // discipline, as a two-click arm (no modal duplication).
+  let armed = false;
   mergeBtn.addEventListener('click', () => {
     if (!fromIn.value.trim() || !toIn.value.trim()) { mechNote.textContent = 'merge-topic 需要 from/to 两个 slug'; return; }
+    if (!armed) {
+      armed = true;
+      mergeBtn.textContent = `确认合并 ${fromIn.value.trim()} → ${toIn.value.trim()}?(回链改写不可逆)`;
+      mergeBtn.classList.add('danger-solid');
+      setTimeout(() => { armed = false; html(mergeBtn, `${icon('play', 13)} 合并`); mergeBtn.classList.remove('danger-solid'); }, 5000);
+      return;
+    }
+    armed = false;
     runMech({ action: 'merge-topic', from: fromIn.value.trim(), to: toIn.value.trim() }, 'merge-topic');
   });
   const mergeRow = el('div', { class: 'pull-actions' });

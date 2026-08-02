@@ -88,6 +88,11 @@ async function initHeader() {
   html(document.getElementById('stale-banner'), `${icon('circleAlert', 14)} 待治理`);
 
   const { kbs } = await api('/api/kbs');
+  // D5 (M7c review P2-1): the stale banner is a call-to-action, not a label —
+  // click lands on the govern console where the plan preview explains it.
+  const stale = document.getElementById('stale-banner');
+  stale.style.cursor = 'pointer';
+  stale.addEventListener('click', () => { location.hash = '#/govern'; });
   const select = document.getElementById('kb-select');
   for (const k of kbs) {
     const opt = el('option', { value: k.name }, k.name + (k.exists ? '' : ' (缺失)'));

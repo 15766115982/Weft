@@ -53,14 +53,22 @@ export function createJobCenter() {
     emit(job);
 
     s.tail = s.tail.then(async () => {
+      // a job cancelled while queued never runs — the chain steps over it
+      if (job.cancelled) {
+        job.status = 'cancelled';
+        job.finishedAt = new Date().toISOString();
+        persist(kb, job); emit(job);
+        settled.delete(job.id);
+        return;
+      }
       job.status = 'running';
       job.startedAt = new Date().toISOString();
       persist(kb, job); emit(job);
       try {
         job.result = (await spec.run(job)) ?? null;
-        job.status = 'done';
+        job.status = job.cancelled ? 'cancelled' : 'done';
       } catch (err) {
-        job.status = 'failed';
+        job.status = job.cancelled ? 'cancelled' : 'failed';
         job.error = err.message;
       }
       job.finishedAt = new Date().toISOString();
@@ -79,6 +87,24 @@ export function createJobCenter() {
 
   return {
     enqueue,
+    // Cancel a queued job (skipped when its turn comes) or a running one
+    // (its spec's kill handle fires; the terminal status becomes 'cancelled').
+    // Terminal jobs → 409-shaped error. Long agent runs otherwise block the
+    // whole serial queue with no way out (M7c review P3).
+    cancel(kb, id) {
+      const job = stateFor(kb).jobs.find((j) => j.id === id);
+      if (!job) return { code: 404, error: `job not found: ${id}` };
+      if (job.status === 'queued') {
+        job.cancelled = true;
+        return { code: 200, job };
+      }
+      if (job.status === 'running') {
+        job.cancelled = true;
+        try { job.kill?.(); } catch { /* kill is best-effort */ }
+        return { code: 200, job };
+      }
+      return { code: 409, error: `job already ${job.status}` };
+    },
     // Await a job's completion and return its final record (never rejects —
     // the outcome is in job.status/job.error). Lets endpoints keep a
     // synchronous request/response shape while writes stay serialized.

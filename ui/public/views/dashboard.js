@@ -31,8 +31,7 @@ export async function render(view) {
     if (h.plan.anomalies) ctaBits.push(`${h.plan.anomalies} 个异常`);
     const cta = el('div', { class: 'stale-cta' });
     html(cta, `${icon('circleAlert', 15)} <b>知识库不是最新:</b>${esc(ctaBits.join(','))}。
-      请在 Claude 会话中发起治理(kb-govern),或处理 <a href="#/queue">评审队列</a>。
-      <span class="dim">(M7c 治理控制台上线后可直接在这里发起)</span>`);
+      去 <a href="#/govern">治理控制台</a> 预览计划并发起 agent 治理,或处理 <a href="#/queue">评审队列</a>。`);
     view.append(cta);
   }
 

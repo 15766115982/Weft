@@ -383,3 +383,8 @@ button.danger-solid { background: var(--wine); border-color: var(--wine); color:
 .run-transcript { max-height: 380px; overflow: auto; margin-top: 12px; padding: 12px 14px;
   background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-btn);
   font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
+
+/* ---- M7c review fixes ---- */
+.chip.cancelled { background: var(--gray); color: #fff; }
+#stale-banner:hover { text-decoration: underline; }
+.job summary .icon-btn { padding: 2px; margin-right: 4px; }

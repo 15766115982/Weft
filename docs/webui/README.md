@@ -30,9 +30,13 @@
   多行 argv 经 .cmd 垫片零输出)+ I4 SSE run 通道流式转写 + I5 /api/plan 全清单预览
   + I1 sweep/rebuild-index/merge-topic;**真实 agent e2e 通过**(UI 发起 → 流式 →
   产出契约合规 candidate 源页+主题草稿+日志,队列 1→3);默认提示词改指 skill 文件
-  (注册无关)。31 测试全绿
+  (注册无关)。31 测试全绿。**外部审核(M7c-review.zh-CN.md,零误判)2 P2 全处理**:
+  D5 引导链接入治理台;skip-permissions 暴露面立项加固(ADR-0006,M7d 前);
+  P3 批次含作业取消全管道(queued 跳过/running kill)。32 测试全绿
 - 🔵 **下一里程碑:A7 关系图谱**(小里程碑,用户拍板 B:wikilink 力导向图,
-  ≤2k 节点客户端布局,与 [[引用签]] 视觉统一)→ 然后 M7d wiki 编辑(H2/H3 契约规则未议)
+  ≤2k 节点客户端布局,与 [[引用签]] 视觉统一;顺手解决 backlinks 全库扫描直用
+  retrieval outlinks)→ 然后 M7d wiki 编辑(H2/H3 契约规则未议;**进 M7d 前先落
+  P2-2 加固:allowedTools/permissions.deny 限定写路径**)
 - ⬜ backlog:K 评测 / J9 闭环 / C5 批量 / B5 查询历史
 - ⬜ 并行欠账:真实环境验收 docs/real-env-test.md(全系统级,与 M7 无关)
 

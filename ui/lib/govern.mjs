@@ -48,6 +48,7 @@ export function governRunJob(kb, { prompt, executor = 'claude' }, onChunk) {
       try {
         run = startRun(executor, { prompt, cwd: kb });
       } catch (err) { reject(err); return; }
+      job.kill = run.kill; // jobs.cancel(kb, id) calls this for running jobs
       run.events.on('event', (e) => {
         const line = e.kind === 'init' ? `— ${e.text} —\n` : e.text;
         job.log = (job.log + line).slice(-64 * 1024);

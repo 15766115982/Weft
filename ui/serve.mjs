@@ -179,9 +179,10 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
         // at it so runs follow the real workflow EVEN when the skill is not
         // registered in the executor's environment (e2e finding 2026-08-02).
         if (url.pathname === '/api/govern-context') {
-          return json(res, 200, {
-            skillPath: path.resolve(UI_DIR, '..', 'governance', 'skills', 'govern', 'SKILL.md'),
-          });
+          // existsSync fallback (M7c review P3): a missing skill file must not
+          // leave the default prompt pointing at a phantom path.
+          const skillPath = path.resolve(UI_DIR, '..', 'governance', 'skills', 'govern', 'SKILL.md');
+          return json(res, 200, { skillPath: fs.existsSync(skillPath) ? skillPath : null });
         }
         if (url.pathname === '/api/diff') {
           // Same as the thin viewer: read-only git show; graceful null baseline
@@ -288,6 +289,15 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
           const spec = governRunJob(kb, body, (job, kind, chunk) =>
             runBridge.emit('chunk', { kb, jobId: job.id, kind, chunk }));
           return json(res, 202, { job: jobs.enqueue(kb, spec) });
+        }
+
+        // Cancel a queued/running job (M7c review P3 — long agent runs
+        // otherwise hold the serial queue hostage).
+        if (url.pathname === '/api/job-cancel') {
+          const body = JSON.parse(await readBody(req) || '{}');
+          const kb = registry.resolve(body.kb).path;
+          const r = jobs.cancel(kb, body.id);
+          return json(res, r.code, r.error ? { error: r.error } : { job: r.job });
         }
 
         return json(res, 404, { error: 'not found' });

@@ -65,7 +65,13 @@ function startClaudeRun({ prompt, cwd }) {
     } else if (ev.type === 'assistant') {
       for (const block of ev.message?.content || []) {
         if (block.type === 'text') emitText('assistant', block.text);
-        else if (block.type === 'tool_use') emitText('assistant', `[tool: ${block.name}]`);
+        else if (block.type === 'tool_use') {
+          // I4 density (M7c review): "[Write: wiki/topics/x.md]" tells the
+          // watcher WHAT the agent is doing, "[tool: Write]" does not.
+          const target = block.input?.file_path || block.input?.path
+            || (block.input?.command ? String(block.input.command).slice(0, 60) : null);
+          emitText('assistant', target ? `[${block.name}: ${target}]` : `[tool: ${block.name}]`);
+        }
       }
     } else if (ev.type === 'result') {
       result = ev;

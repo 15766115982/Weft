@@ -174,7 +174,7 @@ export async function render(view) {
 
   // ============================== I6: job center ==============================
   const jobBox = el('div');
-  const STATUS_CHIP = { queued: '排队中', running: '运行中', done: '完成', failed: '失败' };
+  const STATUS_CHIP = { queued: '排队中', running: '运行中', done: '完成', failed: '失败', cancelled: '已取消' };
   async function loadJobs() {
     const { jobs } = await api('/api/jobs').catch(() => ({ jobs: [] }));
     jobBox.textContent = '';
@@ -186,6 +186,17 @@ export async function render(view) {
         <span class="t">${esc(j.label)}</span>
         <span class="grow"></span><span class="mono dim">${esc(fmtDur(j.startedAt, j.finishedAt))}</span>
         <span class="mono dim">${esc(fmtTime(j.createdAt))}</span>`);
+      // cancel entry (M7c review P3): queued jobs are skipped, running jobs killed
+      if (j.status === 'queued' || j.status === 'running') {
+        const cancel = el('button', { class: 'icon-btn danger', title: '取消作业(排队=跳过;运行中=终止)' });
+        html(cancel, icon('x', 12));
+        cancel.addEventListener('click', async (e) => {
+          e.stopPropagation(); // don't toggle the details
+          try { await apiPost('/api/job-cancel', { id: j.id }); }
+          catch (err) { alert(`取消失败:${err.message}`); }
+        });
+        sum.append(cancel);
+      }
       det.append(sum);
       const body = el('div', { class: 'job-body' });
       if (j.error) body.append(el('pre', { class: 'error' }, j.error));

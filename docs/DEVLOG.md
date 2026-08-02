@@ -8,6 +8,30 @@
 > **M7 UI portal: process + design docs in `docs/webui/`** (requirements frozen, option 1
 > no-build SPA selected, ADR-0006, contract §1 UI-portal column, S7 spike report).
 
+## M7c review-fix round (2026-08-02, 32 tests green): external M7c review — 2 P2 confirmed, zero misjudgments (third round)
+
+- **P2-1 (D5 引导链断裂)**: dashboard stale CTA 文案还停在"请在 Claude 会话中发起
+  (M7c 上线后可在这里发起)"——M7c 交付后引导终点就是错的。修:CTA 链接 #/govern;
+  顶栏 stale 横幅可点(hover underline);过时括注删除。D5 定义("提示引导发起治理")
+  至此闭环。
+- **P2-2 (skip-permissions 残余暴露面)**: 记录在案并立项——双保险(candidate 评审 +
+  作业日志)只覆盖 wiki 内写;agent 文件工具不受 cwd 限制,prompt 注入(raw 内容天然
+  不可信)可写 KB 外且不留 wiki 痕迹。加固方向按成本排序写入 ADR-0006:
+  --allowedTools/permissions.deny 限定写路径(可与 skip-permissions 叠加)> 提示词约束
+  (弱)> 跑后 git status 比对(限 git KB)。排期:M7d 前。
+- **P3 批次**: ① 作业取消全管道(queued 跳过 / running 调 kill,终态 cancelled;
+  作业中心取消按钮;waitJob 识别 cancelled;测试覆盖排队取消+运行杀死后队列继续+
+  终态 409)——长 agent 运行不再能堵死串行队列;② transcript 前端 64KB 界(照抄服务端);
+  ③ /api/govern-context existsSync 回退(skillPath null → 回退 "Use the kb-govern skill");
+  ④ merge-topic 二次点击确认(与 raw 删除同级的不可逆操作,纪律对齐);
+  ⑤ 运行完成 → "去评审队列"链接 + 自动刷新 plan 闭环;⑥ tool_use 显示关键参数
+  ([Write: wiki/topics/x.md] 比 [tool: Write] 更能讲清 agent 在干什么,演示场景加分);
+  ⑦ 计划清单刷新时间戳;⑧ 提示词安抚句("通常不用改");⑨ ADR-0006 补两笔:
+  stdin prompt + SKILL.md 文件指向(注册无关,I3 实际可插拔性增强的正式记录)。
+- Playwright 验证:CTA 链接 ✓ 横幅跳转 ✓ SKILL.md 路径进提示词 ✓ 时间戳 ✓ 零 JS 错误。
+
+**M7 系列 (a/b/c) 至此全部交付且全部经外部评审验收。下一:A7 图谱小里程碑。**
+
 ## M7c (2026-08-02, 31 tests green + real-agent e2e): governance console — agent executor live
 
 Scope: I1 mechanical steps + I2/I3 executor + I4 streaming + I5 plan-as-preview.

@@ -70,16 +70,6 @@ async function until(fn, ms = 10000, step = 100) {
   }
 }
 
-async function waitJob(id) {
-  let job;
-  await until(async () => {
-    const { jobs } = await (await get('/api/jobs')).json();
-    job = jobs.find((j) => j.id === id);
-    return job && (job.status === 'done' || job.status === 'failed');
-  });
-  return job;
-}
-
 test('mock executor registered (I3: the plug point works)', () => {
   assert.ok(executorNames().includes('claude'), 'claude is the built-in');
   assert.ok(executorNames().includes('mock'), 'third-party executors register by name');
@@ -150,3 +140,50 @@ test('M7c write security: govern endpoints refuse no-token and forged Origin', a
   assert.equal((await post('/api/govern-run', { prompt: 'x' })).status, 403);
   assert.equal((await post('/api/govern-run', { prompt: 'x', executor: 'mock' }, { 'x-ui-token': token, origin: 'http://evil.example' })).status, 403);
 });
+
+test('job cancel: queued job is skipped, running job is killed (M7c review P3)', async () => {
+  // slow mock occupying the queue so the next two stay queued behind it
+  registerExecutor('mock-slow', () => {
+    const events = new EventEmitter();
+    const timer = setTimeout(() => events.emit('done', { ok: true, text: 'slow done' }), 800);
+    return { events, kill: () => { clearTimeout(timer); events.emit('done', { ok: false, text: 'killed' }); } };
+  });
+  const slow = await post('/api/govern-run', { prompt: 'slow', executor: 'mock-slow' }, { 'x-ui-token': token });
+  const slowId = (await slow.json()).job.id;
+  const queued1 = await post('/api/govern-run', { prompt: 'victim', executor: 'mock' }, { 'x-ui-token': token });
+  const q1 = (await queued1.json()).job;
+  const queued2 = await post('/api/govern-run', { prompt: 'survivor', executor: 'mock' }, { 'x-ui-token': token });
+  const q2 = (await queued2.json()).job;
+
+  // cancel the queued victim → its turn comes and the chain steps over it
+  const c1 = await post('/api/job-cancel', { id: q1.id }, { 'x-ui-token': token });
+  assert.equal(c1.status, 200);
+  // cancel the running slow job → kill fires, terminal status cancelled
+  await until(async () => {
+    const { jobs } = await (await get('/api/jobs')).json();
+    return jobs.find((j) => j.id === slowId)?.status === 'running';
+  });
+  const c2 = await post('/api/job-cancel', { id: slowId }, { 'x-ui-token': token });
+  assert.equal(c2.status, 200);
+
+  const victim = await waitJob(q1.id);
+  assert.equal(victim.status, 'cancelled', 'queued victim skipped, never ran');
+  assert.ok(!victim.result, 'cancelled job has no result');
+  const killed = await waitJob(slowId);
+  assert.equal(killed.status, 'cancelled', 'killed running job ends cancelled');
+  const survivor = await waitJob(q2.id);
+  assert.equal(survivor.status, 'done', 'the queue continues after cancellations');
+  // terminal jobs refuse cancellation
+  const c3 = await post('/api/job-cancel', { id: q2.id }, { 'x-ui-token': token });
+  assert.equal(c3.status, 409);
+});
+
+async function waitJob(id) {
+  let job;
+  await until(async () => {
+    const { jobs } = await (await get('/api/jobs')).json();
+    job = jobs.find((j) => j.id === id);
+    return job && ['done', 'failed', 'cancelled'].includes(job.status);
+  });
+  return job;
+}

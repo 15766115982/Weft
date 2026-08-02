@@ -53,8 +53,21 @@ trace in log.md).
 - The agent executor interface (`startRun(spec) → event stream`, modeled on
   `claude -p --output-format stream-json --verbose`) keeps the LLM backend pluggable;
   the same three-source LLM adapter layer (copilot-proxy GPT / Azure SPN GPT / claude)
-  serves both the executor and the evaluation judge. Headless permission posture decided
-  after the S7 spike.
+  serves both the executor and the evaluation judge. Headless permission posture:
+  **`--dangerously-skip-permissions` (user-ruled 2026-08-02)**, buffered by candidate
+  review + full job logging. Two M7c implementation facts now part of this decision:
+  the prompt is delivered via **stdin** (the claude.cmd `%*` shim mangles multi-line
+  argv), and the default prompt points at the **SKILL.md file path** rather than
+  relying on skill registration — runs follow the canonical workflow in any
+  environment, and non-Claude backends can "read this file and comply" (I3
+  strengthened).
+- **Recorded exposure (M7c review P2-2, hardening planned before M7d)**: under
+  skip-permissions the agent's file tools are NOT confined to the KB — prompt
+  injection via untrusted raw content could write outside it, bypassing both
+  buffers (no candidate review, no wiki trace). Planned mitigation, in cost order:
+  ① `--allowedTools` / `permissions.deny` rules scoping Write/Edit to the KB path
+  (composable with skip-permissions); ② prompt-level confinement (weak, additive
+  only); ③ post-run `git status` diff on git KBs to surface unexpected in-KB changes.
 - Version management must not assume the KB is a git repo: git when available, file-copy
   snapshots under `.kb/ui/snapshots/` plus a "git init recommended" banner otherwise.
 - The M7d wiki human-edit path (edit → demote to candidate → re-review, plus

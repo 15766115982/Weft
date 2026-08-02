@@ -15,6 +15,11 @@
 > ④ headless 权限姿态 = **`--dangerously-skip-permissions`**(缓冲:candidate 评审 +
 > 作业日志双保险;"被拦但 exit 0" 的假成功比放开写更难缠);
 > ⑤ A7 关系图谱**不并入 M7c**,M7c 先做执行器本体,图谱紧随其后单独小里程碑。
+> **裁决记录(2026-08-02,M7c 外部审核后)**:
+> ⑥ **skip-permissions 残余暴露面立项加固**(M7d 前):agent 文件工具不受 cwd 限制,
+> prompt 注入可写 KB 外(绕过 candidate 评审 + wiki 痕迹双保险);加固方向 =
+> --allowedTools/permissions.deny 限定写路径(与 skip-permissions 叠加),详见 ADR-0006;
+> ⑦ D5 引导链接入治理控制台(dashboard CTA + 顶栏 stale 横幅 → #/govern)。
 > 每条标注来源:【用户】= 用户明确表达;【推导】= 从现有系统能力/调研推导,待用户确认。
 
 ## 已明确的边界(全程有效)
