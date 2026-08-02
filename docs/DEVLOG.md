@@ -1,4 +1,4 @@
-# Development Log (as of 2026-08-02, M0-M6 complete + cross-service test layer + M7a/M7b/M7c UI portal + A7 graph)
+# Development Log (as of 2026-08-03, M0-M6 complete + cross-service test layer + M7a-d UI portal + A7 graph)
 
 > Restart entry point after context compaction. Architecture decisions: `CONTEXT.md`;
 > three-party contract: `schema/contract.md` + `schema/governance.md` (§1 language
@@ -7,6 +7,52 @@
 > prerequisites, skill linking, kb.json/PAT/CA configuration, smoke test, troubleshooting.
 > **M7 UI portal: process + design docs in `docs/webui/`** (requirements frozen, option 1
 > no-build SPA selected, ADR-0006, contract §1 UI-portal column, S7 spike report).
+
+## M7d (2026-08-03, 45 UI tests green + 2 real-agent e2e): P2-2 hardening + wiki edit + page history
+
+User rulings ⑧⑨⑩ before start (requirements.zh-CN.md 裁决记录): P2-2 = A 主 C 兜底
+B 顺手;H2 = save demotes to candidate (any status editable, candidate edit = content
+only, originals on git/G6 snapshots);H3 = 甲 (provenance read-only, drift → agent rounds).
+
+- **P2-2 (8-round spike → docs/webui/spike-p2-2.zh-CN.md)**: the spike DISPROVED the
+  original plan — path-scoped rules are dead under skip-permissions (R1/R2/S4),
+  settings/flag allow rules never auto-approve Write in headless (R2/R3), and
+  skip-permissions + deny [Write] is routed around via Bash (T1). The winning
+  posture is **`--permission-mode acceptEdits` + generated allow-list**
+  (`<kb>/.kb/ui/agent-settings.json`): cwd boundary built in (in-KB writes
+  auto-accept, outside auto-deny, nothing hangs), `Bash(node <repo>/**)` for
+  governance scripts (`/**` glob, NOT `:*` — R8: the prefix form breaks on args;
+  S18: backslash invocations don't match — the prompt prescribes forward slashes),
+  read-only git prefixes, `Read(<repo>/**)` keeps SKILL.md reachable. **Ruling ④
+  revised** (skip-permissions → acceptEdits) — the only way to implement the
+  user-approved A direction. C layer: post-run `git status --porcelain` diff flags
+  newly-dirty paths outside {wiki/, log.md, .kb/} in the job log. B layer: prompt
+  states the confinement. Residuals honestly recorded (spike doc §残余).
+- **e2e ×2 (demo KB)**: run 1 (old `:*` rule) — scripts denied, agent adapted by
+  hand-writing a contract-conformant candidate; run 2 (`/**` rule) — `govern.mjs
+  plan --kb .` executed with args, agent verified prior work instead of duplicating;
+  C layer quiet (no out-of-bounds changes).
+- **H wiki edit (contract §1 whitelist ⑤ + matrix rows)**: ui/lib/edit.mjs —
+  snapshot first (ruling ⑨c), body replaced wholesale, frontmatter surgery
+  byte-preserving (status→candidate unless already, review_note, updated_at;
+  locateFrontmatter exported from statusflip), `portal | candidate:manual` log.md
+  entry. **Governance-side amendment**: sweep backfill + assertNoUnloggedFlip now
+  treat `portal | candidate:*` exactly like `govern | candidate:*` (shared
+  isPendingCandidateAction — the M4/M6 caliber lesson applied before it could
+  bite: an unamended sweep would never backfill review flips after a portal edit).
+  Guards: index.md not editable, frontmatter-paste rejected (provenance is
+  governance-owned), 512KB body limit (CJK pages). /api/edit is sync-shaped over
+  the queue (waitFor, like /api/review). browse reader gains 编辑 button →
+  editor (read-only archive card + mono textarea + demote notice).
+- **J7 page history**: /api/history — git `log --follow` (\x1f/\x1e framed),
+  non-git → G6 snapshot listing + "建议 git init" hint (version-management
+  constraint). Fourth ctx tab 历史 in browse.
+- Playwright: editor flow (open → prefill → save → demote note → candidate
+  badges) ✓ history tab ✓ zero JS errors. Demo KB: retry-resilience.md now a
+  manually-edited candidate (queue 4).
+
+**M7d 交付完成。下一:backlog(K 评测 / J9 闭环 / C5 批量 / B5 查询历史)+
+并行欠账真实环境验收。**
 
 ## A7 (2026-08-02, 36 UI tests green): relationship graph + backlinks over shared edges
 

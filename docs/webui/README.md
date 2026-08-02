@@ -7,6 +7,7 @@
 2. ✅ **头脑风暴,捋清用户想要的工作/场景** — 完成(两轮对齐 + 愿景拆解)
 3. ✅ **记录确认的功能清单** — [requirements.zh-CN.md](requirements.zh-CN.md) **已冻结**(2026-08-02);
    里程碑:M7a 只读全套 → M7b 采集控制台 → M7c 治理可视化+执行器 → M7d wiki 编辑+版本管理 → backlog
+   (**M7a-d 全部交付**,2026-08-03)
 4. ✅ **按功能 + 现有服务设计多个架构方案** — [options/](options/README.md),3 个候选 + 公共决策 S1-S11
 5. ✅ **逐个评审方案,敲定** — 方案一(no-build SPA)当选;架构评审 10 条已核对并入设计;
    ADR-0006 + 契约 §1 修订 + CONTEXT 同步完成(2026-08-02);S7 spike 完成(见 spike-s7.zh-CN.md)
@@ -40,8 +41,17 @@
   预热 180 tick 首帧即成图,悬停邻域高亮 + [[引用签]] tooltip,点击导航,候选虚线琥珀/
   主题青瓷/来源空心/index 双环,g r 热键 + 浏览页"在图谱中查看"互链;36 测试全绿,
   Playwright 明暗双主题 + 交互验证零 JS 错误
-- 🔵 **下一里程碑:M7d wiki 编辑**(H2/H3 契约规则未议;**进 M7d 前先落 P2-2 加固:
-  allowedTools/permissions.deny 限定写路径**)
+- ✅ **M7d wiki 编辑 + P2-2 加固 + J7 历史 — 完成**(2026-08-03):裁决 ⑧⑨⑩ 全部落地。
+  **P2-2**(八轮 spike,spike-p2-2.zh-CN.md):skip-permissions 与路径规则互斥 →
+  姿态修订为 **acceptEdits + 生成式 allow-list**(Bash(node repo/**\)、只读 git、
+  Read(repo/**\)),cwd 边界内建、零挂起;C 层跑后 git diff 越界检出;B 层提示词声明;
+  两次真实 e2e 验证。**H**(契约 §1 白名单 ⑤):edit.mjs 快照先行 + 字节保持手术 +
+  降级 candidate + `portal | candidate:manual` 日志;**治理侧修订** sweep 回填与
+  未记录翻转护栏同口径识别 portal 动作;编辑器 UI(溯源只读提示)。**J7**:
+  /api/history(git log --follow / 快照+git init 提示)+ 浏览页历史 tab。
+  45 UI 测试全绿,Playwright 零 JS 错误
+- 🔵 **全部既定里程碑(M7a-d + A7)已交付**。余量:backlog(K 评测 / J9 闭环 /
+  C5 批量 / B5 查询历史);并行欠账:真实环境验收 docs/real-env-test.md
 - ⬜ backlog:K 评测 / J9 闭环 / C5 批量 / B5 查询历史
 - ⬜ 并行欠账:真实环境验收 docs/real-env-test.md(全系统级,与 M7 无关)
 

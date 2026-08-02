@@ -107,3 +107,42 @@ test('edit guards: traversal, empty body, pasted frontmatter, missing page, secu
   assert.equal((await post('/api/edit', { path: 'wiki/topics/ok-page.md', body: 'x' })).status, 403, 'no token');
   assert.equal((await post('/api/edit', { path: 'wiki/topics/ok-page.md', body: 'x' }, { 'x-ui-token': token, origin: 'http://evil.example' })).status, 403, 'forged Origin');
 });
+
+// ---- J7 page history ----
+
+test('history on a non-git KB: G6 snapshots + git-init hint', async () => {
+  // runs after the edit test above, which created one snapshot of ok-page
+  const h = await (await fetch(base + '/api/history?path=wiki/topics/ok-page.md')).json();
+  assert.equal(h.kind, 'snapshots');
+  assert.ok(h.hint.includes('git init'), 'version-management constraint hint');
+  assert.ok(h.entries.length >= 1);
+  assert.ok(h.entries[0].subject.includes('快照'));
+});
+
+test('history on a git KB: git log --follow entries, newest first', async () => {
+  const kb2 = fs.mkdtempSync(path.join(os.tmpdir(), 'kb-portal-j7-'));
+  const { execFileSync } = await import('node:child_process');
+  const git = (...args) => execFileSync('git', ['-C', kb2, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { stdio: 'ignore' });
+  fs.mkdirSync(path.join(kb2, 'wiki', 'topics'), { recursive: true });
+  const page = path.join(kb2, 'wiki', 'topics', 'p.md');
+  fs.writeFileSync(page, buildFrontmatter({ type: 'topic', status: 'approved', title: 'P' }) + '\nv1\n', 'utf8');
+  git('init', '-q');
+  git('add', '.');
+  git('commit', '-q', '-m', 'govern | approved:topic | wiki/topics/p.md | initial');
+  fs.writeFileSync(page, buildFrontmatter({ type: 'topic', status: 'candidate', title: 'P', review_note: 'manual edit via portal @ x' }) + '\nv2\n', 'utf8');
+  git('add', '.');
+  git('commit', '-q', '-m', 'ui: snapshot before wiki-edit (abc123)');
+
+  const s2 = createPortal({ kb: kb2, port: 0 });
+  await new Promise((resolve) => s2.listen(0, '127.0.0.1', resolve));
+  const b2 = `http://127.0.0.1:${s2.address().port}`;
+  const h = await (await fetch(b2 + '/api/history?path=wiki/topics/p.md')).json();
+  s2.close();
+  fs.rmSync(kb2, { recursive: true, force: true });
+
+  assert.equal(h.kind, 'git');
+  assert.equal(h.entries.length, 2);
+  assert.ok(h.entries[0].subject.includes('snapshot before wiki-edit'), 'newest first');
+  assert.ok(h.entries[1].subject.includes('approved:topic'));
+  assert.ok(h.entries.every((e) => e.hash && e.ts));
+});

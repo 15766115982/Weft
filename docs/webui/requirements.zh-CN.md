@@ -32,6 +32,10 @@
 > (规则统一);c) 原文留底:git KB 靠 git,非 git KB 复用 G6 快照;
 > ⑩ **H3 走甲**:溯源字段(source_ref/sources)UI 只读,人工编辑永不动血缘;
 > 编辑造成的内容/溯源漂移交给后续 agent 治理轮发现修复;漂移若成真实痛点再升级。
+> **交付记录(2026-08-03):M7d 完成,既定里程碑(M7a-d)全部交付**——P2-2 加固
+> (姿态修订为 acceptEdits + 生成式 allow-list,八轮 spike)+ H wiki 编辑(契约
+> §1 白名单⑤,降级重审 + portal 日志动作治理侧同口径)+ J7 页面历史(git log
+> --follow / 快照降级)。backlog 待排期:K 评测 / J9 / C5 / B5。
 > **交付记录(2026-08-02):A7 关系图谱完成**——力导向图(≤2k 节点客户端布局,与
 > [[引用签]] 视觉统一);顺手项落地:backlinks 全库扫描消除,改走共享边表
 > (retrieval outlinks + 候选页 UI 补扫)。backlog 中 A7 条目关闭。

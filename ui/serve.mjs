@@ -17,6 +17,7 @@ import { createKbRegistry } from './lib/kb.mjs';
 import { resolveUnder, normalizeWikiRelRead, normalizeRawRel, walkMd } from './lib/paths.mjs';
 import { listWikiPages, rawRefs, health } from './lib/browse.mjs';
 import { buildGraph, backlinks } from './lib/graph.mjs';
+import { pageHistory } from './lib/history.mjs';
 import { runSearch } from './lib/search.mjs';
 import { flipStatus, normalizeWikiRel, parseFrontmatter } from './lib/review.mjs';
 import { createJobCenter } from './lib/jobs.mjs';
@@ -164,6 +165,12 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
         // A7 relationship graph: all wiki pages as nodes, wikilink edges from
         // the retrieval index (approved) + candidate scan (lib/graph.mjs).
         if (url.pathname === '/api/graph') return json(res, 200, buildGraph(kb));
+        // J7 page history: git log --follow, or G6 snapshots + hint on
+        // non-git KBs (version-management constraint).
+        if (url.pathname === '/api/history') {
+          const rel = normalizeWikiRelRead(url.searchParams.get('path') || '');
+          return json(res, 200, pageHistory(kb, rel));
+        }
         if (url.pathname === '/api/rawrefs') {
           // A5: which wiki pages trace to this raw doc (source_ref / sources[])
           const rel = normalizeRawRel(url.searchParams.get('path') || '');

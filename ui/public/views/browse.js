@@ -152,6 +152,26 @@ function backlinksTab(backlinks, rel) {
   return box;
 }
 
+// J7: page evolution timeline (git log --follow / G6 snapshots + hint).
+function historyTab(hist) {
+  const box = el('div', { class: 'history' });
+  if (hist.hint) box.append(el('p', { class: 'dim', style: 'font-size:12px' }, hist.hint));
+  if (!hist.entries.length) {
+    box.append(el('p', { class: 'dim' }, hist.kind === 'git' ? '还没有提交记录 — 页面尚未进入 git 历史。' : '还没有快照记录。'));
+    return box;
+  }
+  for (const e of hist.entries) {
+    const row = el('div', { class: 'history-row' });
+    const when = e.ts ? String(e.ts).slice(0, 16).replace('T', ' ') : '';
+    row.append(el('span', { class: 'mono dim' }, when));
+    const what = el('span', { class: 't' }, e.subject || '');
+    row.append(what);
+    if (e.hash) row.append(el('span', { class: 'mono dim' }, e.hash));
+    box.append(row);
+  }
+  return box;
+}
+
 function tocTab(main) {
   const box = el('div', { class: 'toc' });
   const heads = [...main.querySelectorAll('h2, h3')];
@@ -278,9 +298,10 @@ function impactPreview(refs) {
 // ============================== page renderers ==============================
 
 async function renderPage(content, rel, anchor) {
-  const [page, back] = await Promise.all([
+  const [page, back, hist] = await Promise.all([
     api('/api/page', { path: rel }),
     api('/api/backlinks', { path: rel }).catch(() => ({ pages: [] })),
+    api('/api/history', { path: rel }).catch(() => ({ kind: 'none', entries: [] })),
   ]);
   const reader = el('div', { class: 'reader' });
   reader.append(el('h1', { class: 'doc-title' }, page.fields.title || rel));
@@ -295,6 +316,7 @@ async function renderPage(content, rel, anchor) {
   ctxTabs(ctx, {
     信息: infoTab(page.fields),
     反链: backlinksTab(back.pages, rel),
+    历史: historyTab(hist),
     大纲: tocTab(main),
   });
 
