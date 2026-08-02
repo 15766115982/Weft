@@ -61,15 +61,26 @@ trace in log.md).
   relying on skill registration — runs follow the canonical workflow in any
   environment, and non-Claude backends can "read this file and comply" (I3
   strengthened).
-- **Recorded exposure (M7c review P2-2, hardening planned before M7d)**: under
-  skip-permissions the agent's file tools are NOT confined to the KB — prompt
-  injection via untrusted raw content could write outside it, bypassing both
-  buffers (no candidate review, no wiki trace). Planned mitigation, in cost order:
-  ① `--allowedTools` / `permissions.deny` rules scoping Write/Edit to the KB path
-  (composable with skip-permissions); ② prompt-level confinement (weak, additive
-  only); ③ post-run `git status` diff on git KBs to surface unexpected in-KB changes.
+- **Recorded exposure (M7c review P2-2) — RESOLVED 2026-08-03 (ruling ⑧, eight-round
+  spike in docs/webui/spike-p2-2.zh-CN.md)**: under skip-permissions the agent's file
+  tools were not confined to the KB. The spike proved skip-permissions and path-scoped
+  rules are MUTUALLY EXCLUSIVE (path rules are dead under it), so ruling ④ is revised:
+  the posture is now **`--permission-mode acceptEdits` + a per-deployment generated
+  settings allow-list** (`<kb>/.kb/ui/agent-settings.json`): the cwd boundary is
+  built in (in-KB writes auto-accept, outside writes auto-deny in headless),
+  `Bash(node <repo>/**)` lets governance scripts run with args (`node -e` denied),
+  read-only git prefixes, `Read(<repo>/**)` keeps SKILL.md reachable. Nothing hangs.
+  Layers: **A** = this boundary (tool-enforced); **B** = the default prompt states
+  the confinement and prescribes the forward-slash script form (backslash forms
+  don't match rules); **C** = post-run `git status --porcelain` diff on git KBs
+  flags newly-dirty paths outside {wiki/, log.md, .kb/} in the job log.
+  Residuals (recorded in the spike doc): repo scripts with hostile args (contract
+  says they only write in-KB; C detects), pre-dirty paths unattributable, non-git
+  KBs have A+B only, in-KB malice remains by design (candidate review + job log).
+- The M7d wiki human-edit path (H2/H3) was **user-ruled 2026-08-02**: save =
+  demote to candidate + review_note + re-review (any status editable; editing a
+  candidate changes content only); originals rest on git / G6 copy snapshots;
+  provenance fields (source_ref/sources) stay read-only in the UI — drift
+  between edited content and provenance is the agent governance round's job.
 - Version management must not assume the KB is a git repo: git when available, file-copy
   snapshots under `.kb/ui/snapshots/` plus a "git init recommended" banner otherwise.
-- The M7d wiki human-edit path (edit → demote to candidate → re-review, plus
-  provenance-relinking governance rules) is a separate future contract discussion (H2/H3),
-  not covered by this ADR.

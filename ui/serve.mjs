@@ -186,7 +186,11 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
           // existsSync fallback (M7c review P3): a missing skill file must not
           // leave the default prompt pointing at a phantom path.
           const skillPath = path.resolve(UI_DIR, '..', 'governance', 'skills', 'govern', 'SKILL.md');
-          return json(res, 200, { skillPath: fs.existsSync(skillPath) ? skillPath : null });
+          // repoRoot (forward-slash): the default prompt prescribes the exact
+          // script-invocation form the acceptEdits allow-list matches (S18 of
+          // the P2-2 spike: backslash invocations are denied).
+          const repoRoot = path.resolve(UI_DIR, '..').split(path.sep).join('/');
+          return json(res, 200, { skillPath: fs.existsSync(skillPath) ? skillPath : null, repoRoot });
         }
         if (url.pathname === '/api/diff') {
           // Same as the thin viewer: read-only git show; graceful null baseline

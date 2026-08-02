@@ -83,8 +83,8 @@ export async function render(view) {
   const runPanel = el('div', { class: 'run-panel', hidden: '' });
   let currentRunId = null;
 
-  let skillPath = null;
-  api('/api/govern-context').then((c) => { skillPath = c.skillPath; }).catch(() => {});
+  let skillPath = null, repoRoot = null;
+  api('/api/govern-context').then((c) => { skillPath = c.skillPath; repoRoot = c.repoRoot; }).catch(() => {});
 
   function defaultPrompt() {
     const lines = lastPlan.pending.slice(0, 30).map((p) => `- ${p.raw} (${p.reason})`);
@@ -98,6 +98,10 @@ export async function render(view) {
       'write English source-summary pages for each pending raw via apply-source,',
       'then evaluate topic synthesis (apply-topic) where cross-source themes exist.',
       'Leave every page as candidate — a human reviews and approves. Do not approve or merge anything.',
+      // B layer (P2-2 ruling ⑧): the prompt states the confinement out loud;
+      // the acceptEdits boundary + allow-list enforce it underneath.
+      'Permission confinement is active: create or edit files ONLY inside this KB (your cwd) — writes outside it are denied.',
+      repoRoot ? `Run service scripts exactly as: node ${repoRoot}/<service>/scripts/<name>.mjs (forward slashes; other command forms are denied).` : '',
       lines.length ? `\nPending raws (from plan):\n${lines.join('\n')}` : '',
       '\nWhen done, output one short paragraph summarizing what you created or changed.',
     ].join('\n');
@@ -112,7 +116,7 @@ export async function render(view) {
 
   function buildRunPanel() {
     const head = el('h2');
-    html(head, `${icon('sparkles', 16)} agent 治理运行 <span class="dim">I2 · 执行器:headless claude(skip-permissions,已拍板)· 全程串行入队</span>`);
+    html(head, `${icon('sparkles', 16)} agent 治理运行 <span class="dim">I2 · 执行器:headless claude(acceptEdits + 仓库限定 · P2-2 加固)· 全程串行入队</span>`);
     const helper = el('p', { class: 'dim', style: 'font-size:12px;margin:0 0 6px' },
       '下面是给 agent 的完整指令(已含计划快照与"全部留 candidate"约束),通常不用改。');
     const ta = el('textarea', { rows: '10', class: 'run-prompt' });

@@ -20,6 +20,18 @@
 > prompt 注入可写 KB 外(绕过 candidate 评审 + wiki 痕迹双保险);加固方向 =
 > --allowedTools/permissions.deny 限定写路径(与 skip-permissions 叠加),详见 ADR-0006;
 > ⑦ D5 引导链接入治理控制台(dashboard CTA + 顶栏 stale 横幅 → #/govern)。
+> **裁决记录(2026-08-02,M7d 开工前用户拍板)**:
+> ⑧ **P2-2 加固组合确认**:A 为主(--allowedTools/permissions.deny 把 agent 写路径
+> 限定在 KB 内,工具层强制)+ C 兜底(git KB 时跑后 git status 比对)+ B 顺手
+> (提示词写"只许写 KB 内")。**落地修订(2026-08-03,八轮 spike 实证)**:
+> skip-permissions 与路径规则互斥,裁决④的姿态据此改为 **acceptEdits +
+> 生成式 allow-list**(Bash(node repo/**\)、只读 git 前缀、Read(repo/**\));
+> 详见 spike-p2-2.zh-CN.md 与 ADR-0006;
+> ⑨ **H2 确认**:wiki 人工编辑保存即降级 candidate + review_note 重审;细项——
+> a) 候选页同规则(编辑不触发额外状态变化,只记日志);b) 任何状态的页都可编辑
+> (规则统一);c) 原文留底:git KB 靠 git,非 git KB 复用 G6 快照;
+> ⑩ **H3 走甲**:溯源字段(source_ref/sources)UI 只读,人工编辑永不动血缘;
+> 编辑造成的内容/溯源漂移交给后续 agent 治理轮发现修复;漂移若成真实痛点再升级。
 > **交付记录(2026-08-02):A7 关系图谱完成**——力导向图(≤2k 节点客户端布局,与
 > [[引用签]] 视觉统一);顺手项落地:backlinks 全库扫描消除,改走共享边表
 > (retrieval outlinks + 候选页 UI 补扫)。backlog 中 A7 条目关闭。
@@ -161,8 +173,8 @@ G6 快照、J7 页面历史、C2 的 diff(viewer 已有无-git 降级先例:base
 
 ## 待讨论清单
 
-1. H2 wiki 编辑的合法路径(降级 candidate + 重审)——待用户确认规则
-2. H3 wiki 改动后触发治理规则更新 wiki↔raw 回链——具体规则待讨论
+1. ~~H2 wiki 编辑的合法路径~~ → 裁决⑨(降级 candidate + 重审,细则已确认)【已清】
+2. ~~H3 wiki 改动后回链规则~~ → 裁决⑩(溯源只读,漂移归 agent 治理轮)【已清】
 3. ~~多 KB~~ → J1 切换器;~~删除边界~~ → G4;~~治理观察~~ → I4 流式;~~零碎项~~ → J2-J5(全部要)【已清】
 
 ## 规模预期(用户 2026-08-02 提供)

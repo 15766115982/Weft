@@ -10,6 +10,12 @@
 //           is_error false — exit code is not an error signal).
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const repoFwd = () => REPO_ROOT.split(path.sep).join('/');
 
 const registry = new Map();
 
@@ -34,20 +40,51 @@ export function startRun(name, spec) {
 //  ② spawn 'claude.cmd' directly, no shell ('claude' ENOENTs on Windows);
 //  ③ cwd must be a Windows path (Git-Bash /tmp paths ENOENT) — callers pass
 //    path.resolve'd KB roots, which satisfies this naturally;
-//  ④ permission posture: --dangerously-skip-permissions (user-ruled
-//    2026-08-02; buffered by candidate review + full job logging);
+//  ④ permission posture (P2-2, user-ruled A 为主 2026-08-02; six-round spike
+//    in docs/webui/spike-p2-2.zh-CN.md): **--permission-mode acceptEdits +
+//    generated settings allow-list**, replacing --dangerously-skip-permissions
+//    (ruling ④ revised — path-scoped rules are DEAD under skip-permissions;
+//    acceptEdits has the cwd boundary built in: writes outside cwd need
+//    approval → headless auto-deny, inside auto-accept). allow-list:
+//    Bash(node <repo>/:*) so governance scripts run (node -e is denied),
+//    read-only git prefixes, Read(<repo>/**) so the agent can read SKILL.md.
+//    Residual: repo scripts with hostile args (they write into the KB by
+//    contract) — layers B (prompt) and C (post-run git diff) stand behind.
 //  ⑤ the prompt goes via STDIN, never as an argv slot (M7c e2e finding):
 //    claude.cmd is a batch shim using %*, and cmd.exe treats a literal
 //    newline in the command line as a command terminator — a multi-line
 //    prompt produces ZERO output and no result event (single-line works).
+
+// The per-deployment settings file lives under the KB's derived-artifact dir
+// (write whitelist ④). Regenerated every run — cheap and always in sync.
+export function buildAgentSettings(kbRoot) {
+  const dir = path.join(kbRoot, '.kb', 'ui');
+  fs.mkdirSync(dir, { recursive: true });
+  const p = path.join(dir, 'agent-settings.json');
+  fs.writeFileSync(p, JSON.stringify({ permissions: { allow: [
+    // /** glob, NOT the :* prefix form — spike round 8: Bash(prefix/:*) only
+    // matches the bare command; arguments break the match. The /** glob
+    // covers any repo script with any args. node -e stays denied.
+    `Bash(node ${repoFwd()}/**)`,
+    'Bash(git status:*)', 'Bash(git log:*)', 'Bash(git show:*)', 'Bash(git diff:*)',
+    `Read(${repoFwd()}/**)`,
+  ] } }, null, 2), 'utf8');
+  return p;
+}
+
+export function buildClaudeArgs(kbRoot) {
+  return [
+    '-p',
+    '--output-format', 'stream-json', '--verbose',
+    '--permission-mode', 'acceptEdits',
+    '--settings', buildAgentSettings(kbRoot),
+  ];
+}
+
 function startClaudeRun({ prompt, cwd }) {
   if (!prompt || !String(prompt).trim()) throw new Error('executor run requires a non-empty prompt');
   const events = new EventEmitter();
-  const child = spawn('claude.cmd', [
-    '-p',
-    '--output-format', 'stream-json', '--verbose',
-    '--dangerously-skip-permissions',
-  ], { cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  const child = spawn('claude.cmd', buildClaudeArgs(cwd), { cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
   child.stdin.on('error', () => {}); // EPIPE if the process dies before reading
   child.stdin.write(String(prompt));
   child.stdin.end();
@@ -98,7 +135,9 @@ function startClaudeRun({ prompt, cwd }) {
       return;
     }
     const text = result.result || '';
-    const blocked = /write was blocked|permission to (write|edit)/i.test(text);
+    // Denial phrasings seen across postures: skip-permissions-era blocks, and
+    // acceptEdits auto-denials ("requires approval", "hasn't been granted").
+    const blocked = /write was blocked|permission to (write|edit)|requires approval|not been granted|permission not granted/i.test(text);
     const ok = result.is_error === false && result.subtype === 'success' && !blocked;
     events.emit('done', { ok, text: text || (ok ? '(completed without a summary)' : stderr.slice(-1000)) });
   });
