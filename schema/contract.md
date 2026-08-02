@@ -38,8 +38,8 @@ A knowledge base instance is a directory on disk, itself an independent Git repo
 | Path | Acquisition | Governance | Retrieval | Thin viewer | UI portal |
 |---|---|---|---|---|---|
 | `raw/` | **write** | read | forbidden | read | read + **delete/move only** (see rules) |
-| `wiki/` | forbidden | **write** | read | only frontmatter `status` (candidate → approved / rejected) | same as thin viewer (same flip primitive) |
-| `log.md` | **append** | **append** | read | forbidden | read |
+| `wiki/` | forbidden | **write** | read | only frontmatter `status` (candidate → approved / rejected) | same flip primitive + **human body edits** (demote rule, see ⑤) |
+| `log.md` | **append** | **append** | read | forbidden | **append** (manual-edit entries only) |
 | `.kb/` | only `acquire_runs.jsonl` append | forbidden | **write** | read | only `.kb/ui/` **write**, rest read |
 | `kb.json` | read | read | read | read | read |
 
@@ -56,7 +56,16 @@ Rules:
   first, executed via its per-KB serial write queue; move = new identity — the old
   document becomes an orphan, as with any rename), ③ frontmatter `status` flips via the
   governance statusflip primitive,
-  ④ `.kb/ui/` derived artifacts. Everything else is read-only. Its write operations go
+  ④ `.kb/ui/` derived artifacts,
+  ⑤ **human wiki edits** (M7d, user-ruled 2026-08-02): the portal may rewrite a wiki
+  page's body; every save demotes the page to `candidate` with a `review_note`
+  (`manual edit via portal @ <ts>`; editing a candidate changes content only — no
+  status transition) and appends a `portal | candidate:manual` log.md entry, which the
+  governance sweep's review backfill and the unlogged-flip guard treat exactly like
+  `govern | candidate:*` (pending-review semantics). Provenance fields
+  (`source_ref`/`sources`) are never touched by this path — drift between edited
+  content and provenance is reconciled by later agent governance rounds, not by the
+  editor. Everything else is read-only. Its write operations go
   through a per-KB serial queue; its destructive operations preserve a restorable
   snapshot (git commit when the KB is a repository, file-copy snapshot otherwise);
 - Everything inside `.kb/` can be fully rebuilt from `wiki/` (plus, for

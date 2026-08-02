@@ -22,6 +22,7 @@ import { flipStatus, normalizeWikiRel, parseFrontmatter } from './lib/review.mjs
 import { createJobCenter } from './lib/jobs.mjs';
 import { createWatcher } from './lib/watch.mjs';
 import { governJob, governRunJob } from './lib/govern.mjs';
+import { saveWikiEditJob } from './lib/edit.mjs';
 import { plan } from '../governance/scripts/lib/govern.mjs';
 import {
   UPLOAD_MAX, uploadJob, pullJob, inboxDeleteJob, rawDeleteJob, rawMoveJob,
@@ -51,11 +52,11 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
     res.end(JSON.stringify(obj));
   };
 
-  const readBody = (req) => new Promise((resolveBody, rejectBody) => {
+  const readBody = (req, max = 64 * 1024) => new Promise((resolveBody, rejectBody) => {
     let body = '';
     req.on('data', (c) => {
       body += c;
-      if (body.length > 64 * 1024) { rejectBody(Object.assign(new Error('request body too large (64KB max)'), { code: 413 })); req.destroy(); }
+      if (body.length > max) { rejectBody(Object.assign(new Error(`request body too large (${Math.round(max / 1024)}KB max)`), { code: 413 })); req.destroy(); }
     });
     req.on('end', () => resolveBody(body));
     req.on('error', rejectBody);
@@ -229,6 +230,17 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
           }));
           if (job.status === 'failed') throw new Error(job.error);
           return json(res, 200, { page: rel, status: job.result.to });
+        }
+
+        // M7d H1/H2: human wiki edit (whitelist ⑤). Bigger body limit — pages
+        // run to tens of thousands of chars (CJK ≈ 3 bytes each).
+        if (url.pathname === '/api/edit') {
+          const { path: p, body, kb: kbName } = JSON.parse(await readBody(req, 512 * 1024) || '{}');
+          const kb = registry.resolve(kbName).path;
+          const spec = saveWikiEditJob(kb, { path: p, body }); // factory validates → 400
+          const job = await jobs.waitFor(jobs.enqueue(kb, spec));
+          if (job.status === 'failed') throw new Error(job.error);
+          return json(res, 200, { page: job.result.path, demoted: job.result.demoted });
         }
 
         // E1: upload raw bytes → inbox/ → acquire local (one queued job).

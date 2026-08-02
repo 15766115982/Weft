@@ -11,6 +11,16 @@ function appendLog(kbRoot, actor, action, target, note = '') {
   fs.appendFileSync(path.join(kbRoot, 'log.md'), line, 'utf8');
 }
 
+/** A log action that marks a page as PENDING REVIEW. `govern | candidate:*`
+ * is produced by the governance pipeline; `portal | candidate:*` by the UI
+ * portal's manual-edit path (M7d, contract §1 whitelist ⑤: every portal wiki
+ * edit demotes the page to candidate and logs this action). Both must be
+ * treated identically by the sweep backfill and the unlogged-flip guard —
+ * same pending-review semantics, same reading caliber. */
+function isPendingCandidateAction(action) {
+  return action.startsWith('govern | candidate:') || action.startsWith('portal | candidate:');
+}
+
 function* walk(dir) {
   if (!fs.existsSync(dir)) return;
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -242,7 +252,7 @@ function lastLogAction(kbRoot, pageRel) {
 function assertNoUnloggedFlip(kbRoot, pageRel, currentStatus) {
   if (currentStatus && currentStatus !== 'candidate') {
     const last = lastLogAction(kbRoot, pageRel);
-    if (last && last.startsWith('govern | candidate:')) {
+    if (last && isPendingCandidateAction(last)) {
       throw new Error(`unlogged review flip pending on this page; run sweep first: ${pageRel}`);
     }
   }
@@ -425,7 +435,7 @@ export function sweep(kbRoot) {
   }
   const backfilled = [];
   for (const [page, action] of lastAction) {
-    if (!action.startsWith('govern | candidate:')) continue;
+    if (!isPendingCandidateAction(action)) continue;
     const abs = path.join(kbRoot, page);
     if (!fs.existsSync(abs) || !/^wiki\/(sources|topics)\//.test(page)) continue;
     const status = readStatus(abs);

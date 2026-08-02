@@ -416,3 +416,12 @@ button.danger-solid { background: var(--wine); border-color: var(--wine); color:
 .graph-guard p { max-width: 420px; text-align: center; color: var(--ink-dim); }
 .graph-stage .empty-hint { position: absolute; inset: 0; display: flex; align-items: center;
   justify-content: center; color: var(--ink-dim); font-size: 13.5px; }
+
+/* ---- M7d wiki editor ---- */
+.wiki-editor { width: 100%; margin-top: 12px; padding: 12px 14px; font-family: var(--font-mono);
+  font-size: 13px; line-height: 1.7; border: 1px solid var(--line); border-radius: var(--r-btn);
+  background: var(--paper); color: var(--ink); resize: vertical; }
+.wiki-editor:focus { outline: 2px solid var(--celadon-soft); border-color: var(--celadon); }
+.save-note { padding: 10px 14px; margin: 0 0 14px; border: 1px solid var(--celadon);
+  border-radius: var(--r-btn); background: var(--celadon-soft); font-size: 13px; }
+.save-note a { color: var(--celadon); font-weight: 600; }

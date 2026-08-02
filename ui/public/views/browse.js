@@ -307,8 +307,60 @@ async function renderPage(content, rel, anchor) {
     reader.querySelector('.archive-card').append(btn);
   }
 
+  // M7d H1: human edit — demote-to-candidate on save (ruling ⑨)
+  const editBtn = el('button', { class: 'icon-btn compare-btn', 'data-tt': '人工编辑(保存即降级为候选,重新评审)' });
+  html(editBtn, icon('pencil', 15) + '<span style="font-size:12px;margin-left:4px">编辑</span>');
+  tippy(editBtn, { content: editBtn.dataset.tt, delay: 0 });
+  editBtn.addEventListener('click', () => renderEditor(content, rel, page));
+  reader.querySelector('.archive-card').append(editBtn);
+
   content.append(reader, ctx);
   if (anchor) main.querySelector(`#${CSS.escape(anchorToId(anchor))}`)?.scrollIntoView({ block: 'start' });
+}
+
+// M7d H1/H2 editor: body is editable; frontmatter is shown read-only with the
+// provenance fields called out (ruling ⑩ — drift is the governance round's
+// job, not the editor's). Save = demote to candidate + re-review (ruling ⑨).
+function renderEditor(content, rel, page) {
+  content.textContent = '';
+  const wrap = el('div', { class: 'reader editor' });
+  wrap.append(el('h1', { class: 'doc-title' }, `编辑:${page.fields.title || rel}`));
+  const hint = el('p', { class: 'dim', style: 'font-size:12.5px' },
+    '保存后页面降级为 candidate 并回到评审队列;frontmatter 与溯源字段(source_ref / sources)只读——内容与溯源的漂移由后续治理轮修复。');
+  wrap.append(hint);
+  wrap.append(archiveCard(page.fields, rel));
+
+  const ta = el('textarea', { class: 'wiki-editor', rows: '24', spellcheck: 'false' });
+  ta.value = page.body || '';
+  wrap.append(ta);
+
+  const row = el('div', { style: 'display:flex;gap:10px;align-items:center;margin-top:10px' });
+  const save = el('button', { class: 'primary sm' }, '保存(降级为候选)');
+  const cancel = el('button', { class: 'sm' }, '放弃');
+  const note = el('span', { class: 'dim', style: 'font-size:12.5px' });
+  row.append(save, cancel, note);
+  wrap.append(row);
+  content.append(wrap);
+  ta.focus();
+
+  cancel.addEventListener('click', () => { content.textContent = ''; renderPage(content, rel); });
+  save.addEventListener('click', async () => {
+    save.disabled = true;
+    note.textContent = '保存中(快照 → 写入 → 降级 + 日志)…';
+    try {
+      const r = await apiPost('/api/edit', { path: rel, body: ta.value });
+      content.textContent = '';
+      await renderPage(content, rel);
+      const done = el('p', { class: 'save-note' });
+      html(done, r.demoted
+        ? `已保存 — 页面已降级为 <b>candidate</b>,去 <a href="#/queue">评审队列</a> 批准。`
+        : `已保存 — 页面本就是候选,仍在 <a href="#/queue">评审队列</a> 中。`);
+      content.querySelector('.reader').prepend(done);
+    } catch (err) {
+      save.disabled = false;
+      note.textContent = `保存失败:${err.message}`;
+    }
+  });
 }
 
 // A5 split view: wiki left, raw right, exit returns to the normal reader.

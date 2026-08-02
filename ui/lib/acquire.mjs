@@ -111,7 +111,9 @@ export function rawMoveJob(kb, { from, to }) {
 // destructive op. git commit when the KB is a repository (pathspec-scoped so
 // unrelated worktree changes are NOT swept in); file-copy snapshot under
 // .kb/ui/snapshots/ otherwise (whitelist ④).
-function snapshot(kb, rels, job) {
+// Also reused by the M7d wiki-edit path (ruling ⑨c: original rests on
+// git / G6 copy snapshots).
+export function snapshot(kb, rels, job) {
   if (isGitRepo(kb)) {
     // -c user.*: snapshot commits must not depend on the machine's git config,
     // and a fixed machine author makes automated snapshots greppable in git log.

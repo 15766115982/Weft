@@ -8,7 +8,8 @@ import fs from 'node:fs';
 // Locate the frontmatter block without a BOM escape literal: charCodeAt keeps the
 // BOM check explicit. Returns { blockStart, block } where block is the text
 // between the opening and closing --- lines, or null when absent.
-function locateFrontmatter(text) {
+// Exported for the UI portal's M7d edit path (same byte-preserving surgery).
+export function locateFrontmatter(text) {
   const start = text.charCodeAt(0) === 0xFEFF ? 1 : 0;
   const open = text.slice(start).match(/^---\r?\n/);
   if (!open) return null;
