@@ -124,16 +124,91 @@ export async function render(view, params) {
   queue = queueData.pages;
 
   const wrap = el('div', { class: 'browse' });
-  const list = el('nav', { class: 'tree', style: 'width:220px' });
+  const list = el('nav', { class: 'tree', style: 'width:260px' });
   const head = el('div', { class: 'dim', style: 'padding:6px 4px;font-size:11px;text-transform:uppercase;letter-spacing:.08em' },
     `评审队列 · ${queue.length}`);
   list.append(head);
+
+  // ---- C5 batch review (ruling 2026-08-03: checkboxes + select-all; approve
+  // direct — recoverable via edit-demote; reject armed two-click + archive
+  // consequence copy, merge-topic discipline) ----
+  const selected = new Set();
+  const batchBar = el('div', { class: 'batchbar', hidden: '' });
+  const selNote = el('span', { class: 'dim', style: 'font-size:12px' });
+  const approveBtn = el('button', { class: 'sm approve' });
+  const rejectBtn = el('button', { class: 'sm reject' });
+  const clearBtn = el('button', { class: 'sm' }, '清空');
+  const resultNote = el('div', { style: 'font-size:12.5px;padding:2px 4px' });
+  list.append(batchBar, resultNote);
+
+  function syncBatchBar() {
+    batchBar.hidden = selected.size === 0;
+    selNote.textContent = `已选 ${selected.size} 篇`;
+    html(approveBtn, `✓ 批量批准 (${selected.size})`);
+    if (!rejectBtn.dataset.armed) html(rejectBtn, `✗ 批量拒绝 (${selected.size})`);
+    for (const cb of list.querySelectorAll('input[data-sel]')) cb.checked = selected.has(cb.dataset.sel);
+    allBox.checked = selected.size > 0 && selected.size === queue.length;
+  }
+
+  let rejectDisarm = 0;
+  async function runBatch(action) {
+    approveBtn.disabled = rejectBtn.disabled = true;
+    const paths = [...selected];
+    try {
+      const { results } = await apiPost('/api/review-batch', { paths, action });
+      const failed = results.filter((r) => !r.ok);
+      const verb = action === 'approve' ? '批准' : '拒绝';
+      resultNote.textContent = `批量${verb}:${results.length - failed.length} 成功` + (failed.length ? ` / ${failed.length} 失败` : '');
+      for (const f of failed.slice(0, 3)) {
+        resultNote.append(el('div', { class: 'dim', style: 'font-size:11.5px' }, `${f.path}: ${f.error}`));
+      }
+      window.dispatchEvent(new CustomEvent('ui:refresh-header'));
+      setTimeout(() => window.dispatchEvent(new CustomEvent('ui:remount')), 1500);
+    } catch (err) {
+      resultNote.textContent = `批量${action === 'approve' ? '批准' : '拒绝'}失败:${err.message}`;
+      approveBtn.disabled = rejectBtn.disabled = false;
+    }
+  }
+  approveBtn.addEventListener('click', () => runBatch('approve'));
+  rejectBtn.addEventListener('click', () => {
+    if (!rejectBtn.dataset.armed) {
+      rejectBtn.dataset.armed = '1';
+      rejectBtn.textContent = `确认拒绝 ${selected.size} 篇?sweep 后归档,找回是手工活`;
+      rejectBtn.classList.add('danger-solid');
+      clearTimeout(rejectDisarm);
+      rejectDisarm = setTimeout(() => { delete rejectBtn.dataset.armed; rejectBtn.classList.remove('danger-solid'); syncBatchBar(); }, 5000);
+      return;
+    }
+    delete rejectBtn.dataset.armed;
+    rejectBtn.classList.remove('danger-solid');
+    runBatch('reject');
+  });
+  clearBtn.addEventListener('click', () => { selected.clear(); syncBatchBar(); });
+  batchBar.append(selNote, approveBtn, rejectBtn, clearBtn);
+
+  const allRow = el('label', { class: 'batch-all' });
+  const allBox = el('input', { type: 'checkbox' });
+  allBox.addEventListener('change', () => {
+    selected.clear();
+    if (allBox.checked) for (const p of queue) selected.add(p.path);
+    syncBatchBar();
+  });
+  allRow.append(allBox, el('span', { style: 'font-size:12px' }, ' 全选'));
+  list.append(allRow);
+
   for (const p of queue) {
+    const row = el('div', { class: 'batch-row' });
+    const cb = el('input', { type: 'checkbox', 'data-sel': p.path });
+    cb.addEventListener('change', () => {
+      if (cb.checked) selected.add(p.path); else selected.delete(p.path);
+      syncBatchBar();
+    });
     const a = el('a', { href: `#/queue?path=${encodeURIComponent(p.path)}`,
       class: p.path === params.get('path') ? 'current' : '' });
     const t = el('span', { class: 't' }, p.title);
     a.append(t);
-    list.append(a);
+    row.append(cb, a);
+    list.append(row);
   }
   if (!queue.length) list.append(el('p', { class: 'dim', style: 'padding:4px' }, '队列已清空 🎉'));
 

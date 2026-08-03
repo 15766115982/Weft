@@ -50,10 +50,11 @@
   未记录翻转护栏同口径识别 portal 动作;编辑器 UI(溯源只读提示)。**J7**:
   /api/history(git log --follow / 快照+git init 提示)+ 浏览页历史 tab。
   45 UI 测试全绿,Playwright 零 JS 错误
-- 🔵 **全部既定里程碑(M7a-d + A7)已交付**。余量:backlog(K 评测 / J9 闭环 /
-  C5 批量 / B5 查询历史);并行欠账:真实环境验收 docs/real-env-test.md
-- ⬜ backlog:K 评测 / J9 闭环 / C5 批量 / B5 查询历史
-- ⬜ 并行欠账:真实环境验收 docs/real-env-test.md(全系统级,与 M7 无关)
+- ✅ **C5 批量评审(backlog 第一项)— 完成**(2026-08-03):用户拍板(复选框+全选 /
+  批准直接 / 拒绝 armed 二次确认带归档后果文案);/api/review-batch 单队列作业逐页
+  容错(409/遍历/缺失不中断批次);队列页批量操作条;49 测试全绿,Playwright 验证
+- 🔵 **余量**:backlog(K 评测(LLM backend registry)→ J9 → B5)
+- ⬜ 并行欠账:真实环境验收 docs/real-env-test.md(全系统级,排最前,需真实 PAT/服务器)
 
 硬约束(全程有效):现有三服务(acquisition/governance/retrieval)零改动、零反向依赖;
 前端可依赖现有服务;内网离线,依赖越少越好;继承 viewer 三条红线(按需启动 /

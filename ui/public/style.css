@@ -436,3 +436,14 @@ button.danger-solid { background: var(--wine); border-color: var(--wine); color:
 .conflict-card { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--amber);
   border-radius: var(--r-btn); background: color-mix(in srgb, var(--amber) 8%, transparent); }
 .conflict-card p { margin: 0 0 10px; font-size: 13px; }
+
+/* ---- C5 batch review ---- */
+.batchbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 4px;
+  margin: 0 0 6px; border: 1px solid var(--celadon); border-radius: var(--r-btn);
+  background: var(--celadon-soft); }
+.batchbar button { margin: 0; padding: 3px 10px; font-size: 12px; }
+.batch-all { display: flex; align-items: center; gap: 6px; padding: 2px 4px 6px;
+  color: var(--ink-dim); cursor: pointer; }
+.batch-all input, .batch-row input { width: auto; margin: 0; }
+.batch-row { display: flex; align-items: center; gap: 7px; padding-right: 4px; }
+.batch-row a { flex: 1; min-width: 0; }

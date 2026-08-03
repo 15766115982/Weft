@@ -8,6 +8,26 @@
 > **M7 UI portal: process + design docs in `docs/webui/`** (requirements frozen, option 1
 > no-build SPA selected, ADR-0006, contract §1 UI-portal column, S7 spike report).
 
+## C5 (2026-08-03, 49 UI tests green): batch review — first backlog item
+
+User ruling 2026-08-03 (AskUserQuestion, requirements 排期记录 C5 "需详细讨论" 的落地):
+checkboxes + select-all;approve DIRECT (recoverable via M7d edit-demote);reject =
+armed two-click + archive consequence copy (merge-topic discipline).Final-review
+guidance adopted:approve/reject treated as different cost classes.
+
+- **/api/review-batch**: one queued job (S10), per-page statusflip with per-page
+  fault isolation — a 409-lost page (or traversal, or missing page) is recorded in
+  that page's result slot and never aborts the batch; the job itself only fails on
+  wholesale errors. action enum + non-empty ≤200 array validation; sync-shaped
+  response ({action, results[]}) like /api/review.
+- **queue.js**: checkbox per item + 全选;batch bar appears on selection
+  (已选 N · ✓批量批准 · ✗批量拒绝 · 清空);reject arms into danger-solid with
+  "确认拒绝 N 篇?sweep 后归档,找回是手工活" (5s disarm);result note with the
+  first 3 per-page failures, then ui:refresh-header + ui:remount (1.5s).
+- Tests: batch approve, mixed batch (409-lost + traversal + missing all isolated),
+  validation + security. Playwright: 5 candidates → select 2 → bar → armed copy →
+  direct approve → queue 5→3, zero JS errors (demo KB: 2 verified pages approved).
+
 ## M7 final-review-fix round (2026-08-03, 46 UI tests green): final review — 1 P2 confirmed, P3 batch, 1 misjudgment
 
 - **① H4/H5 跟踪漏洞(确认,最重要)**:块 H 的 H4(local 内容写回 inbox 重新采集)

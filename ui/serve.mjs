@@ -243,6 +243,38 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
           return json(res, 200, { page: rel, status: job.result.to });
         }
 
+        // C5 batch review (ruling 2026-08-03): one queued job, per-page flips,
+        // per-page fault isolation — a 409-lost page never aborts the batch.
+        if (url.pathname === '/api/review-batch') {
+          const { paths, action, kb: kbName } = JSON.parse(await readBody(req) || '{}');
+          if (action !== 'approve' && action !== 'reject') {
+            return json(res, 400, { error: `action must be approve|reject: ${action}` });
+          }
+          if (!Array.isArray(paths) || !paths.length || paths.length > 200) {
+            return json(res, 400, { error: `paths must be a non-empty array (≤200): ${JSON.stringify(paths)?.slice(0, 80)}` });
+          }
+          const kb = registry.resolve(kbName).path;
+          const to = action === 'approve' ? 'approved' : 'rejected';
+          const job = await jobs.waitFor(jobs.enqueue(kb, {
+            type: 'review-batch', label: `${action} ×${paths.length}`,
+            run: async () => {
+              const results = [];
+              for (const p of paths) {
+                try {
+                  const rel = normalizeWikiRel(p);
+                  flipStatus(resolveUnder(kb, rel, 'wiki'), 'candidate', to);
+                  results.push({ path: rel, ok: true });
+                } catch (err) {
+                  results.push({ path: String(p), ok: false, error: err.message });
+                }
+              }
+              return { action, results };
+            },
+          }));
+          if (job.status === 'failed') throw new Error(job.error);
+          return json(res, 200, job.result);
+        }
+
         // M7d H1/H2: human wiki edit (whitelist ⑤). Bigger body limit — pages
         // run to tens of thousands of chars (CJK ≈ 3 bytes each).
         if (url.pathname === '/api/edit') {
