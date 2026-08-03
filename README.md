@@ -6,7 +6,8 @@ A self-governing knowledge base system for Claude Code: three fully decoupled se
 search over approved pages) — distributed as Claude Code skills + Node.js scripts.
 No Python, no always-on services, no web platform.
 
-- **安装配置教程（中文）**: [docs/installation.zh-CN.md](docs/installation.zh-CN.md)
+- **完整安装上手指南(中文,含 KB Portal)**: [docs/guide.zh-CN.md](docs/guide.zh-CN.md)
+- **安装配置教程(中文,服务层)**: [docs/installation.zh-CN.md](docs/installation.zh-CN.md)
 - **Installation & configuration (English)**: [docs/installation.md](docs/installation.md)
 - Architecture & decisions: [CONTEXT.md](CONTEXT.md) · three-party contract:
   [schema/contract.md](schema/contract.md) · dev log: [docs/DEVLOG.md](docs/DEVLOG.md)

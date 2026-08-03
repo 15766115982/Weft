@@ -3,8 +3,10 @@
 > Restart entry point after context compaction. Architecture decisions: `CONTEXT.md`;
 > three-party contract: `schema/contract.md` + `schema/governance.md` (§1 language
 > convention: wiki all-English, raw keeps source language); six ADRs in `docs/adr/`.
-> **New-deployment entry: `docs/installation.md` (+ `installation.zh-CN.md` 中文版)** —
-> prerequisites, skill linking, kb.json/PAT/CA configuration, smoke test, troubleshooting.
+> **New-deployment entry: `docs/guide.zh-CN.md`(完整指南,含 portal + Claude Code
+> 委托安装提示词,2026-08-03)**;纯服务层参照:`docs/installation.md`
+> (+ `installation.zh-CN.md` 中文版) — prerequisites, skill linking, kb.json/PAT/CA
+> configuration, smoke test, troubleshooting.
 > **M7 UI portal: process + design docs in `docs/webui/`** (requirements frozen, option 1
 > no-build SPA selected, ADR-0006, contract §1 UI-portal column, S7 spike report).
 
