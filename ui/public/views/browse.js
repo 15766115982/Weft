@@ -108,14 +108,24 @@ function buildTreeFrame(wrap, { onSegment, onRefresh }) {
 
 // ============================== context panel ==============================
 
+// tabs values are nodes, or { lazy: () => node|Promise<node> } for expensive
+// tabs (final-review P3: J7 history must not spawn git log for a tab that is
+// never opened) — built on first activation.
 function ctxTabs(panel, tabs) {
   const bar = el('div', { class: 'tabs' });
   const body = el('div');
   panel.append(bar, body);
-  const activate = (name) => {
+  const activate = async (name) => {
     for (const b of bar.children) b.classList.toggle('active', b.dataset.tab === name);
     body.textContent = '';
-    body.append(tabs[name]);
+    let t = tabs[name];
+    if (t && typeof t.lazy === 'function') {
+      body.append(el('p', { class: 'dim', style: 'font-size:12.5px' }, '加载中…'));
+      t = tabs[name] = await t.lazy(); // built once — cached as a plain node
+      if (!bar.querySelector(`[data-tab="${name}"]`)?.classList.contains('active')) return; // switched away mid-load
+      body.textContent = '';
+    }
+    body.append(t);
   };
   for (const name of Object.keys(tabs)) {
     const b = el('button', { 'data-tab': name }, name);
@@ -298,10 +308,9 @@ function impactPreview(refs) {
 // ============================== page renderers ==============================
 
 async function renderPage(content, rel, anchor) {
-  const [page, back, hist] = await Promise.all([
+  const [page, back] = await Promise.all([
     api('/api/page', { path: rel }),
     api('/api/backlinks', { path: rel }).catch(() => ({ pages: [] })),
-    api('/api/history', { path: rel }).catch(() => ({ kind: 'none', entries: [] })),
   ]);
   const reader = el('div', { class: 'reader' });
   reader.append(el('h1', { class: 'doc-title' }, page.fields.title || rel));
@@ -316,7 +325,8 @@ async function renderPage(content, rel, anchor) {
   ctxTabs(ctx, {
     信息: infoTab(page.fields),
     反链: backlinksTab(back.pages, rel),
-    历史: historyTab(hist),
+    // J7 lazy (final-review P3): git log spawns only if the tab is opened
+    历史: { lazy: async () => historyTab(await api('/api/history', { path: rel }).catch(() => ({ kind: 'none', entries: [] }))) },
     大纲: tocTab(main),
   });
 
@@ -343,12 +353,14 @@ async function renderPage(content, rel, anchor) {
 // M7d H1/H2 editor: body is editable; frontmatter is shown read-only with the
 // provenance fields called out (ruling ⑩ — drift is the governance round's
 // job, not the editor's). Save = demote to candidate + re-review (ruling ⑨).
+// Optimistic lock (final-review P2): the editor carries the page's hash at
+// open; a 409 means the page changed underneath — reload or force-overwrite.
 function renderEditor(content, rel, page) {
   content.textContent = '';
   const wrap = el('div', { class: 'reader editor' });
   wrap.append(el('h1', { class: 'doc-title' }, `编辑:${page.fields.title || rel}`));
   const hint = el('p', { class: 'dim', style: 'font-size:12.5px' },
-    '保存后页面降级为 candidate 并回到评审队列;frontmatter 与溯源字段(source_ref / sources)只读——内容与溯源的漂移由后续治理轮修复。');
+    '保存后页面降级为 candidate 并回到评审队列(重新批准前将从检索结果中暂时消失);frontmatter 与溯源字段(source_ref / sources)只读——内容与溯源的漂移由后续治理轮修复。');
   wrap.append(hint);
   wrap.append(archiveCard(page.fields, rel));
 
@@ -366,23 +378,50 @@ function renderEditor(content, rel, page) {
   ta.focus();
 
   cancel.addEventListener('click', () => { content.textContent = ''; renderPage(content, rel); });
-  save.addEventListener('click', async () => {
+
+  async function doSave(baseHash) {
     save.disabled = true;
     note.textContent = '保存中(快照 → 写入 → 降级 + 日志)…';
     try {
-      const r = await apiPost('/api/edit', { path: rel, body: ta.value });
+      const r = await apiPost('/api/edit', { path: rel, body: ta.value, base_hash: baseHash });
       content.textContent = '';
       await renderPage(content, rel);
       const done = el('p', { class: 'save-note' });
-      html(done, r.demoted
+      html(done, (r.demoted
         ? `已保存 — 页面已降级为 <b>candidate</b>,去 <a href="#/queue">评审队列</a> 批准。`
-        : `已保存 — 页面本就是候选,仍在 <a href="#/queue">评审队列</a> 中。`);
+        : `已保存 — 页面本就是候选,仍在 <a href="#/queue">评审队列</a> 中。`)
+        + ' <span class="dim">重新批准前,本页将从检索结果中暂时消失。</span>');
       content.querySelector('.reader').prepend(done);
     } catch (err) {
       save.disabled = false;
+      if (/^edit conflict:/.test(err.message)) { showConflict(); return; }
       note.textContent = `保存失败:${err.message}`;
     }
-  });
+  }
+
+  // 409 card (final-review P2): the page changed while the editor was open.
+  function showConflict() {
+    note.textContent = '';
+    const card = el('div', { class: 'conflict-card' });
+    card.append(el('p', {}, '保存被拒绝:这个页面在编辑期间被外部改动过(agent 治理轮或另一次保存)。你的编辑还在文本框里。'));
+    const reload = el('button', { class: 'sm danger' }, '放弃我的修改,查看最新');
+    const force = el('button', { class: 'sm' }, '以我为准,强制覆盖');
+    const cNote = el('span', { class: 'dim', style: 'font-size:12.5px' });
+    reload.addEventListener('click', () => { content.textContent = ''; renderPage(content, rel); });
+    force.addEventListener('click', async () => {
+      cNote.textContent = '取最新版本号…';
+      const fresh = await api('/api/page', { path: rel }); // re-base, then one locked retry
+      card.remove();
+      await doSave(fresh.hash);
+    });
+    const btnRow = el('div', { style: 'display:flex;gap:10px;align-items:center' });
+    btnRow.append(reload, force, cNote);
+    card.append(btnRow);
+    row.after(card);
+    save.disabled = false;
+  }
+
+  save.addEventListener('click', () => doSave(page.hash));
 }
 
 // A5 split view: wiki left, raw right, exit returns to the normal reader.
@@ -436,6 +475,14 @@ async function renderRaw(content, rel) {
   html(back, `<a href="#/browse">← 返回浏览</a>`);
   reader.append(back, el('h1', { class: 'doc-title' }, `raw 证据:${rel.split('/').pop()}`));
   reader.append(archiveCard(doc.fields, rel));
+  // H4/H5 (final-review ①): how to CHANGE this content, per source system.
+  // raw is immutable by contract — local docs flow through inbox re-upload,
+  // remote systems stay read-only with a pointer back to the source.
+  const src = String(doc.fields.source || rel.split('/')[1] || '');
+  const hintText = src === 'local'
+    ? '修改此文档:把同名文件重新上传到 inbox 即会重新采集更新(raw 不可直接改,版本由内容哈希衔接)。'
+    : `此内容来自 ${src || '外部源系统'},只读 — 请在源系统中修改,然后到采集控制台重新拉取。`;
+  reader.append(el('p', { class: 'dim', style: 'font-size:12.5px;margin:4px 0 10px' }, hintText));
   const main = el('div', { class: 'md' });
   html(main, renderMarkdown(doc.body));
   reader.append(main);

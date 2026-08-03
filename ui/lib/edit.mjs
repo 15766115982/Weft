@@ -7,6 +7,7 @@
 // `govern | candidate:*`). Provenance fields are never touched (ruling ⑩).
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { resolveUnder } from './paths.mjs';
 import { normalizeWikiRel } from './review.mjs';
 import { locateFrontmatter } from '../../governance/scripts/lib/statusflip.mjs';
@@ -20,7 +21,7 @@ function setField(block, eol, key, value) {
   return `${block}${eol}${key}: ${value}`;
 }
 
-export function saveWikiEditJob(kb, { path: rel, body }) {
+export function saveWikiEditJob(kb, { path: rel, body, baseHash }) {
   rel = normalizeWikiRel(rel); // wiki/sources|topics only — index.md stays non-editable
   if (typeof body !== 'string' || !body.trim()) throw new Error('page body must be non-empty');
   // A pasted frontmatter block would silently corrupt the page's identity —
@@ -35,8 +36,19 @@ export function saveWikiEditJob(kb, { path: rel, body }) {
       const abs = resolveUnder(kb, rel, 'wiki');
       if (!fs.existsSync(abs)) throw new Error(`page does not exist: ${rel}`);
 
-      const snap = snapshot(kb, [rel], job);
+      // Optimistic lock (final-review P2): the editor opened a specific file
+      // version; if it changed underneath (agent round, another save), refuse
+      // loudly — same 409 discipline as the review flip. The G6 snapshot below
+      // keeps even an accepted overwrite recoverable.
       const text = fs.readFileSync(abs, 'utf8');
+      if (baseHash) {
+        const cur = crypto.createHash('sha256').update(text, 'utf8').digest('hex');
+        if (cur !== baseHash) {
+          throw new Error(`edit conflict: ${rel} changed since the editor was opened — reload the latest version or force-overwrite`);
+        }
+      }
+
+      const snap = snapshot(kb, [rel], job);
       const loc = locateFrontmatter(text);
       if (!loc) throw new Error(`page has no frontmatter: ${rel}`);
 
@@ -45,10 +57,15 @@ export function saveWikiEditJob(kb, { path: rel, body }) {
       const statusMatch = loc.block.match(/(?:^|\r?\n)status:[ \t]*([^\r\n]*)/);
       const was = statusMatch ? statusMatch[1].trim() : '';
       const demoted = was !== 'candidate';
+      const noteMatch = loc.block.match(/(?:^|\r?\n)review_note:[ \t]*([^\r\n]*)/);
+      const prevNote = noteMatch ? noteMatch[1].trim() : '';
 
       let block = loc.block;
       if (demoted) block = setField(block, eol, 'status', 'candidate');
-      block = setField(block, eol, 'review_note', `manual edit via portal @ ${iso}`);
+      // preserve the previous note (agent's governance context must not be
+      // silently dropped by a manual edit — final-review P3)
+      const note = `manual edit via portal @ ${iso}` + (prevNote ? `; prev: ${prevNote.slice(0, 120)}` : '');
+      block = setField(block, eol, 'review_note', note);
       block = setField(block, eol, 'updated_at', iso);
 
       // head + new block + the newline+closing fence the locator left behind,

@@ -43,7 +43,9 @@ before(async () => {
 after(() => { server.close(); fs.rmSync(kb, { recursive: true, force: true }); });
 
 test('graph: every wiki page is a node, index.md included and flagged', async () => {
-  const g = await (await fetch(base + '/api/graph')).json();
+  const res = await fetch(base + '/api/graph');
+  assert.equal(res.status, 200, `graph must not error (native module healthy?): ${await res.clone().text().catch(() => '')}`);
+  const g = await res.json();
   const paths = g.nodes.map((n) => n.path).sort();
   assert.deepEqual(paths, ['wiki/index.md', 'wiki/sources/local-a1.md', 'wiki/topics/cand.md', 'wiki/topics/hub.md']);
   assert.equal(g.nodes.find((n) => n.isIndex)?.path, 'wiki/index.md');
@@ -51,7 +53,9 @@ test('graph: every wiki page is a node, index.md included and flagged', async ()
 });
 
 test('graph edges: approved via index, candidate via scan, unresolved dropped', async () => {
-  const { edges } = await (await fetch(base + '/api/graph')).json();
+  const res = await fetch(base + '/api/graph');
+  assert.equal(res.status, 200);
+  const { edges } = await res.json();
   const pairs = edges.map((e) => `${e.from} → ${e.to}`).sort();
   assert.ok(pairs.includes('wiki/sources/local-a1.md → wiki/topics/hub.md'), 'approved outlink from retrieval index');
   assert.ok(pairs.includes('wiki/topics/cand.md → wiki/topics/hub.md'), 'candidate edge from UI scan (pathed target)');
@@ -60,10 +64,14 @@ test('graph edges: approved via index, candidate via scan, unresolved dropped', 
 });
 
 test('backlinks over the shared edge list keep the old shape and caliber', async () => {
-  const { pages } = await (await fetch(base + '/api/backlinks?path=wiki/topics/hub.md')).json();
+  const res = await fetch(base + '/api/backlinks?path=wiki/topics/hub.md');
+  assert.equal(res.status, 200);
+  const { pages } = await res.json();
   assert.deepEqual(pages.map((p) => p.path), ['wiki/index.md', 'wiki/sources/local-a1.md', 'wiki/topics/cand.md']);
   assert.ok(pages.every((p) => p.title), 'title carried through');
-  const none = await (await fetch(base + '/api/backlinks?path=wiki/topics/cand.md')).json();
+  const r2 = await fetch(base + '/api/backlinks?path=wiki/topics/cand.md');
+  assert.equal(r2.status, 200);
+  const none = await r2.json();
   assert.deepEqual(none.pages, [], 'nobody links the candidate');
 });
 

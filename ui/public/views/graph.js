@@ -25,9 +25,13 @@ export async function render(view, params) {
   const relayBtn = el('button', { class: 'icon-btn', title: '重新布局' });
   html(relayBtn, icon('history', 15));
   const stats = el('span', { class: 'dim graph-stats' });
+  // edge-list provenance (final-review ③): edges mirror the retrieval index
+  // and freeze until a page is re-indexed — say so before someone asks why a
+  // fresh link is missing while dangling_links (live-scanned) disagrees.
+  const lag = el('span', { class: 'dim', style: 'font-size:11px', title: '边取自检索索引,页面重建索引前是冻结的:指向新建页面的边会迟到,plan 的悬空链接(实时扫描)可能已经算它有效。治理台 rebuild-index 可强制重建。' }, '边可能滞后');
   const legend = el('span', { class: 'graph-legend dim' });
   html(legend, '<span class="lg-topic">●</span> 主题页 <span class="lg-source">○</span> 来源页 <span class="lg-cand">◌</span> 候选 <span class="lg-index">◎</span> 索引');
-  const bar = el('div', { class: 'graph-bar' }, focusInput, candBtn, isoBtn, relayBtn, legend, stats);
+  const bar = el('div', { class: 'graph-bar' }, focusInput, candBtn, isoBtn, relayBtn, legend, lag, stats);
 
   const stage = el('div', { class: 'graph-stage' });
   const canvas = el('canvas');

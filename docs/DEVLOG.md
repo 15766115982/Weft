@@ -8,6 +8,37 @@
 > **M7 UI portal: process + design docs in `docs/webui/`** (requirements frozen, option 1
 > no-build SPA selected, ADR-0006, contract §1 UI-portal column, S7 spike report).
 
+## M7 final-review-fix round (2026-08-03, 46 UI tests green): final review — 1 P2 confirmed, P3 batch, 1 misjudgment
+
+- **① H4/H5 跟踪漏洞(确认,最重要)**:块 H 的 H4(local 内容写回 inbox 重新采集)
+  / H5(Jira/Confluence 只读引导)从未交付也无裁决记录,而交付记录写着"全部交付"。
+  处理 = 轻形态落地 + 需求文档留痕:raw 页面按来源显示修改路径提示(local →
+  "同名文件重新上传 inbox 即重新采集"(内容哈希衔接,能力本已存在,缺的是引导);
+  非 local → "请在源系统修改后重新拉取")。需求文档补交付记录。
+- **P2 编辑无乐观锁(确认)**:评审 flip 有 409 而编辑没有——编辑器打开期间被
+  agent 治理轮/另一次保存改动会静默覆盖。修:/api/page 带内容 sha256;编辑保存
+  带 base_hash,服务端队列内比对不一致 → 409;前端冲突卡(放弃查看最新 /
+  以我为准强制覆盖——强制 = 取新 hash 重放一次,快照仍兜底)。
+- **P3 批次(全部确认)**:① 保存提示与编辑器首行补"重新批准前将从检索结果中
+  暂时消失"(裁决⑨的隐性副作用);② review_note 保留前值(`; prev: <旧备注>`,
+  agent 治理备注不再被覆盖丢失);③ J7 历史改 tab 激活懒加载(ctxTabs 支持
+  lazy 值,不再每次翻页 spawn git log);④ 图谱工具栏加"边可能滞后"说明(边表
+  冻结语义 vs dangling 实时扫描的口径差异,扫描③);⑤ 新测试补"先断言状态码"
+  纪律(M7a 确立的模式在新文件回潮)。
+- **误判 1 条**:报告称 merge-topic 确认"仍未补"——实际 M7c 修复轮已交付,形态是
+  两次点击 armed 确认(govern.js:195-209,注释在案),不是模态;纪律与 raw 删除同级。
+- **index.md 可编辑性(审回:by-design,不改)**:normalizeWikiRel 把 index.md 排除
+  在一切写路径外是治理写门禁的设计;且 index.md 每次治理运行都被 rebuildIndex
+  重新生成,人工微调会被下一次重建抹掉——"可编辑 index.md"需要的是手工段落/模板
+  设计,不是放开门禁。已在需求文档留痕。
+- **backlog 重排(采纳)**:C5 批量评审提前(编辑即降级让队列成为高频入口;
+  设计时批量批准/批量拒绝分开讨论)→ K 评测(LLM backend registry)→ J9 → B5。
+- 真实环境验收(docs/real-env-test.md)再次确认为最大非代码欠账,排在 backlog 前。
+- Playwright 验证:H4 提示 ✓ 历史懒加载(未激活零请求)✓ 409 冲突卡 + 强制覆盖 ✓
+  检索消失提示 ✓ 图谱滞后说明 ✓ 零 JS 错误(409 是预期响应)。
+
+**四轮外部评审全部闭环(误判共 3 条:M7a 两条、终审一条)。M7 系列可验收。**
+
 ## M7d (2026-08-03, 45 UI tests green + 2 real-agent e2e): P2-2 hardening + wiki edit + page history
 
 User rulings ⑧⑨⑩ before start (requirements.zh-CN.md 裁决记录): P2-2 = A 主 C 兜底

@@ -431,3 +431,8 @@ button.danger-solid { background: var(--wine); border-color: var(--wine); color:
   border-bottom: 1px dashed var(--line); font-size: 12.5px; }
 .history-row .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .history-row .mono { font-size: 11px; flex: none; }
+
+/* ---- M7d final-review fixes ---- */
+.conflict-card { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--amber);
+  border-radius: var(--r-btn); background: color-mix(in srgb, var(--amber) 8%, transparent); }
+.conflict-card p { margin: 0 0 10px; font-size: 13px; }

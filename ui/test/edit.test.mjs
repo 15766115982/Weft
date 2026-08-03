@@ -69,14 +69,38 @@ test('edit approved page: demoted + noted + logged + snapshot, provenance untouc
   assert.ok(snapText.includes('status: approved'));
 });
 
-test('edit candidate page: content only, no status transition (ruling ⑨a)', async () => {
+test('edit candidate page: content only, no status transition, prev note preserved (ruling ⑨a + P3)', async () => {
   const res = await post('/api/edit', { path: 'wiki/topics/cand-one.md', body: 'Edited candidate body.' }, { 'x-ui-token': token });
   assert.equal(res.status, 200);
   assert.deepEqual(await res.json(), { page: 'wiki/topics/cand-one.md', demoted: false });
   const { fields, body } = readPage('wiki/topics/cand-one.md');
   assert.equal(fields.status, 'candidate');
   assert.equal(body.trim(), 'Edited candidate body.');
+  assert.match(String(fields.review_note), /^manual edit via portal @ /);
+  assert.ok(String(fields.review_note).includes('; prev: agent draft'), 'agent governance note is not silently dropped');
   assert.ok(logLines().some((l) => l.includes('portal | candidate:manual | wiki/topics/cand-one.md') && !l.includes('demoted')));
+});
+
+test('optimistic lock: stale base_hash → 409; re-based force save succeeds (final-review P2)', async () => {
+  const pageRes = await fetch(base + '/api/page?path=wiki/topics/ok-page.md');
+  assert.equal(pageRes.status, 200);
+  const { hash } = await pageRes.json();
+  assert.ok(hash, 'page endpoint carries the content hash');
+
+  // external change behind the editor's back (agent round, another save)
+  fs.appendFileSync(path.join(kb, 'wiki', 'topics', 'ok-page.md'), 'External touch.\n', 'utf8');
+
+  const stale = await post('/api/edit', { path: 'wiki/topics/ok-page.md', body: 'My edit.', base_hash: hash }, { 'x-ui-token': token });
+  assert.equal(stale.status, 409, 'stale base refuses loudly');
+  assert.match((await stale.json()).error, /^edit conflict:/);
+  assert.ok(fs.readFileSync(path.join(kb, 'wiki', 'topics', 'ok-page.md'), 'utf8').includes('External touch.'),
+    'the conflicting save did NOT overwrite');
+
+  // force path: re-base on the fresh hash, one locked retry
+  const fresh = await (await fetch(base + '/api/page?path=wiki/topics/ok-page.md')).json();
+  const force = await post('/api/edit', { path: 'wiki/topics/ok-page.md', body: 'My edit.', base_hash: fresh.hash }, { 'x-ui-token': token });
+  assert.equal(force.status, 200);
+  assert.equal(readPage('wiki/topics/ok-page.md').body.trim(), 'My edit.');
 });
 
 test('governance contract: portal candidate action feeds sweep backfill + flip guard', async () => {
@@ -112,7 +136,9 @@ test('edit guards: traversal, empty body, pasted frontmatter, missing page, secu
 
 test('history on a non-git KB: G6 snapshots + git-init hint', async () => {
   // runs after the edit test above, which created one snapshot of ok-page
-  const h = await (await fetch(base + '/api/history?path=wiki/topics/ok-page.md')).json();
+  const res = await fetch(base + '/api/history?path=wiki/topics/ok-page.md');
+  assert.equal(res.status, 200);
+  const h = await res.json();
   assert.equal(h.kind, 'snapshots');
   assert.ok(h.hint.includes('git init'), 'version-management constraint hint');
   assert.ok(h.entries.length >= 1);
@@ -136,7 +162,9 @@ test('history on a git KB: git log --follow entries, newest first', async () => 
   const s2 = createPortal({ kb: kb2, port: 0 });
   await new Promise((resolve) => s2.listen(0, '127.0.0.1', resolve));
   const b2 = `http://127.0.0.1:${s2.address().port}`;
-  const h = await (await fetch(b2 + '/api/history?path=wiki/topics/p.md')).json();
+  const hRes = await fetch(b2 + '/api/history?path=wiki/topics/p.md');
+  assert.equal(hRes.status, 200);
+  const h = await hRes.json();
   s2.close();
   fs.rmSync(kb2, { recursive: true, force: true });
 

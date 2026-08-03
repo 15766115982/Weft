@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
+import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { EventEmitter } from 'node:events';
@@ -135,7 +136,10 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
           const rel = normalizeWikiRelRead(url.searchParams.get('path') || '');
           const abs = resolveUnder(kb, rel, 'wiki');
           if (!fs.existsSync(abs)) return json(res, 404, { error: `page does not exist: ${rel}` });
-          return json(res, 200, { path: rel, ...parseFrontmatter(fs.readFileSync(abs, 'utf8')) });
+          const text = fs.readFileSync(abs, 'utf8');
+          // hash: the M7d editor's optimistic-lock base (final-review P2)
+          const hash = crypto.createHash('sha256').update(text, 'utf8').digest('hex');
+          return json(res, 200, { path: rel, hash, ...parseFrontmatter(text) });
         }
         if (url.pathname === '/api/raw') {
           const rel = normalizeRawRel(url.searchParams.get('path') || '');
@@ -242,11 +246,15 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
         // M7d H1/H2: human wiki edit (whitelist ⑤). Bigger body limit — pages
         // run to tens of thousands of chars (CJK ≈ 3 bytes each).
         if (url.pathname === '/api/edit') {
-          const { path: p, body, kb: kbName } = JSON.parse(await readBody(req, 512 * 1024) || '{}');
+          const { path: p, body, base_hash, kb: kbName } = JSON.parse(await readBody(req, 512 * 1024) || '{}');
           const kb = registry.resolve(kbName).path;
-          const spec = saveWikiEditJob(kb, { path: p, body }); // factory validates → 400
+          const spec = saveWikiEditJob(kb, { path: p, body, baseHash: base_hash }); // factory validates → 400
           const job = await jobs.waitFor(jobs.enqueue(kb, spec));
-          if (job.status === 'failed') throw new Error(job.error);
+          if (job.status === 'failed') {
+            const err = new Error(job.error);
+            if (/^edit conflict:/.test(job.error)) err.code = 409; // optimistic lock (final-review P2)
+            throw err;
+          }
           return json(res, 200, { page: job.result.path, demoted: job.result.demoted });
         }
 
@@ -351,7 +359,9 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
       return json(res, 404, { error: 'not found' });
     } catch (err) {
       if (!res.headersSent) {
-        const code = err.code === 404 || err.code === 413 ? err.code : /page status is/.test(err.message) ? 409 : 400;
+        // numeric 4xx codes set by libs (413 body cap, 409 edit conflict) pass through
+        const code = (Number.isInteger(err.code) && err.code >= 400 && err.code < 500) ? err.code
+          : /page status is/.test(err.message) ? 409 : 400;
         return json(res, code, { error: err.message });
       }
       res.end();
