@@ -8,6 +8,23 @@
 > **M7 UI portal: process + design docs in `docs/webui/`** (requirements frozen, option 1
 > no-build SPA selected, ADR-0006, contract §1 UI-portal column, S7 spike report).
 
+## J8 + K4 (2026-08-03, 56 UI tests green): the last two sweep findings closed
+
+逐条核验(用户问"还有未完成的需求吗")抓到的最后两条:
+
+- **J8 空态引导(确认缺口,已修)**:dashboard 在空 KB 下此前只有一版零数字——
+  首个 J 块遗漏项(各视图空态早就有,唯独首次使用引导缺)。修:dashboard
+  pages.total===0 → 三步引导卡(采集→治理→评审,design-plan §2.7 空态即行动
+  邀请)。空 scratch KB Playwright 验证。
+- **K4 judge 校准跑法(确认欠账,已修)**:ui/script/judge-calibrate.mjs(零依赖
+  手动跑法)——照 tests/eval 的方式重建 fixture KB,黄金查询逐条真实检索 +
+  judge 评分,报告一致率与黄金页均分。首跑基线:**judge↔golden top-1 一致率
+  94.1%(16/17),黄金页均分 2.65/3**(q12 分歧;判官有轻微跑间方差,q01 在
+  两连跑间翻过——claude -p 不可控 temp,记录在报告里)。
+  报告:docs/test-reports/judge-calibration-latest.md。
+
+**至此:需求清单 79 条全部有交付或正式留痕。**
+
 ## J9 + B5 (2026-08-03, 56 UI tests green): feedback loop + query history — backlog cleared
 
 - **J9 反馈闭环**: result cards gain 👍/👎 vote buttons (event delegation, one

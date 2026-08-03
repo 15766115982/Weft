@@ -14,6 +14,21 @@ export async function render(view) {
     api('/api/log', { limit: 12 }).catch(() => ({ entries: [] })),
   ]);
 
+  // J8 first-use / empty-KB guidance: an action invitation, not a wall of
+  // zeros (design-plan §2.7 — empty states invite the next step).
+  if (h.pages.total === 0) {
+    const guide = el('div', { class: 'welcome-card' });
+    html(guide, `<div class="big">这座知识库还是空的</div>
+      <p>三步让它运转起来:</p>
+      <ol>
+        <li><a href="#/acquire"><b>采集</b></a> — 拖入第一批文档,或配置 Jira / Confluence 源拉取;</li>
+        <li><a href="#/govern"><b>治理</b></a> — 预览计划后发起 agent 运行:读取文档,起草摘要页与主题页,全部留候选;</li>
+        <li><a href="#/queue"><b>评审</b></a> — 批准后页面进入检索,知识库开始可问。</li>
+      </ol>`);
+    view.append(guide);
+    return;
+  }
+
   // dossier: one natural-language paragraph instead of a wall of numbers
   const bits = [`共 <b>${h.pages.total}</b> 篇页面`];
   bits.push(`<b>${h.pages.byStatus.approved || 0}</b> 篇已批准(可检索)`);
