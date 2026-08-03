@@ -36,12 +36,17 @@ node <skill-dir>/../../scripts/acquire.mjs jira --kb <kb-root>
 # One-off scope override (does not edit kb.json) / result cap / PAT sanity check
 node <skill-dir>/../../scripts/acquire.mjs jira --kb <kb-root> --jql "project = PROJ ORDER BY updated DESC" --max 100
 node <skill-dir>/../../scripts/acquire.mjs jira --kb <kb-root> --check
+# Shape probe: Zephyr ZAPI response structure of one Test issue — types/keys/counts
+# only, NO values; the output is safe to relay across the intranet border verbatim
+node <skill-dir>/../../scripts/acquire.mjs jira --kb <kb-root> --probe
 
 # Confluence connector (Server/DC, PAT auth): pull the spaces configured in kb.json
 node <skill-dir>/../../scripts/acquire.mjs confluence --kb <kb-root>
 # One-off CQL override (does not edit kb.json) / result cap / PAT sanity check
 node <skill-dir>/../../scripts/acquire.mjs confluence --kb <kb-root> --cql "space = DEV AND label = kb" --max 100
 node <skill-dir>/../../scripts/acquire.mjs confluence --kb <kb-root> --check
+# Shape probe: the first Gliffy attachment's structure on a given page (value-free)
+node <skill-dir>/../../scripts/acquire.mjs confluence --kb <kb-root> --probe <pageId>
 ```
 
 Jira setup (contract §6): `kb.json` holds only non-sensitive config —
@@ -50,9 +55,22 @@ Jira setup (contract §6): `kb.json` holds only non-sensitive config —
 { "connectors": { "jira": {
   "base_url": "https://jira.example.com",
   "pat_env": "JIRA_PAT",
-  "jql": ["project = PROJ ORDER BY updated DESC"]
+  "jql": ["project = PROJ ORDER BY updated DESC"],
+  "zephyr": "auto",
+  "test_issue_types": ["Test"]
 } } }
 ```
+
+Zephyr Squad (phase 1): issues whose type is in `test_issue_types` (default `["Test"]`)
+get their test steps pulled via ZAPI (`/rest/zapi/latest/teststep/<numeric-issue-id>`,
+same PAT — steps live in Zephyr's own tables, NOT in any Jira field) and rendered as a
+`## Test Steps` table in the raw body. `zephyr` defaults to `"auto"`: the first Test
+issue of a run doubles as the probe — a ZAPI 404/403 means "plugin absent" and the run
+degrades to plain issues (never fails the pull); `true` forces (per-issue failures land
+in `errors`), `false` disables. If the summary carries `zephyr_hint`, the intranet runs
+Zephyr **Scale** instead — a different product whose adaptation is not implemented yet.
+Note: the first run after upgrading re-hashes every Test issue (new body section) — one
+expected `updated` wave.
 
 Confluence setup is the same shape; the pull scope is `spaces` (one CQL scope per
 space key) or an explicit `cql` string/array, which overrides `spaces` —
@@ -69,11 +87,22 @@ Pages land in `raw/confluence/<page-id>.md`. The body is a **minimal** conversio
 of the storage-format XHTML: headings/lists/tables/code+panel macros/links are
 preserved, unknown macros degrade to a visible `[macro: name]` placeholder, and
 the original XHTML is discarded (contract §2). Comments are not pulled (v1).
+
+Macro adaptation (phase 1): three macros resolve to real content instead of the
+placeholder — **gliffy** (labels extracted from the `.gliffy` attachment JSON plus
+the PNG render stored as a sidecar at `raw/confluence/<page-id>.assets/` and embedded
+as an image link), **jira** (`key` → a one-line issue card; `jql`/`jqlQuery` → an
+issue table executed against the configured Jira, capped at 20 rows, identical JQLs
+run once per pull — the macro's `serverId` cannot be resolved without the applinks
+API, so a **single-Jira assumption** applies), **gallery** (renders its attachment
+filenames synchronously, cross-page/external noted by name only). Per-macro failures
+degrade in place to `[gliffy 图: name — reason]` / `[jira filter: <jql> — reason]`
+and count into `summary.macros.degraded` — they never fail the page. The summary's
+`macros` object counts `{gliffy, jira_filter, gallery, degraded}`.
 By design there is no orphan reconcile for Confluence (same as Jira): a CQL/space
 scope is a query, not an inventory — a page that falls out of scope is not
-reported orphaned. Also by design, attachment-only changes are invisible to the
-incremental skip (uploading an attachment neither bumps version.number nor
-changes the storage XHTML, and attachments render as placeholders anyway).
+reported orphaned. Attachment binaries are byte-compared independently of the
+document hash (a changed PNG updates the sidecar even when the page is skipped).
 
 The PAT itself lives **only** in the environment variable named by `pat_env` (default
 `JIRA_PAT` / `CONFLUENCE_PAT`) — never in kb.json (the KB is a Git repository; checked-in
@@ -118,6 +147,11 @@ stdout is JSON:
   not full coverage. A failed scope (bad JQL/CQL, transient 500) lands in `errors` with its
   `jql`/`cql` and the remaining scopes still run; an auth failure (401/403) aborts the
   whole run loudly;
+- jira runs may also carry `zephyr` (`available`/`unavailable`/`disabled` — omitted when no
+  Test-type issue was seen), `test_steps` (total steps attached) and `zephyr_hint`
+  (Scale detected — tell the user Squad adaptation does not apply);
+  confluence runs may carry `macros` (per-macro resolution counts including `degraded` —
+  a non-zero `degraded` means some macros fell back to placeholders; tell the user);
 - When `errors` is non-empty you must report it to the user — never swallow it silently.
 
 ## Behavioral rules

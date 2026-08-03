@@ -48,18 +48,25 @@ async function main() {
       break;
     }
     case 'jira': {
-      const { run, check } = await import('./connectors/jira.mjs');
+      const { run, check, probeZephyr } = await import('./connectors/jira.mjs');
       if (args.check !== undefined && boolFlag(args.check, '--check')) {
         summary = { myself: await check(config) };
+      } else if (args.probe !== undefined && boolFlag(args.probe, '--probe')) {
+        // shape probe: ZAPI response structure, no values — safe to relay out
+        summary = await probeZephyr(config);
       } else {
         summary = await run(kbRoot, { kbConfig: config, jql: args.jql, maxResults: args.max });
       }
       break;
     }
     case 'confluence': {
-      const { run, check } = await import('./connectors/confluence.mjs');
+      const { run, check, probeGliffy } = await import('./connectors/confluence.mjs');
       if (args.check !== undefined && boolFlag(args.check, '--check')) {
         summary = { myself: await check(config) };
+      } else if (args.probe !== undefined) {
+        // --probe <pageId>: first gliffy attachment's structure, no values
+        const pageId = args.probe === true ? '' : args.probe;
+        summary = await probeGliffy(config, pageId);
       } else {
         summary = await run(kbRoot, { kbConfig: config, cql: args.cql, maxResults: args.max });
       }
@@ -68,8 +75,8 @@ async function main() {
     default:
       console.error('usage: node acquire.mjs <local|jira|confluence> [--kb <path>] [options]');
       console.error('  local: [--inbox <path>] [--prune]  --prune removes orphaned docs (default report-only)');
-      console.error('  jira:  [--jql "<JQL>"] [--max <n>] [--check]  scope from kb.json connectors.jira.jql; PAT via env var');
-      console.error('  confluence: [--cql "<CQL>"] [--max <n>] [--check]  scope from kb.json connectors.confluence.spaces/.cql; PAT via env var');
+      console.error('  jira:  [--jql "<JQL>"] [--max <n>] [--check] [--probe]  scope from kb.json connectors.jira.jql; PAT via env var');
+      console.error('  confluence: [--cql "<CQL>"] [--max <n>] [--check] [--probe <pageId>]  scope from kb.json connectors.confluence.spaces/.cql; PAT via env var');
       process.exitCode = 64;
       return;
   }
@@ -82,12 +89,17 @@ async function main() {
 // auth probes, not pulls, and are not recorded. Best-effort: history must
 // never break the pull itself.
 function recordRun(kbRoot, connector, summary) {
-  if (!summary || summary.myself) return; // --check shape
+  if (!summary || summary.myself || summary.probe) return; // --check / --probe shapes
   const rec = { ts: new Date().toISOString(), connector };
   for (const k of ['created', 'updated', 'unchanged', 'unsupported', 'orphaned', 'pruned', 'errors', 'truncated']) {
     if (Array.isArray(summary[k])) rec[k] = summary[k].length;
   }
   if (typeof summary.total === 'number') rec.total = summary.total;
+  // phase-1 passthroughs (explicit whitelist, not generic): zephyr status and
+  // macro-resolution counts surface in the portal's /api/sources freshness
+  if (typeof summary.zephyr === 'string') rec.zephyr = summary.zephyr;
+  if (typeof summary.zephyr_hint === 'string') rec.zephyr_hint = summary.zephyr_hint;
+  if (summary.macros && typeof summary.macros === 'object') rec.macros = summary.macros;
   try {
     const dir = path.join(kbRoot, '.kb');
     fs.mkdirSync(dir, { recursive: true });

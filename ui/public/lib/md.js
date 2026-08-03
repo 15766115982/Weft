@@ -3,6 +3,7 @@
 // unresolved targets become dashed dead chips. Heading ids + hover anchor
 // buttons for section linking. Page set injected via setKnownPages.
 import { esc } from './render.js';
+import { getKb } from './api.js';
 
 let knownByBase = new Map();
 
@@ -60,6 +61,19 @@ const renderer = {
     const anchor = depth === 2 || depth === 3
       ? `<button class="anchor" data-anchor="${esc(id)}" title="复制小节链接">#</button>` : '';
     return `<h${depth} id="${esc(id)}" data-depth="${depth}">${text}${anchor}</h${depth}>\n`;
+  },
+  // KB-root-relative sidecar assets (phase 1: ![gliffy: x](raw/confluence/<id>.assets/x.png))
+  // route through the portal's gated asset endpoint; everything else untouched.
+  image({ href, title, text }) {
+    let src = href || '';
+    if (/^raw\/[^/]+\/[^/]+\.assets\//.test(src)) {
+      const qs = new URLSearchParams({ path: src });
+      const kb = getKb();
+      if (kb) qs.set('kb', kb);
+      src = `/api/raw-asset?${qs}`;
+    }
+    const t = title ? ` title="${esc(title)}"` : '';
+    return `<img src="${esc(src)}" alt="${esc(text || '')}"${t} loading="lazy">`;
   },
 };
 

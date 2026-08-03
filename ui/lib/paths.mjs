@@ -57,6 +57,34 @@ export function normalizeKbFileName(input) {
   return name;
 }
 
+// raw-asset read gate (phase 1: Gliffy PNG sidecars, contract §1 amendment
+// 2026-08-03): under raw/, inside a *.assets/ directory, image extensions
+// only, per-segment traversal rejection. Whitelists, not patterns.
+const ASSET_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp']);
+const ASSET_MIME = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif', '.svg': 'image/svg+xml', '.webp': 'image/webp',
+};
+export function normalizeRawAssetRel(input) {
+  const rel = String(input).replace(/\\/g, '/');
+  const segs = rel.split('/');
+  if (!rel.startsWith('raw/') || segs.some((s) => s === '..' || s === '.' || s === '')) {
+    throw new Error(`asset path must be under raw/ without traversal: ${input}`);
+  }
+  // parent directory must be a sidecar dir: raw/<source>/<id>.assets/<file>
+  if (segs.length !== 4 || !segs[2].endsWith('.assets')) {
+    throw new Error(`asset path must be raw/<source>/<id>.assets/<file>: ${input}`);
+  }
+  const ext = path.posix.extname(rel).toLowerCase();
+  if (!ASSET_EXT.has(ext)) {
+    throw new Error(`asset extension not allowed: ${ext} (allowed: ${[...ASSET_EXT].join(', ')})`);
+  }
+  return rel;
+}
+export function assetMime(rel) {
+  return ASSET_MIME[path.posix.extname(rel).toLowerCase()];
+}
+
 export function* walkMd(dir) {
   if (!fs.existsSync(dir)) return;
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {

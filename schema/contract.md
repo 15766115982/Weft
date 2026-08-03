@@ -18,6 +18,7 @@ A knowledge base instance is a directory on disk, itself an independent Git repo
 ├── raw/                     # Raw zone — exclusive write by the acquisition service
 │   ├── jira/<issue-key>.md          # e.g. raw/jira/PROJ-123.md
 │   ├── confluence/<page-id>.md      # e.g. raw/confluence/123456.md
+│   ├── confluence/<page-id>.assets/<file>  # binary evidence sidecars (Gliffy PNGs; amendment 2026-08-03 phase 1)
 │   └── local/<hash8>-<slug>.md      # output of the local-file connector
 ├── wiki/                    # Curation zone — exclusive write by the governance service
 │   ├── sources/<source>-<source_id>.md   # source summary pages, 1:1 with raw documents
@@ -83,6 +84,14 @@ are not retained; conversion happens at acquisition time and the original is dis
 Filenames are deterministically generated from `source + source_id`; re-pulling the same
 document = overwriting the old file; raw/ keeps only the latest pulled version (history is
 carried by Git).
+
+**Binary evidence sidecars** (amendment 2026-08-03, phase 1): Confluence attachments that
+carry content the normalized Markdown cannot express (today: Gliffy PNG renders) live at
+`raw/confluence/<page-id>.assets/<file>` and are referenced from the owning document as
+KB-root-relative image links (`![…](raw/confluence/<page-id>.assets/<file>)`). Sidecars
+are byte-compared and updated **independently of the document's `content_hash`** (the
+render can change while the page text does not); they are not hashed into the document.
+Asset filenames are sanitized (path separators/traversal rejected, image extensions only).
 
 ### frontmatter (identity quintuple + required fields)
 
@@ -288,7 +297,9 @@ the backfilled form is written by the sweep for flips the viewer made without lo
     "jira": {
       "base_url": "https://jira.example.com",
       "pat_env": "JIRA_PAT",
-      "jql": ["project = PROJ ORDER BY updated DESC"]
+      "jql": ["project = PROJ ORDER BY updated DESC"],
+      "zephyr": "auto",
+      "test_issue_types": ["Test"]
     },
     "confluence": {
       "base_url": "https://wiki.example.com",
@@ -309,6 +320,10 @@ Rules: **secrets go through environment variables only**; kb.json stores at most
 environment-variable names (`*_env`). The `KB_PATH` environment variable locates kb-root.
 Connector scope keys: jira `jql` (array); confluence `spaces` (array, one CQL scope per
 space key) or `cql` (string or array, optional — when set it overrides `spaces`).
+Optional jira keys (amendment 2026-08-03, phase 1): `zephyr` (`"auto"` | `true` | `false`,
+default `"auto"` — probe ZAPI once per run for Test-type issues and attach Zephyr Squad
+test steps; degrade silently when the plugin is absent) and `test_issue_types` (array,
+default `["Test"]`).
 
 ## 7. Change Discipline
 

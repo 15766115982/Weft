@@ -252,3 +252,72 @@ test('raw delete in a git KB snapshots via pathspec-scoped commit (G6 git path)'
   portal2.close();
   fs.rmSync(kb2, { recursive: true, force: true });
 });
+
+// ---- phase 1: /api/raw-asset (Gliffy sidecars) + /api/probe (shape probe) ----
+
+test('raw-asset: whitelist-gated image serving', async () => {
+  fs.mkdirSync(path.join(kb, 'raw', 'confluence', '501.assets'), { recursive: true });
+  fs.writeFileSync(path.join(kb, 'raw', 'confluence', '501.assets', 'arch.png'), Buffer.from([1, 2, 3]));
+  const ok = await get(`/api/raw-asset?path=${encodeURIComponent('raw/confluence/501.assets/arch.png')}`);
+  assert.equal(ok.status, 200);
+  assert.equal(ok.headers.get('content-type'), 'image/png');
+  assert.ok(Buffer.from(await ok.arrayBuffer()).equals(Buffer.from([1, 2, 3])));
+
+  const traversal = await get(`/api/raw-asset?path=${encodeURIComponent('raw/../kb.json')}`);
+  assert.equal(traversal.status, 400);
+  const outsideRaw = await get(`/api/raw-asset?path=${encodeURIComponent('wiki/topics/x.png')}`);
+  assert.equal(outsideRaw.status, 400);
+  const notAssetsDir = await get(`/api/raw-asset?path=${encodeURIComponent('raw/confluence/501/arch.png')}`);
+  assert.equal(notAssetsDir.status, 400);
+  const badExt = await get(`/api/raw-asset?path=${encodeURIComponent('raw/confluence/501.assets/evil.exe')}`);
+  assert.equal(badExt.status, 400);
+  const missing = await get(`/api/raw-asset?path=${encodeURIComponent('raw/confluence/501.assets/none.png')}`);
+  assert.equal(missing.status, 404);
+});
+
+test('probe endpoint: write gates + jira shape output via real CLI spawn', async (t) => {
+  const noToken = await post('/api/probe', { connector: 'jira' });
+  assert.equal(noToken.status, 403);
+  const badOrigin = await post('/api/probe', { connector: 'jira' },
+    { 'x-ui-token': token, origin: 'http://evil.example' });
+  assert.equal(badOrigin.status, 403);
+
+  process.env.JIRA_PAT_UI_PROBE = 'probe-pat';
+  t.after(() => { delete process.env.JIRA_PAT_UI_PROBE; });
+  const issue = {
+    key: 'PROJ-T1', id: '4242',
+    fields: { summary: 's', issuetype: { name: 'Test' } },
+  };
+  const mock = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://mock');
+    const json = (code, obj) => {
+      res.writeHead(code, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(obj));
+    };
+    if (req.headers.authorization !== 'Bearer probe-pat') return json(401, {});
+    if (u.pathname === '/rest/api/2/search') return json(200, { issues: [issue], total: 1 });
+    if (u.pathname === '/rest/zapi/latest/teststep/4242') {
+      return json(200, [{ id: 1, orderId: 1, step: 's', data: 'd', result: 'r' }]);
+    }
+    return json(404, {});
+  });
+  await new Promise((resolve) => mock.listen(0, '127.0.0.1', resolve));
+  t.after(() => mock.close());
+
+  fs.writeFileSync(path.join(kb, 'kb.json'), JSON.stringify({
+    version: 1,
+    connectors: { jira: { base_url: `http://127.0.0.1:${mock.address().port}`, pat_env: 'JIRA_PAT_UI_PROBE', jql: ['project = PROJ'] } },
+  }));
+  const r = await post('/api/probe', { connector: 'jira' }, { 'x-ui-token': token });
+  assert.equal(r.status, 200);
+  const out = await r.json();
+  assert.equal(out.probe, true);
+  assert.equal(out.issue_key, 'PROJ-T1');
+  assert.equal(out.zephyr.isArray, true);
+  assert.equal(out.zephyr.count, 1);
+
+  // confluence without a page id: CLI exits 1, endpoint surfaces the reason
+  const noPage = await post('/api/probe', { connector: 'confluence' }, { 'x-ui-token': token });
+  assert.equal(noPage.status, 400);
+  assert.match((await noPage.json()).error, /requires a page id/);
+});

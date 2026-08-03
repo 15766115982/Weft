@@ -113,6 +113,24 @@ export async function render(view) {
         } catch (err) { note.textContent = `认证失败:${err.message}`; }
       });
       row.insertBefore(chk, note);
+      // Phase 1: shape probe (acquire --probe) — value-free ZAPI/Gliffy shape
+      // summary, exactly what may be relayed out of the intranet for diagnosis
+      const probe = el('button', { class: 'sm', title: '形状探针:输出 Zephyr/Gliffy 响应结构(不含数据),用于内网诊断' });
+      html(probe, `${icon('search', 13)} 形状探针`);
+      probe.addEventListener('click', async () => {
+        note.textContent = '探测中…';
+        try {
+          const body = { connector };
+          if (connector === 'confluence') {
+            const pageId = prompt('输入任意一个含 Gliffy 图的页面 ID:');
+            if (!pageId) { note.textContent = '已取消'; return; }
+            body.pageId = pageId;
+          }
+          const r = await apiPost('/api/probe', body);
+          note.textContent = `探针:${JSON.stringify(r).slice(0, 300)}`;
+        } catch (err) { note.textContent = `探测失败:${err.message}`; }
+      });
+      row.insertBefore(probe, note);
     }
     card.append(row);
     return card;
@@ -142,10 +160,18 @@ export async function render(view) {
       const r = s.lastRun;
       const ago = r ? fmtAgo(r.ts) : null;
       const counts = r ? ['created', 'updated', 'unchanged', 'errors'].filter((k) => r[k]).map((k) => `${k} ${r[k]}`).join(' · ') : '';
+      // phase 1: zephyr status + macro-resolution counts ride the same line
+      const extras = [];
+      if (r?.zephyr) extras.push(`zephyr ${r.zephyr}`);
+      if (r?.zephyr_hint) extras.push('scale?');
+      if (r?.macros) {
+        const m = Object.entries(r.macros).filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join(' ');
+        if (m) extras.push(`macros: ${m}`);
+      }
       html(row, `<span class="via">${esc(s.connector)}</span>
         <span class="dim scope">${esc(s.scope || '(无 scope)')}</span>
         <span class="grow"></span>
-        ${r ? `<span class="${ago.stale ? 'ago-stale' : 'mono'}">${esc(ago.text)}</span> <span class="dim">${esc(counts || '全部跳过')}</span>`
+        ${r ? `<span class="${ago.stale ? 'ago-stale' : 'mono'}">${esc(ago.text)}</span> <span class="dim">${esc(counts || '全部跳过')}</span>${extras.length ? ` <span class="dim">${esc(extras.join(' · '))}</span>` : ''}`
             : '<span class="dim">从未拉取</span>'}`);
       srcTable.append(row);
     }

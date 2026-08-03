@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { EventEmitter } from 'node:events';
 import { createAuth } from './lib/auth.mjs';
 import { createKbRegistry } from './lib/kb.mjs';
-import { resolveUnder, normalizeWikiRelRead, normalizeRawRel, normalizeKbFileName, walkMd } from './lib/paths.mjs';
+import { resolveUnder, normalizeWikiRelRead, normalizeRawRel, normalizeKbFileName, walkMd, normalizeRawAssetRel, assetMime } from './lib/paths.mjs';
 import { listWikiPages, rawRefs, health } from './lib/browse.mjs';
 import { buildGraph, backlinks } from './lib/graph.mjs';
 import { pageHistory } from './lib/history.mjs';
@@ -32,7 +32,7 @@ import { feedbackJob, readFeedback } from './lib/feedback.mjs';
 import { plan } from '../governance/scripts/lib/govern.mjs';
 import {
   UPLOAD_MAX, uploadJob, pullJob, inboxDeleteJob, rawDeleteJob, rawMoveJob,
-  authCheck, sourceFreshness, listInbox,
+  authCheck, probeCheck, sourceFreshness, listInbox,
 } from './lib/acquire.mjs';
 
 const UI_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -210,6 +210,18 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
         if (url.pathname === '/api/jobs') return json(res, 200, { jobs: jobs.list(kb) });
         if (url.pathname === '/api/inbox') return json(res, 200, { files: listInbox(kb) });
         if (url.pathname === '/api/sources') return json(res, 200, { sources: sourceFreshness(kb) });
+        // Phase 1: binary evidence sidecars (contract §1 amendment 2026-08-03)
+        // — Gliffy PNGs referenced from raw docs. Read-only, whitelist-gated
+        // (raw/<source>/<id>.assets/<file>, image extensions, no traversal).
+        if (url.pathname === '/api/raw-asset') {
+          const rel = normalizeRawAssetRel(url.searchParams.get('path') || '');
+          const abs = resolveUnder(kb, rel, 'raw');
+          if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
+            return json(res, 404, { error: `asset does not exist: ${rel}` });
+          }
+          res.writeHead(200, { 'content-type': assetMime(rel), 'cache-control': 'no-cache' });
+          return fs.createReadStream(abs).pipe(res);
+        }
         // I5 plan-as-preview: the full six lists (paths + titles + reasons) —
         // health() serves counts to the dashboard; this serves the confirm page.
         if (url.pathname === '/api/plan') return json(res, 200, plan(kb));
@@ -382,6 +394,15 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
           const body = JSON.parse(await readBody(req) || '{}');
           const kb = registry.resolve(body.kb).path;
           return json(res, 200, await authCheck(kb, body.connector));
+        }
+
+        // Phase 1: shape probe (Zephyr ZAPI / Gliffy attachment structure).
+        // Read-only, off-queue; output is value-free by design (types/keys/
+        // counts only) — what renders here is safe to relay out of the intranet.
+        if (url.pathname === '/api/probe') {
+          const body = JSON.parse(await readBody(req) || '{}');
+          const kb = registry.resolve(body.kb).path;
+          return json(res, 200, await probeCheck(kb, body.connector, body.pageId));
         }
 
         // J4: remove a staged inbox file.

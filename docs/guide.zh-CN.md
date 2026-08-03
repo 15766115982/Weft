@@ -288,9 +288,16 @@ note: run at most ONE portal per knowledge base (the serial write queue is per-p
 「采集」页每张源卡片(Jira / Confluence)上:
 
 - **认证检查**按钮 = 第 6 步 `--check` 的 UI 化,先点它;
+- **形状探针**按钮 = `--probe` 的 UI 化:输出 Zephyr/Gliffy 响应的**结构摘要**
+  (类型/键名/数量,不含任何数据值)——内网诊断时把这段文本原样发给开发者即可;
 - 输入可选的范围覆盖(JQL / CQL / max)→「拉取」→ 作业中心看进度;
 - **新鲜度面板**显示每个源上次拉取时间、文档数、滞后天数(超 7 天变
-  琥珀色);
+  琥珀色);Jira 源还会显示 `zephyr available` 状态,Confluence 源显示宏解析计数;
+- **Zephyr(测试插件)**:Jira 里 Test 类型的 issue 会自动带上 Test Steps 表格
+  (Test Steps/Test Data/Expected Result 三列,走 Zephyr API,不用配置);
+- **Confluence 宏**:Gliffy 图会提取全部文字标签并把 PNG 存到
+  `raw/confluence/<页面id>.assets/` 嵌进文档(浏览 raw 时能看到图)、Jira
+  Issue Filter 宏会变成实时查询的 issue 表格、Gallery 宏变成图片清单;
 - 拉进来的东西不满意?「浏览」切到 raw 页签,可删可移(删除前有影响
   预览和自动快照,不盲删)。raw 内容本身**永远不可改**(契约)——
   local 文档想改就同名文件重传 inbox;Jira/Confluence 的去源系统改。
@@ -312,10 +319,10 @@ portal 与对话**可以混用**:它们只通过知识库目录通信,互不依�
 全部打 mock,不需要网络/PAT:
 
 ```bash
-cd <repo>/acquisition/scripts && npm test     # 36
-cd <repo>/governance/scripts && npm test      # 52(含薄查看器)
+cd <repo>/acquisition/scripts && npm test     # 59
+cd <repo>/governance/scripts && npm test      # 53(含薄查看器)
 cd <repo>/retrieval/scripts  && npm test      # 37(需先 npm install)
-cd <repo>/ui                 && node --test test/   # 56
+cd <repo>/ui                 && node --test test/   # 67
 cd <repo>                    && node --test tests/  # 39(e2e + 检索评测)
 ```
 

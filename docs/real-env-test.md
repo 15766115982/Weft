@@ -83,14 +83,67 @@ node acquisition/scripts/acquire.mjs jira       --kb <scratch-kb> --max 20
         verbatim (evidence layer).
 - [ ] Verify the source language is preserved in raw/ (no translation happens here).
 
+## 3a. Phase-1 probes + macro/Zephyr verification (2026-08-03 additions)
+
+**Shape probes FIRST (value-free output — the only artifact that may be relayed
+out verbatim for diagnosis):**
+
+```bash
+node acquisition/scripts/acquire.mjs jira       --kb <scratch-kb> --probe
+node acquisition/scripts/acquire.mjs confluence --kb <scratch-kb> --probe <pageId-with-gliffy>
+```
+
+- [ ] `jira --probe` prints `zephyr: {http: 200, isArray: true, count: N,
+      firstItemKeys: [...]}`. If `http: 404`: either the plugin is absent (expected
+      degrade — Test issues pull as plain issues) or the intranet runs Zephyr
+      **Scale** (`scale.http: 200` in the same output → report back; Squad steps
+      do not apply). `note: no-test-issue-found` → widen the JQL or check
+      `test_issue_types`.
+- [ ] `confluence --probe <pageId>` prints `gliffy: {http: 200, jsonValid: true,
+      hasStageObjects: true, ...}`. `jsonValid: false` → old XML-format Gliffy
+      (labels will degrade, placeholders stay). Any other shape: relay the probe
+      output verbatim.
+
+**Zephyr steps:**
+
+```bash
+node acquisition/scripts/acquire.mjs jira --kb <scratch-kb> --jql "project = <P> AND issuetype = Test" --max 5
+```
+
+- [ ] Summary shows `zephyr: "available"` and `test_steps > 0`; a pulled Test
+      issue's raw body has a `## Test Steps` table with Step / Test Data /
+      Expected Result columns matching the Jira web UI.
+- [ ] First pull after this upgrade: every Test issue shows `updated` once
+      (new body section) — expected, one time only.
+
+**Macros:**
+
+```bash
+node acquisition/scripts/acquire.mjs confluence --kb <scratch-kb> --cql "space = <S> AND type = page" --max 20
+```
+
+- [ ] A page with a Gliffy diagram: raw body has `**Gliffy 图: <name>**`, an
+      `![gliffy: ...](raw/confluence/<id>.assets/<name>.png)` image line, and the
+      diagram's text labels as bullets; the PNG exists on disk under
+      `raw/confluence/<id>.assets/` and **renders in the portal browse view**
+      (raw tab of the page).
+- [ ] A page with a Jira Issue Filter macro: raw body has the issues table
+      (Key/Summary/Status/Assignee) — compare against the live filter in Jira.
+- [ ] A page with a Gallery macro: attachment filenames listed.
+- [ ] Summary `macros.degraded` is 0 (or every degraded entry is explainable —
+      e.g. a deleted attachment); `grep -r "\[gliffy 图:\|\[jira filter:" raw/confluence/`
+      shows only explainable degrades.
+
 ## 4. Incremental behavior (10 min)
 
 - [ ] Re-run the same pull → everything `unchanged`, no writes.
 - [ ] Edit one Confluence page in the web UI (body text) → re-run → that page `updated`.
 - [ ] Edit the same page twice **on the same day** → second pull still catches it
       (version.number + full-precision timestamp are inside the hashed body).
-- [ ] Upload an attachment WITHOUT editing the page → re-run → page stays `unchanged`.
-      This is the recorded by-design blind spot; confirm you can live with it.
+- [ ] Upload an attachment WITHOUT editing the page → re-run → page stays `unchanged`
+      (the .md doc's hash is body-only — still the recorded blind spot), but if the
+      attachment is a Gliffy PNG sidecar its bytes must still update on disk
+      (sidecars are byte-compared independently).
 
 ## 5. Full-scope pull
 
@@ -120,6 +173,9 @@ node retrieval/scripts/search.mjs --kb <scratch-kb> "a real query term"
 Collect and bring back:
 
 1. The `[macro: ...]` histogram from step 3 (decides XHTML fidelity upgrade).
+2. The `--probe` outputs from step 3a (value-free by design — the one artifact
+   you may paste verbatim) plus any `macros.degraded` entries with their
+   `[gliffy 图: ... — reason]` / `[jira filter: ... — reason]` placeholder text.
 2. Any page where the markdown is **wrong** (not just degraded) — keep the source XHTML
    (Confluence UI → page → `···` → View storage format) as a fixture.
 3. Auth/cert/scope surprises from steps 1–2.

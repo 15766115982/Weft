@@ -33,7 +33,9 @@ Karpathy LLM Wiki paradigm: raw / wiki / schema):
 - **`raw/` (raw zone)** — exclusive write by the acquisition service. Stores **normalized
   Markdown** (original payloads such as Confluence XHTML / docx are not retained; conversion
   happens at acquisition time and the original is discarded). Organized by source (e.g.
-  `raw/confluence/`, `raw/jira/`). The governance service only reads, never modifies.
+  `raw/confluence/`, `raw/jira/`). Binary evidence sidecars (Gliffy PNGs) live at
+  `raw/confluence/<page-id>.assets/` (contract amendment 2026-08-03). The governance
+  service only reads, never modifies.
 - **`wiki/` (curation zone)** — exclusive write by the governance service. The structurally
   stable governed product, and the retrieval service's only indexing target. Wiki pages trace
   back to `raw/` documents via source pointers in their frontmatter.

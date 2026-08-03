@@ -144,3 +144,108 @@ test('confluence CLI end-to-end: kb.json config + env PAT → raw/confluence doc
   assert.notEqual(bad.code, 0);
   assert.match(bad.stderr, /--check is a boolean flag and takes no value/);
 });
+
+// ---- phase 1: --probe + recordRun passthrough ----
+
+const ZEPHYR_ENV = 'JIRA_PAT_CLI_ZEPHYR';
+
+async function mockJiraZephyr(t, { withTest = true } = {}) {
+  const testIssue = {
+    key: 'PROJ-T1', id: '4242',
+    fields: {
+      summary: 'CLI test issue', description: 'with zephyr steps',
+      status: { name: 'Open' }, issuetype: { name: 'Test' }, priority: { name: 'Medium' },
+      labels: [], components: [], assignee: null, reporter: { displayName: 'Carol' },
+      created: '2026-07-20T09:00:00.000+0800', updated: '2026-07-29T09:00:00.000+0800',
+      comment: { comments: [] }, fixVersions: [],
+    },
+  };
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://mock');
+    const json = (code, obj) => {
+      res.writeHead(code, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(obj));
+    };
+    if (req.headers.authorization !== 'Bearer cli-pat') return json(401, {});
+    if (u.pathname === '/rest/api/2/search') {
+      return json(200, { issues: withTest ? [testIssue] : [], total: withTest ? 1 : 0 });
+    }
+    if (u.pathname === '/rest/zapi/latest/teststep/4242') {
+      return json(200, [{ id: 1, orderId: 1, step: 's', data: 'd', result: 'r' }]);
+    }
+    return json(404, {});
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  return `http://127.0.0.1:${server.address().port}`;
+}
+
+test('jira --probe prints a value-free shape summary; runs record zephyr status', async (t) => {
+  const baseUrl = await mockJiraZephyr(t);
+  const kb = fs.mkdtempSync(path.join(os.tmpdir(), 'kb-acq-probe-'));
+  t.after(() => fs.rmSync(kb, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(kb, 'kb.json'), JSON.stringify({
+    version: 1,
+    connectors: { jira: { base_url: baseUrl, pat_env: ZEPHYR_ENV, jql: ['project = PROJ'] } },
+  }));
+
+  const probe = await runCli(['jira', '--kb', kb, '--probe'], { [ZEPHYR_ENV]: 'cli-pat' });
+  assert.equal(probe.code, 0, probe.stderr);
+  const out = JSON.parse(probe.stdout);
+  assert.equal(out.probe, true);
+  assert.equal(out.issue_key, 'PROJ-T1');
+  assert.deepEqual(out.zephyr, { http: 200, isArray: true, count: 1, firstItemKeys: ['id', 'orderId', 'step', 'data', 'result'] });
+  // probes are not pulls: nothing recorded yet
+  assert.ok(!fs.existsSync(path.join(kb, '.kb', 'acquire_runs.jsonl')));
+
+  const pull = await runCli(['jira', '--kb', kb], { [ZEPHYR_ENV]: 'cli-pat' });
+  assert.equal(pull.code, 0, pull.stderr);
+  assert.equal(JSON.parse(pull.stdout).zephyr, 'available');
+  const rec = JSON.parse(fs.readFileSync(path.join(kb, '.kb', 'acquire_runs.jsonl'), 'utf8').trim());
+  assert.equal(rec.zephyr, 'available');
+});
+
+test('confluence --probe requires a page id and reports the gliffy shape', async (t) => {
+  const gliffy = JSON.stringify({ stage: { objects: [{ graphic: { Text: { html: '<p>x</p>' } }, x: 0, y: 0 }] } });
+  const page = {
+    id: '777', type: 'page', title: 'probe page', status: 'current',
+    space: { key: 'DEV' }, version: { number: 1, when: '2026-07-29T09:00:00.000+08:00', by: { displayName: 'C' } },
+    ancestors: [], metadata: { labels: { results: [] } },
+    body: { storage: { value: '<ac:structured-macro ac:name="gliffy"><ac:parameter ac:name="name">dia</ac:parameter></ac:structured-macro>' } },
+    _links: {},
+  };
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://mock');
+    const json = (code, obj) => {
+      res.writeHead(code, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(obj));
+    };
+    if (req.headers.authorization !== 'Bearer cli-pat') return json(401, {});
+    if (u.pathname === '/rest/api/content/777') return json(200, page);
+    if (u.pathname === '/download/attachments/777/dia.gliffy') {
+      res.writeHead(200, { 'content-type': 'application/octet-stream' });
+      return res.end(gliffy);
+    }
+    return json(404, {});
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  const kb = fs.mkdtempSync(path.join(os.tmpdir(), 'kb-acq-cprobe-'));
+  t.after(() => fs.rmSync(kb, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(kb, 'kb.json'), JSON.stringify({
+    version: 1,
+    connectors: { confluence: { base_url: baseUrl, pat_env: CONF_PAT_ENV, spaces: ['DEV'] } },
+  }));
+
+  const missing = await runCli(['confluence', '--kb', kb, '--probe'], { [CONF_PAT_ENV]: 'cli-pat' });
+  assert.notEqual(missing.code, 0);
+  assert.match(missing.stderr, /requires a page id/);
+
+  const ok = await runCli(['confluence', '--kb', kb, '--probe', '777'], { [CONF_PAT_ENV]: 'cli-pat' });
+  assert.equal(ok.code, 0, ok.stderr);
+  const out = JSON.parse(ok.stdout);
+  assert.equal(out.probe, true);
+  assert.deepEqual(out.gliffy, { http: 200, jsonValid: true, hasStageObjects: true, objectCount: 1, labelCount: 1 });
+});

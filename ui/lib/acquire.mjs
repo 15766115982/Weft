@@ -160,6 +160,24 @@ export function authCheck(kb, connector) {
   });
 }
 
+// Phase 1: shape probe (Zephyr ZAPI / Gliffy attachment). Same off-queue
+// read-only pattern as authCheck; the CLI output is value-free by design, so
+// what the UI shows is exactly what may be relayed out of the intranet.
+export function probeCheck(kb, connector, pageId) {
+  if (!['jira', 'confluence'].includes(connector)) throw new Error(`--probe exists for jira|confluence: ${connector}`);
+  const args = [ACQUIRE, connector, '--kb', kb, '--probe'];
+  if (connector === 'confluence') args.push(String(pageId || ''));
+  return new Promise((resolve, reject) => {
+    const pseudo = { log: '' };
+    spawnJob(pseudo, process.execPath, args)
+      .then(({ log }) => {
+        try { resolve(JSON.parse(log)); }
+        catch { resolve({ raw: tail(log) }); }
+      })
+      .catch(reject);
+  });
+}
+
 // J6: per-source freshness — kb.json connector config + the last record per
 // connector from .kb/acquire_runs.jsonl (written by the acquisition CLI).
 export function sourceFreshness(kb) {

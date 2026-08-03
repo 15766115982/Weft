@@ -15,8 +15,11 @@
 // fallback): headings/lists/tables/code+panel macros/links are preserved;
 // unknown macros degrade to a [macro: name] placeholder instead of being
 // silently dropped. The original XHTML is not retained (contract §2).
+import fs from 'node:fs';
+import path from 'node:path';
 import { upsertRawDoc, sha256 } from '../lib/rawdoc.mjs';
 import { appendLog } from '../lib/log.mjs';
+import { shapeError } from '../lib/shape.mjs';
 
 export const CONNECTOR_ID = 'confluence@1.0.0';
 
@@ -165,6 +168,48 @@ function renderTable(node, ctx) {
   return `\n\n${lines.join('\n')}\n\n`;
 }
 
+// Placeholder token sentinel (phase 1): gliffy/jira macros need the network,
+// but storageToMarkdown stays pure+sync. renderMacro emits a token and pushes
+// the macro record into ctx.collect; run() resolves them async afterwards.
+// STX (U+0002) via fromCharCode — storageToMarkdown strips it from the input
+// at entry, so the token is collision-proof by construction (same philosophy
+// as the HARD_BREAK U+0001 sentinel), and tokens never reach disk (always
+// replaced or degraded before hashing).
+const STX = String.fromCharCode(2);
+
+function macroParam(node, name) {
+  return (findChild(node, 'ac:parameter', 'ac:name', name)?.children || [])
+    .map((c) => c.text || '').join('').trim();
+}
+
+/** Gallery macro: filenames ride inside the macro body (<ac:image>), so it
+ *  renders synchronously — no placeholder needed. Cross-page attachments and
+ *  external URLs are noted by name only (never fetched). */
+function renderGallery(node) {
+  const title = macroParam(node, 'title');
+  const items = [];
+  for (const img of node.children.filter((c) => c.tag === 'ac:image')) {
+    const att = findChild(img, 'ri:attachment');
+    if (att?.attrs['ri:filename']) {
+      const pg = findChild(att, 'ri:page');
+      items.push(pg
+        ? `${att.attrs['ri:filename']} (from page: ${pg.attrs['ri:content-title'] || '?'})`
+        : att.attrs['ri:filename']);
+      continue;
+    }
+    const u = findChild(img, 'ri:url');
+    if (u?.attrs['ri:value']) {
+      let host = u.attrs['ri:value'];
+      try { host = new URL(u.attrs['ri:value']).host; } catch { /* keep raw */ }
+      items.push(`${host} (external image)`);
+    }
+  }
+  if (!items.length) return '\n\n[gallery: page attachments]\n\n';
+  const shown = items.slice(0, 20);
+  const more = items.length > shown.length ? `\n- … +${items.length - shown.length} more` : '';
+  return `\n\n**Gallery${title ? `: ${title}` : ''}**\n${shown.map((i) => `- ${i}`).join('\n')}${more}\n\n`;
+}
+
 function renderMacro(node, ctx) {
   const name = node.attrs['ac:name'] || '';
   if (name === 'code') {
@@ -187,6 +232,26 @@ function renderMacro(node, ctx) {
     const title = (findChild(node, 'ac:parameter', 'ac:name', 'title')?.children || [])
       .map((c) => c.text || '').join('').trim();
     return `[status: ${title}]`;
+  }
+  if (name === 'gallery') {
+    const rendered = renderGallery(node);
+    if (!ctx.collect) return rendered;
+    const token = `${STX}MACRO:${ctx.collect.length}${STX}`;
+    ctx.collect.push({ token, type: 'gallery', rendered });
+    return token;
+  }
+  // async macros (phase 1): emit a token, resolve in run() afterwards;
+  // without a collector (pure unit tests) the placeholder degrade applies
+  if (ctx.collect && (name === 'gliffy' || name === 'jira')) {
+    const token = `${STX}MACRO:${ctx.collect.length}${STX}`;
+    const params = {};
+    for (const c of node.children) {
+      if (c.tag === 'ac:parameter') {
+        params[c.attrs['ac:name'] || ''] = (c.children || []).map((t) => t.text || '').join('').trim();
+      }
+    }
+    ctx.collect.push({ token, type: name, params });
+    return token;
   }
   // nothing is silently dropped: unknown macros leave a visible placeholder
   return `\n\n[macro: ${name}]\n\n`;
@@ -269,10 +334,12 @@ function renderNode(node, ctx) {
   }
 }
 
-/** Storage-format XHTML -> markdown (minimal fidelity, declared). */
-export function storageToMarkdown(xhtml, baseUrl = '') {
-  const root = parseStorage(String(xhtml || ''));
-  const md = renderNodes(root.children, { depth: 0, baseUrl });
+/** Storage-format XHTML -> markdown (minimal fidelity, declared).
+ *  collect (optional array): async macros (gliffy/jira) and gallery are
+ *  emitted as STX tokens + records pushed here, for run() to resolve. */
+export function storageToMarkdown(xhtml, baseUrl = '', collect) {
+  const root = parseStorage(String(xhtml || '').replaceAll(STX, ''));
+  const md = renderNodes(root.children, { depth: 0, baseUrl, collect });
   return cleanupOutsideFences(md).replaceAll(HARD_BREAK, '\n').trim();
 }
 
@@ -298,8 +365,9 @@ const tidy = (s) => s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n');
 // ---------------------------------------------------------------------------
 
 /** One page -> normalized markdown body (English scaffold; the page's own
- *  text keeps its source language — raw/ is the evidence layer). */
-export function pageToMarkdown(page, baseUrl) {
+ *  text keeps its source language — raw/ is the evidence layer).
+ *  out (optional object): receives out.pendingMacros for run() to resolve. */
+export function pageToMarkdown(page, baseUrl, out) {
   const id = String(page.id || '');
   const title = page.title || '';
   const version = page.version?.number ?? '';
@@ -321,8 +389,224 @@ export function pageToMarkdown(page, baseUrl) {
   if (labels.length) head.push(`- Labels: ${labels.join(', ')}`);
   head.push('', '---', '');
 
-  const body = storageToMarkdown(page.body?.storage?.value || '', baseUrl);
+  const collect = [];
+  const body = storageToMarkdown(page.body?.storage?.value || '', baseUrl, collect);
+  if (out) out.pendingMacros = collect.map((m) => ({ ...m, pageId: id }));
   return head.join('\n') + (body || '(empty page)') + '\n';
+}
+
+// ---------------------------------------------------------------------------
+// async macro resolution (phase 1): gliffy attachments / jira-filter JQL
+// ---------------------------------------------------------------------------
+
+/** Raw (non-JSON) Confluence GET for attachment downloads. Error carries
+ *  .status only — response bodies may contain intranet content and must never
+ *  leak into degrade text or summaries. */
+async function confFetchRaw(cfg, pathAndQuery, fetchImpl) {
+  const doFetch = fetchImpl || globalThis.fetch;
+  const res = await doFetch(cfg.baseUrl + pathAndQuery, {
+    headers: { Authorization: `Bearer ${cfg.pat}` },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    redirect: 'follow',
+  });
+  if (!res.ok) {
+    const err = new Error(`attachment download HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  return res;
+}
+
+/** .gliffy attachment JSON -> label strings, ordered top-to-bottom, left-to-
+ *  right (each shape's text lives in graphic.Text.html). Shape-tolerant:
+ *  mismatches throw shapeError (relay-safe diagnostics, no values). */
+export function parseGliffyLabels(text) {
+  let g;
+  try {
+    g = JSON.parse(text);
+  } catch {
+    throw shapeError('gliffy attachment', 'JSON document', text.slice(0, 0));
+  }
+  const objects = g?.stage?.objects;
+  if (!Array.isArray(objects)) {
+    throw shapeError('gliffy attachment', 'stage.objects array', g?.stage?.objects === undefined ? g : objects);
+  }
+  const labels = [];
+  const visit = (obj) => {
+    const html = obj?.graphic?.Text?.html;
+    if (typeof html === 'string' && html.trim()) {
+      const label = decodeEntities(html.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+      if (label) labels.push({ x: Number(obj.x) || 0, y: Number(obj.y) || 0, label });
+    }
+    for (const c of obj?.children || []) visit(c);
+  };
+  objects.forEach(visit);
+  labels.sort((a, b) => a.y - b.y || a.x - b.x);
+  return labels.map((l) => l.label);
+}
+
+function gliffyBaseName(params) {
+  return String(params?.name || params?.displayName || '')
+    .replace(/\.(gliffy|png|svg|jpe?g)$/i, '')
+    .trim();
+}
+
+function safeFileName(name) {
+  const s = String(name)
+    .replace(/[\\/:*?"<>|]/g, '-')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 80);
+  return s && s !== '..' ? s : 'diagram';
+}
+
+/** Binary evidence sidecar (contract §1 amendment 2026-08-03):
+ *  raw/confluence/<page-id>.assets/<file>. Byte-compared independently of the
+ *  doc's content_hash — the PNG can change while the page text doesn't. */
+function writeAsset(kbRoot, pageId, fileName, buf) {
+  const rel = path.posix.join('raw', 'confluence', `${pageId}.assets`, fileName);
+  const abs = path.join(kbRoot, rel);
+  if (fs.existsSync(abs) && fs.readFileSync(abs).equals(buf)) return rel;
+  fs.mkdirSync(path.dirname(abs), { recursive: true });
+  fs.writeFileSync(abs, buf);
+  return rel;
+}
+
+async function resolveGliffy(m, cfg, kbRoot, fetchImpl) {
+  const base = gliffyBaseName(m.params);
+  if (!base) {
+    const err = new Error('gliffy macro without name parameter');
+    err.safe = true;
+    throw err;
+  }
+  const dl = (file) => confFetchRaw(cfg, `/download/attachments/${m.pageId}/${encodeURIComponent(file)}`, fetchImpl);
+  const text = await (await dl(`${base}.gliffy`)).text();
+  const labels = parseGliffyLabels(text);
+  // the PNG render is best-effort: a missing render must not kill the labels
+  let assetRel = '';
+  try {
+    const buf = Buffer.from(await (await dl(`${base}.png`)).arrayBuffer());
+    assetRel = writeAsset(kbRoot, m.pageId, `${safeFileName(base)}.png`, buf);
+  } catch { /* no PNG available — image line omitted, labels still land */ }
+  const parts = [`**Gliffy 图: ${base}**`];
+  if (assetRel) parts.push('', `![gliffy: ${base}](${assetRel})`);
+  if (labels.length) parts.push('', ...labels.map((l) => `- ${l}`));
+  return `\n\n${parts.join('\n')}\n\n`;
+}
+
+function mdCell(s) {
+  return String(s || '').replace(/\|/g, '\\|').replace(/\s*\n\s*/g, ' ').trim();
+}
+
+/** Single-server assumption (documented in SKILL.md): the macro's serverId
+ *  cannot be mapped to a base_url without the applinks API, so key/JQL are
+ *  always executed against the one configured Jira. */
+async function resolveJiraMacro(m, kbConfig, jira, jqlCache, fetchImpl) {
+  const notConfigured = () => {
+    const err = new Error('jira connector not configured');
+    err.safe = true;
+    return err;
+  };
+  const key = m.params?.key || '';
+  const jql = m.params?.jql || m.params?.jqlQuery || '';
+  if (!jira) throw notConfigured();
+  const baseUrl = String(kbConfig.connectors.jira.base_url).replace(/\/+$/, '');
+  if (key) {
+    const issue = await jira.getIssue(kbConfig, key, { fetchImpl });
+    const f = issue.fields || {};
+    return `\n\n- [${issue.key || key}] ${f.summary || ''} (${f.status?.name || '?'} · ${f.assignee?.displayName || 'unassigned'}) — ${baseUrl}/browse/${issue.key || key}\n\n`;
+  }
+  if (!jql) {
+    const err = new Error('jira macro without key/jql parameter');
+    err.safe = true;
+    throw err;
+  }
+  if (!jqlCache.has(jql)) jqlCache.set(jql, jira.searchJql(kbConfig, jql, { max: 20, fetchImpl }));
+  const { issues, total } = await jqlCache.get(jql);
+  const rows = issues.map((it) => {
+    const f = it.fields || {};
+    return `| [${it.key}](${baseUrl}/browse/${it.key}) | ${mdCell(f.summary)} | ${mdCell(f.status?.name)} | ${mdCell(f.assignee?.displayName || 'unassigned')} |`;
+  });
+  const note = total > issues.length ? `\n(showing ${issues.length} of ${total})` : '';
+  return `\n\nJira filter: \`${jql}\`\n\n| Key | Summary | Status | Assignee |\n|---|---|---|---|\n${rows.join('\n')}${note}\n\n`;
+}
+
+/** Degrade text: the macro's own parameters are already page content (safe),
+ *  but error messages from jiraGet embed response snippets (unsafe) — only
+ *  err.safe/shapeSafe messages or bare HTTP codes are quoted. */
+function degradeFor(m, err) {
+  const why = err?.safe || err?.shapeSafe ? err.message : err?.status ? `HTTP ${err.status}` : 'fetch/parse failed';
+  if (m.type === 'gliffy') return `[gliffy 图: ${gliffyBaseName(m.params) || '?'} — ${why}]`;
+  if (m.type === 'jira') return `[jira filter: ${m.params?.jql || m.params?.jqlQuery || m.params?.key || ''} — ${why}]`;
+  return `[macro: ${m.type}]`;
+}
+
+/** Replace STX tokens in body with resolved content. Per-macro failures
+ *  degrade in place (counted, NOT summary.errors — the page itself succeeded). */
+export async function resolveMacros(body, pending, { cfg, kbRoot, kbConfig, jira, jqlCache, counts, fetchImpl } = {}) {
+  let out = body;
+  for (const m of pending || []) {
+    let rendered = m.rendered;
+    try {
+      if (m.type === 'gliffy') rendered = await resolveGliffy(m, cfg, kbRoot, fetchImpl);
+      else if (m.type === 'jira') rendered = await resolveJiraMacro(m, kbConfig, jira, jqlCache, fetchImpl);
+      if (counts) {
+        const k = m.type === 'jira' ? 'jira_filter' : m.type;
+        counts[k] = (counts[k] || 0) + 1;
+      }
+    } catch (err) {
+      rendered = `\n\n${degradeFor(m, err)}\n\n`;
+      if (counts) counts.degraded = (counts.degraded || 0) + 1;
+    }
+    out = out.split(m.token).join(rendered ?? '');
+  }
+  return out;
+}
+
+/** Shape probe (acquire.mjs `confluence --probe <pageId>`): download the
+ *  page's first .gliffy attachment and report its structure — never values. */
+export async function probeGliffy(kbConfig, pageId, { fetchImpl } = {}) {
+  if (!pageId || !String(pageId).trim()) {
+    throw new Error('confluence --probe requires a page id (pick any page containing a Gliffy diagram)');
+  }
+  const auth = resolveAuth(kbConfig);
+  const page = await confGet(auth, `/rest/api/content/${encodeURIComponent(String(pageId))}?expand=body.storage`, fetchImpl);
+  const xhtml = page?.body?.storage?.value || '';
+  const root = parseStorage(xhtml);
+  let name = '';
+  const walk = (n) => {
+    if (name) return;
+    if (n.tag === 'ac:structured-macro' && n.attrs['ac:name'] === 'gliffy') name = macroParam(n, 'name');
+    (n.children || []).forEach(walk);
+  };
+  walk(root);
+  const base = name.replace(/\.(gliffy|png|svg|jpe?g)$/i, '');
+  if (!base) return { probe: true, page: String(pageId), note: 'no-gliffy-macro' };
+  try {
+    const text = await (await confFetchRaw(auth, `/download/attachments/${pageId}/${encodeURIComponent(`${base}.gliffy`)}`, fetchImpl)).text();
+    let g;
+    let jsonValid = true;
+    try { g = JSON.parse(text); } catch { jsonValid = false; }
+    const objects = g?.stage?.objects;
+    let labelCount = 0;
+    if (jsonValid && Array.isArray(objects)) {
+      try { labelCount = parseGliffyLabels(text).length; } catch { /* counted as 0 */ }
+    }
+    return {
+      probe: true,
+      page: String(pageId),
+      gliffy: {
+        http: 200,
+        jsonValid,
+        hasStageObjects: Array.isArray(objects),
+        objectCount: Array.isArray(objects) ? objects.length : null,
+        labelCount,
+      },
+    };
+  } catch (err) {
+    return { probe: true, page: String(pageId), gliffy: { http: err.status || 0, error: 'download failed' } };
+  }
 }
 
 function pageUrl(page, baseUrl) {
@@ -425,6 +709,13 @@ export async function run(kbRoot, { kbConfig, cql, maxResults, fetchImpl } = {})
   const cfg = resolveConfig(kbConfig, { cql, maxResults });
   const summary = { created: [], updated: [], unchanged: [], errors: [], truncated: [], total: 0 };
 
+  // jira-filter macros resolve against the configured Jira (dynamic import:
+  // confluence-only KBs stay decoupled from the jira connector)
+  let jira = null;
+  if (kbConfig?.connectors?.jira?.base_url) jira = await import('./jira.mjs');
+  const jqlCache = new Map(); // one run = one JQL executed once, however many pages embed it
+  const macroCounts = {};
+
   const byId = new Map();
   for (const scope of cfg.cqlList) {
     let res;
@@ -452,7 +743,13 @@ export async function run(kbRoot, { kbConfig, cql, maxResults, fetchImpl } = {})
       continue;
     }
     try {
-      const body = pageToMarkdown(page, cfg.baseUrl);
+      const out = {};
+      let body = pageToMarkdown(page, cfg.baseUrl, out);
+      if (out.pendingMacros?.length) {
+        body = await resolveMacros(body, out.pendingMacros, {
+          cfg, kbRoot, kbConfig, jira, jqlCache, counts: macroCounts, fetchImpl,
+        });
+      }
       const result = upsertRawDoc(kbRoot, {
         source: 'confluence',
         sourceId: id,
@@ -479,5 +776,6 @@ export async function run(kbRoot, { kbConfig, cql, maxResults, fetchImpl } = {})
       summary.errors.push({ id, error: err.message });
     }
   }
+  if (Object.values(macroCounts).some((v) => v)) summary.macros = macroCounts;
   return summary;
 }

@@ -1,5 +1,26 @@
 # Development Log (as of 2026-08-03, M0-M6 complete + cross-service test layer + M7a-d UI portal + A7 graph)
 
+> **采集适配一期(2026-08-03,Zephyr + Confluence 宏,调研 docs/research/
+> zephyr-confluence-macros.md)**:① Jira Zephyr Squad——Test 类型 issue 的
+> Test Steps 走 ZAPI `/rest/zapi/latest/teststep/<numeric-id>`(同 PAT;steps 在
+> Zephyr 自己的表里,任何 fields 展开都拿不到),`zephyr: "auto"` 首 Test issue
+> 探测,404/403 降级为普通 issue(不杀拉取;ZAPI 403 ≠ jiraGet 的全局
+> authFailed,故独立 fetch 封装),Scale 端点顺带探测 → `zephyr_hint`;
+> ② Confluence 宏——storageToMarkdown 保持纯同步,gliffy/jira 宏落 STX(U+0002)
+> 占位符由 run() 异步兑现:gliffy 双附件(.gliffy JSON 确定性提取标签 + PNG 写
+> `raw/confluence/<id>.assets/` 边车并嵌 KB 根相对图片链接,**字节独立比对**不受
+> doc hash skip 影响)、jira(key → issue 卡;jql → 执行 JQL 渲染表格,cap 20,
+> 同 JQL 按 run 去重,单 Jira 假设)、gallery 同步渲染文件名清单;逐宏降级计数
+> `summary.macros`,失败不进 errors;③ **用户裁定:内网数据绝不出网** → 形状
+> 不匹配只能口头转述,故 `lib/shape.mjs` 无值诊断(类型/键名/数量)+ `--probe`
+> 形状探针(jira ZAPI / confluence gliffy,零值输出可原样抄出)+ portal 采集页
+> 「形状探针」按钮(/api/probe,off-queue 照 authcheck 先例);录制回放砍出一期。
+> 契约修订(增量兼容):§1 raw/ 树 += `.assets/` 边车、§2 边车规则、§6 jira 可选键;
+> portal 新增 /api/raw-asset(白名单门禁:raw/ 下 + *.assets/ 目录 + 图片扩展名),
+> 检索服务零改动(只索引 wiki/ 批准页,已验证)。测试:acquisition 36 → 59,
+> UI 65 → 67,全绿。内网验收剧本:real-env-test.md §3a。
+
+
 > **项目定名 Weft(2026-08-03,用户拍板)**:纬线——wikilink 把页面织成网。
 > 仓库目录沿用 knowledge-extension;portal 品牌位(index.html title/brand)、
 > README、guide 已换新名。

@@ -14,6 +14,7 @@
 // only; this is a from-scratch Node rewrite on the global fetch (Node >= 18).
 import { upsertRawDoc, sha256 } from '../lib/rawdoc.mjs';
 import { appendLog } from '../lib/log.mjs';
+import { describeShape, shapeError } from '../lib/shape.mjs';
 
 export const CONNECTOR_ID = 'jira@1.0.0';
 
@@ -60,8 +61,10 @@ export function adfToText(node) {
 }
 
 /** One issue -> normalized markdown body (English scaffold; the issue's own
- *  text keeps its source language — raw/ is the evidence layer). */
-export function issueToMarkdown(issue, baseUrl) {
+ *  text keeps its source language — raw/ is the evidence layer).
+ *  opts.testSteps: parsed Zephyr steps (parseTestSteps output); appended as a
+ *  table after Comments so steps ride the content_hash incremental semantics. */
+export function issueToMarkdown(issue, baseUrl, { testSteps } = {}) {
   const key = issue.key || '';
   const f = issue.fields || {};
   const summary = f.summary || '';
@@ -99,7 +102,132 @@ export function issueToMarkdown(issue, baseUrl) {
     }
   }
   if (blocks.length) head.push('', '## Comments', '', blocks.join('\n\n'));
+  const stepsMd = testStepsToMarkdown(testSteps);
+  if (stepsMd) head.push('', stepsMd);
   return head.join('\n') + '\n';
+}
+
+// ---------------------------------------------------------------------------
+// Zephyr Squad test steps (2026-08-03 phase 1)
+// Steps live in Zephyr's own tables — NO Jira field expansion can reach them;
+// the only way in is ZAPI: GET /rest/zapi/latest/teststep/{issueId} with the
+// same PAT. Zephyr Scale (/rest/atm/...) is a different product, phase 2+.
+// ---------------------------------------------------------------------------
+
+const ZAPI_TIMEOUT_MS = 30_000;
+
+function decodeBasicEntities(s) {
+  return String(s)
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&'); // must run last
+}
+
+/** ZAPI teststep JSON -> [{n, step, data, result}] ordered by orderId.
+ *  Shape-tolerant (only the relayed error text may cross the intranet border):
+ *  plain step/data/result first, tag-stripped html* variants as fallback. */
+export function parseTestSteps(data) {
+  if (!Array.isArray(data)) throw shapeError('zapi teststep response', 'array', data);
+  const cell = (item, plain, html) => {
+    const v = item?.[plain];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+    const h = item?.[html];
+    if (typeof h === 'string' && h.trim()) {
+      return decodeBasicEntities(h.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+    }
+    return '';
+  };
+  return data
+    .map((item, i) => ({
+      orderId: Number.isInteger(item?.orderId) ? item.orderId : i + 1,
+      step: cell(item, 'step', 'htmlStep'),
+      data: cell(item, 'data', 'htmlData'),
+      result: cell(item, 'result', 'htmlResult'),
+      _i: i,
+    }))
+    .sort((a, b) => a.orderId - b.orderId || a._i - b._i)
+    .map(({ _i, ...rest }, n) => ({ n: n + 1, ...rest }));
+}
+
+export function testStepsToMarkdown(steps) {
+  if (!steps?.length) return '';
+  const cell = (s) => String(s).replace(/\|/g, '\\|').replace(/\s*\n\s*/g, ' ').trim();
+  return [
+    '## Test Steps',
+    '',
+    '| # | Step | Test Data | Expected Result |',
+    '|---|------|-----------|-----------------|',
+    ...steps.map((s) => `| ${s.n} | ${cell(s.step)} | ${cell(s.data)} | ${cell(s.result)} |`),
+  ].join('\n');
+}
+
+/** ZAPI fetch — deliberately NOT jiraGet: jiraGet treats 403 as global
+ *  authFailed (fail-fast across scopes), but a ZAPI 403/404 in auto mode only
+ *  means "plugin absent", which must degrade, never kill the pull. */
+async function fetchTestSteps(cfg, issueId, fetchImpl) {
+  const doFetch = fetchImpl || globalThis.fetch;
+  const res = await doFetch(`${cfg.baseUrl}/rest/zapi/latest/teststep/${issueId}`, {
+    headers: { Authorization: `Bearer ${cfg.pat}`, Accept: 'application/json' },
+    signal: AbortSignal.timeout(ZAPI_TIMEOUT_MS),
+    redirect: 'follow',
+  });
+  if (!res.ok) {
+    const err = new Error(`zapi teststep HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+}
+
+/** Opportunistic Zephyr Scale detection (squad probe 404'd): returns the HTTP
+ *  status of the Scale endpoint (0 on network error) — 200 means the intranet
+ *  runs Scale, whose adaptation is a different (phase 2+) job. */
+async function probeScale(cfg, issueKey, fetchImpl) {
+  try {
+    const doFetch = fetchImpl || globalThis.fetch;
+    const res = await doFetch(`${cfg.baseUrl}/rest/atm/1.0/testcase/${encodeURIComponent(issueKey)}`, {
+      headers: { Authorization: `Bearer ${cfg.pat}`, Accept: 'application/json' },
+      signal: AbortSignal.timeout(ZAPI_TIMEOUT_MS),
+      redirect: 'follow',
+    });
+    return res.status;
+  } catch {
+    return 0;
+  }
+}
+
+/** Shape probe (acquire.mjs `jira --probe`): fetch ONE Test issue's ZAPI
+ *  response and report its structure — types/key names/counts, never values,
+ *  so the output is safe to relay out of the intranet verbatim. */
+export async function probeZephyr(kbConfig, { fetchImpl } = {}) {
+  const cfg = resolveConfig(kbConfig, { maxResults: 1 });
+  const type = cfg.testIssueTypes[0];
+  // user JQL may end with ORDER BY — the type filter must go before it
+  const [head, tail] = cfg.jqlList[0].split(/\s+ORDER\s+BY\s+/i);
+  const jql = `${head} AND issuetype = "${type}"${tail ? ` ORDER BY ${tail}` : ''}`;
+  const { issues } = await searchAll({ ...cfg, max: 1 }, jql, fetchImpl);
+  if (!issues.length) return { probe: true, note: 'no-test-issue-found', jql };
+  const issue = issues[0];
+  const out = { probe: true, issue_key: issue.key || '', jql };
+  try {
+    const steps = await fetchTestSteps(cfg, issue.id, fetchImpl);
+    const d = describeShape(steps);
+    out.zephyr = {
+      http: 200,
+      isArray: d.type === 'array',
+      count: d.length ?? null,
+      firstItemKeys: d.keys || [],
+    };
+  } catch (err) {
+    out.zephyr = { http: err.status || 0, error: err.message };
+    out.scale = { http: await probeScale(cfg, issue.key, fetchImpl) };
+  }
+  return out;
 }
 
 /** Shared auth/config resolution for run() and check() — one reading
@@ -129,7 +257,16 @@ function resolveConfig(kbConfig, { jql, maxResults } = {}) {
   if (!Number.isInteger(max) || max <= 0) {
     throw new Error(`--max must be a positive integer (got ${JSON.stringify(maxResults)})`);
   }
-  return { ...auth, jqlList, max };
+  // Zephyr (phase 1): 'auto' probes once per run, true forces, false disables
+  const zephyr = j.zephyr === undefined ? 'auto' : j.zephyr;
+  if (!(zephyr === 'auto' || zephyr === true || zephyr === false)) {
+    throw new Error(`connectors.jira.zephyr must be "auto" | true | false (got ${JSON.stringify(j.zephyr)})`);
+  }
+  const testIssueTypes = j.test_issue_types === undefined ? ['Test'] : j.test_issue_types;
+  if (!Array.isArray(testIssueTypes) || testIssueTypes.some((t) => typeof t !== 'string' || !t)) {
+    throw new Error('connectors.jira.test_issue_types must be an array of non-empty strings');
+  }
+  return { ...auth, jqlList, max, zephyr, testIssueTypes };
 }
 
 async function jiraGet(cfg, pathAndQuery, fetchImpl) {
@@ -156,6 +293,20 @@ export async function check(kbConfig, { fetchImpl } = {}) {
   const auth = resolveAuth(kbConfig);
   const me = await jiraGet(auth, '/rest/api/2/myself', fetchImpl);
   return { name: me.name || '', displayName: me.displayName || '', emailAddress: me.emailAddress || '' };
+}
+
+/** Reusable JQL search for external callers (the Confluence jira-filter macro
+ *  resolver). Returns {issues, total} like searchAll, capped at max. */
+export async function searchJql(kbConfig, jql, { max = 20, fetchImpl } = {}) {
+  const auth = resolveAuth(kbConfig);
+  return searchAll({ ...auth, max }, String(jql), fetchImpl);
+}
+
+/** Single issue by key, minimal fields (jira-filter macro `key` parameter). */
+export async function getIssue(kbConfig, key, { fetchImpl } = {}) {
+  const auth = resolveAuth(kbConfig);
+  const q = new URLSearchParams({ fields: 'summary,status,assignee' });
+  return jiraGet(auth, `/rest/api/2/issue/${encodeURIComponent(String(key))}?${q}`, fetchImpl);
 }
 
 /** JQL search with startAt/maxResults pagination (per-JQL cap = cfg.max).
@@ -210,6 +361,15 @@ export async function run(kbRoot, { kbConfig, jql, maxResults, fetchImpl } = {})
   }
   summary.total = byKey.size;
 
+  // Zephyr state for this run: 'auto' starts undecided and probes on the
+  // first Test-type issue only; forced true is available from the start
+  const testTypes = new Set(cfg.testIssueTypes);
+  let zephyrAvailable = cfg.zephyr === true;
+  let zephyrState = cfg.zephyr === false ? 'disabled' : null;
+  let probed = false;
+  let sawTestIssue = false;
+  let totalSteps = 0;
+
   for (const [key, issue] of byKey) {
     if (!SAFE_SOURCE_ID.test(key)) {
       summary.errors.push({ key, error: `non-compliant issue key (contract §2): ${key}` });
@@ -217,7 +377,33 @@ export async function run(kbRoot, { kbConfig, jql, maxResults, fetchImpl } = {})
     }
     try {
       const f = issue.fields || {};
-      const body = issueToMarkdown(issue, cfg.baseUrl);
+
+      // Zephyr steps: ZAPI takes the numeric issue.id, NOT the key
+      const isTest = testTypes.has(f.issuetype?.name || '');
+      let testSteps = null;
+      if (isTest) {
+        sawTestIssue = true;
+        if (cfg.zephyr !== false && (zephyrAvailable || (cfg.zephyr === 'auto' && !probed))) {
+          try {
+            testSteps = parseTestSteps(await fetchTestSteps(cfg, issue.id, fetchImpl));
+            totalSteps += testSteps.length;
+            if (!zephyrAvailable) { zephyrAvailable = true; zephyrState = 'available'; }
+          } catch (err) {
+            if (cfg.zephyr === 'auto' && !probed && (err.status === 404 || err.status === 403)) {
+              // plugin absent (or no permission): degrade to plain issue = pre-phase-1 behavior
+              zephyrState = 'unavailable';
+              if ((await probeScale(cfg, key, fetchImpl)) === 200) {
+                summary.zephyr_hint = 'Zephyr Scale endpoint detected (/rest/atm); Squad steps unavailable — Scale adaptation is phase 2+';
+              }
+            } else {
+              summary.errors.push({ key, error: `zephyr steps: ${err.message}` });
+            }
+          }
+          if (cfg.zephyr === 'auto') probed = true;
+        }
+      }
+
+      const body = issueToMarkdown(issue, cfg.baseUrl, { testSteps });
       const result = upsertRawDoc(kbRoot, {
         source: 'jira',
         sourceId: key,
@@ -235,6 +421,7 @@ export async function run(kbRoot, { kbConfig, jql, maxResults, fetchImpl } = {})
           labels: (f.labels || []).join(', '),
           components: (f.components || []).map((c) => c.name || '').join(', '),
           fix_versions: (f.fixVersions || []).map((v) => v.name || '').join(', '),
+          ...(testSteps?.length ? { test_steps: String(testSteps.length) } : {}),
         },
         contentHash: sha256(body),
         body,
@@ -248,5 +435,12 @@ export async function run(kbRoot, { kbConfig, jql, maxResults, fetchImpl } = {})
       summary.errors.push({ key, error: err.message });
     }
   }
+  // field omitted entirely when no Test-type issue was seen (Bug-only scopes
+  // stay exactly as before); first post-upgrade run re-hashes every Test
+  // issue (new body section) — one expected "updated" wave
+  if (sawTestIssue) {
+    summary.zephyr = cfg.zephyr === false ? 'disabled' : zephyrState || (zephyrAvailable ? 'available' : 'unavailable');
+  }
+  if (totalSteps) summary.test_steps = totalSteps;
   return summary;
 }
