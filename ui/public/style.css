@@ -457,3 +457,25 @@ button.danger-solid { background: var(--wine); border-color: var(--wine); color:
 .judge-chip.s1 { background: var(--amber); }
 .judge-chip.s0 { background: var(--wine); }
 .judge-chip.pending, .judge-chip.na { background: none; border: 1px dashed var(--line); color: var(--ink-dim); }
+
+/* ---- J9 feedback ---- */
+.vote-btn { display: inline-flex; padding: 2px; margin-left: 4px; border-radius: 4px;
+  color: var(--ink-dim); cursor: pointer; vertical-align: -2px; }
+.vote-btn:hover { color: var(--celadon); background: var(--celadon-soft); }
+.vote-btn.voted { color: var(--celadon); background: var(--celadon-soft); }
+.vote-btn.voted-off { opacity: .35; pointer-events: none; }
+.down-panel { margin: 8px 0 2px; font-size: 12.5px; }
+.down-panel summary { color: var(--ink-dim); cursor: pointer; }
+.down-panel a { color: var(--celadon); }
+
+/* ---- B5 query history ---- */
+.hist-panel { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
+.hist-item { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px;
+  border: 1px solid var(--line); border-radius: 999px; font-size: 12px; background: var(--paper-raise); }
+.hist-item a { color: var(--ink); text-decoration: none; }
+.hist-item a:hover { color: var(--celadon); }
+.hist-item.saved { border-color: var(--celadon); }
+.hist-item.saved a { color: var(--celadon); font-weight: 600; }
+.hist-star { cursor: pointer; color: var(--ink-dim); font-size: 12px; }
+.hist-star:hover { color: var(--celadon); }
+.hist-item.saved .hist-star { color: var(--celadon); }

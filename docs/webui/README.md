@@ -58,8 +58,12 @@
   判官无文件系统)+ /api/judge(固定 rubric 0-3,top-5 单次批量)+ 检索页异步
   徽标(K1);Promptfoo 不落(依赖重),K4 校准跑法留欠账;54 测试全绿,
   真实 claude 冒烟(评分梯度合理,26.1s 批量)
-- 🔵 **余量**:backlog(J9 闭环 → B5 查询历史;copilot/Azure judge 适配器待端点验证)
-- ⬜ 并行欠账:真实环境验收 docs/real-env-test.md(全系统级,排最前,需真实 PAT/服务器)
+- ✅ **J9 反馈闭环 + B5 查询历史(backlog 收尾)— 完成**(2026-08-03):结果卡片
+  👍/👎 → .kb/ui/feedback.jsonl(队列内),👎 面板=黄金集候选池;查询历史/保存
+  走 localStorage(KB 维度);56 测试全绿,Playwright 验证。**需求清单全部条目
+  至此均有交付或留痕**
+- 🔵 **余欠账**:真实环境验收 docs/real-env-test.md(排最前,需真实 PAT/服务器);
+  K4 judge 校准跑法;copilot/Azure judge 适配器(端点待验证)
 
 硬约束(全程有效):现有三服务(acquisition/governance/retrieval)零改动、零反向依赖;
 前端可依赖现有服务;内网离线,依赖越少越好;继承 viewer 三条红线(按需启动 /

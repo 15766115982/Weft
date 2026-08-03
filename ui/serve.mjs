@@ -26,6 +26,7 @@ import { createWatcher } from './lib/watch.mjs';
 import { governJob, governRunJob } from './lib/govern.mjs';
 import { saveWikiEditJob } from './lib/edit.mjs';
 import { judge, judgeNames } from './lib/judge.mjs';
+import { feedbackJob, readFeedback } from './lib/feedback.mjs';
 import { plan } from '../governance/scripts/lib/govern.mjs';
 import {
   UPLOAD_MAX, uploadJob, pullJob, inboxDeleteJob, rawDeleteJob, rawMoveJob,
@@ -192,6 +193,10 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
         // I5 plan-as-preview: the full six lists (paths + titles + reasons) —
         // health() serves counts to the dashboard; this serves the confirm page.
         if (url.pathname === '/api/plan') return json(res, 200, plan(kb));
+        // J9: recent feedback votes (the 👎 panel in search)
+        if (url.pathname === '/api/feedback') {
+          return json(res, 200, { entries: readFeedback(kb, { vote: url.searchParams.get('vote') || undefined }) });
+        }
         // The govern skill's canonical path — the default agent prompt points
         // at it so runs follow the real workflow EVEN when the skill is not
         // registered in the executor's environment (e2e finding 2026-08-02).
@@ -291,6 +296,16 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
           }
           const out = await judge(backend, String(q), results.slice(0, 10));
           return json(res, 200, out);
+        }
+
+        // J9: record a 👍/👎 vote (tiny append, still inside the serial queue
+        // — every KB-touching write is, S10).
+        if (url.pathname === '/api/feedback') {
+          const { q, page, vote, kb: kbName } = JSON.parse(await readBody(req) || '{}');
+          const kb = registry.resolve(kbName).path;
+          const job = await jobs.waitFor(jobs.enqueue(kb, feedbackJob(kb, { q, page, vote })));
+          if (job.status === 'failed') throw new Error(job.error);
+          return json(res, 200, { recorded: true });
         }
 
         // M7d H1/H2: human wiki edit (whitelist ⑤). Bigger body limit — pages

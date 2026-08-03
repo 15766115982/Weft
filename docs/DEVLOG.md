@@ -8,6 +8,24 @@
 > **M7 UI portal: process + design docs in `docs/webui/`** (requirements frozen, option 1
 > no-build SPA selected, ADR-0006, contract §1 UI-portal column, S7 spike report).
 
+## J9 + B5 (2026-08-03, 56 UI tests green): feedback loop + query history — backlog cleared
+
+- **J9 反馈闭环**: result cards gain 👍/👎 vote buttons (event delegation, one
+  vote per card); votes append one JSON line each to `.kb/ui/feedback.jsonl`
+  (whitelist ④) via a queued job (S10 discipline holds even for tiny writes).
+  The 👎 panel above the results lists down-voted queries — the **golden-set
+  candidate pool**, one click re-runs; curation into tests/eval stays a manual
+  step (documented), the K judge is the in-product complement, Hit@5 the CI
+  backstop — the living loop: retrieval → feedback → regression corpus.
+- **B5 查询历史/保存**: localStorage, KB-scoped keys (`ui.search-history.<kb>`
+  / `ui.search-saved.<kb>`) — no server round-trip for a convenience list.
+  Chip row above results: ★ saved items + last 8 recent (deduped, star to
+  save, click to re-run, survives reload).
+- Playwright: vote → 👎 panel ✓ history record/save/re-run/persist ✓ zero JS errors.
+
+**需求清单全部条目至此均有交付或留痕。余欠账:真实环境验收(排最前)、
+K4 judge 校准跑法、copilot/Azure judge 适配器(端点待验证)。**
+
 ## K phase 1 (2026-08-03, 54 UI tests green + real-claude smoke): LLM judge + async badge
 
 Block K direction was already ruled in requirements (self-built lightweight judge,
