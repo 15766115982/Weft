@@ -447,3 +447,13 @@ button.danger-solid { background: var(--wine); border-color: var(--wine); color:
 .batch-all input, .batch-row input { width: auto; margin: 0; }
 .batch-row { display: flex; align-items: center; gap: 7px; padding-right: 4px; }
 .batch-row a { flex: 1; min-width: 0; }
+
+/* ---- K1 judge badge ---- */
+.judge-chip { display: inline-flex; align-items: center; justify-content: center; min-width: 18px;
+  height: 18px; padding: 0 4px; border-radius: 5px; font-family: var(--font-mono);
+  font-size: 11px; font-weight: 600; color: #fff; vertical-align: 1px; cursor: default; }
+.judge-chip.s3 { background: var(--pine); }
+.judge-chip.s2 { background: var(--celadon); }
+.judge-chip.s1 { background: var(--amber); }
+.judge-chip.s0 { background: var(--wine); }
+.judge-chip.pending, .judge-chip.na { background: none; border: 1px dashed var(--line); color: var(--ink-dim); }

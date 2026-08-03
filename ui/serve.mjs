@@ -25,6 +25,7 @@ import { createJobCenter } from './lib/jobs.mjs';
 import { createWatcher } from './lib/watch.mjs';
 import { governJob, governRunJob } from './lib/govern.mjs';
 import { saveWikiEditJob } from './lib/edit.mjs';
+import { judge, judgeNames } from './lib/judge.mjs';
 import { plan } from '../governance/scripts/lib/govern.mjs';
 import {
   UPLOAD_MAX, uploadJob, pullJob, inboxDeleteJob, rawDeleteJob, rawMoveJob,
@@ -273,6 +274,23 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
           }));
           if (job.status === 'failed') throw new Error(job.error);
           return json(res, 200, job.result);
+        }
+
+        // K1 judge (block K): pointwise 0-3 rubric over the query's top
+        // results. Read-only (no KB writes) → off-queue like authCheck. The
+        // snippet payload is untrusted KB content — the judge backend runs
+        // tool-less (judge.mjs), its output is display-only.
+        if (url.pathname === '/api/judge') {
+          const { q, results, backend = 'claude', kb: _kbName } = JSON.parse(await readBody(req) || '{}');
+          if (!q || !String(q).trim()) return json(res, 400, { error: 'judge requires a query string' });
+          if (!Array.isArray(results) || !results.length || results.length > 10) {
+            return json(res, 400, { error: 'results must be a non-empty array (≤10)' });
+          }
+          if (!judgeNames().includes(backend)) {
+            return json(res, 400, { error: `unknown judge backend: ${backend} (registered: ${judgeNames().join(', ')})` });
+          }
+          const out = await judge(backend, String(q), results.slice(0, 10));
+          return json(res, 200, out);
         }
 
         // M7d H1/H2: human wiki edit (whitelist ⑤). Bigger body limit — pages

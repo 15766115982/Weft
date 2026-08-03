@@ -8,6 +8,36 @@
 > **M7 UI portal: process + design docs in `docs/webui/`** (requirements frozen, option 1
 > no-build SPA selected, ADR-0006, contract §1 UI-portal column, S7 spike report).
 
+## K phase 1 (2026-08-03, 54 UI tests green + real-claude smoke): LLM judge + async badge
+
+Block K direction was already ruled in requirements (self-built lightweight judge,
+zero Python); this is phase 1: K1 badge + K3 registry with its first adapter.
+
+- **ui/lib/judge.mjs — the judge half of the "LLM backend registry"** (M7c
+  reviewer note): registerJudge(name, chatFn) mirrors executor.mjs's
+  registerExecutor — executor = name→startRun, judge = name→chat→text, same
+  plug-point discipline (tests register 'mock' through the same path).
+  First adapter `claude`: claude.cmd -p, prompt via stdin, **tools disabled
+  (--disallowedTools)** — the judge's input is untrusted KB content, so it
+  must not have a filesystem; output is display-only. copilot-proxy / Azure
+  SPN adapters plug in here once their endpoints are verified (still 待验证
+  in requirements since 2026-08-02).
+- **K2 scope note**: fixed rubric (0-3 pointwise + ≤15-word reason), ONE call
+  for all top-5 (not five serial calls). **Promptfoo CI deliberately not
+  vendored** (heavy npm dep, intranet rule) — the existing tests/eval
+  Hit@5=1.000 gate stays the CI regression; judge calibration vs the golden
+  set (K4) is a manual run, recorded as a leftover.
+- **/api/judge**: read-only → off-queue (authCheck precedent); q + ≤10 results
+  validation; parseVerdicts tolerates prose around the JSON array, clamps
+  scores to 0-3, and marks unjudged slots null instead of failing.
+- **search view (K1)**: results render immediately; top-5 cards get a pending
+  chip, the badge (3 pine / 2 celadon / 1 amber / 0 wine) lands when the judge
+  returns, tooltip = reason + backend + latency; head line gains judge timing.
+  Same seq race guard as the search itself.
+- Real-claude smoke (demo KB, "retry compensation"): 5 verdicts with sensible
+  gradation (saga compensation page = 3, adjacent pages = 1-2), 26.1s batched
+  latency — the async badge absorbs it. Zero JS errors.
+
 ## C5 (2026-08-03, 49 UI tests green): batch review — first backlog item
 
 User ruling 2026-08-03 (AskUserQuestion, requirements 排期记录 C5 "需详细讨论" 的落地):

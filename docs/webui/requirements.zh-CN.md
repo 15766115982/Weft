@@ -158,14 +158,21 @@
 ## 块 K · 评测服务(backlog,调研已完成 → research-eval.zh-CN.md)
 
 - K1 每次搜索可看到本次结果的评测质量——**形态定为异步徽标**(搜索立即渲染,judge
-  后台跑,完成浮现;top-5 约 3-6s、3-4k tokens/查询)【用户+调研】
+  后台跑,完成浮现;top-5 约 3-6s、3-4k tokens/查询)【用户+调研】→ **已交付
+  (2026-08-03)**:top-5 单次调用批量评分,徽标 3 松绿/2 青瓷/1 琥珀/0 枣红,
+  tooltip 理由+后端+耗时
 - K2 **方案已定方向(待排期)**:自研轻量 judge(Node 直调 LLM,pointwise 0-3 分 + 理由,
   固定 rubric + temp=0)+ Promptfoo 做 CI 黄金集回归——**全程零 Python**;不选 RAGAS
-  (依赖重/要 embedding)、Python sidecar 仅作远期备选【调研结论】
+  (依赖重/要 embedding)、Python sidecar 仅作远期备选【调研结论】→ **部分交付
+  (2026-08-03)**:自研 judge 已交付(固定 rubric,解析容错);**Promptfoo 不落**
+  (npm 依赖重,违反内网离线规则)——CI 回归继续用现有 tests/eval Hit@5=1.000 门
 - K3 judge 与块 I agent 执行器**共用同一套 LLM 后端抽象**(三适配器:copilot proxy /
-  Azure SPN[msal-node 或纯 fetch]/ claude -p 备用+交叉验证)【推导+调研】
+  Azure SPN[msal-node 或纯 fetch]/ claude -p 备用+交叉验证)【推导+调研】→ **首个
+  适配器已交付(2026-08-03)**:judge.mjs 注册点(与 executor.mjs 互为镜像,合称
+  "LLM backend registry")+ claude 适配器(--disallowedTools 无文件系统);
+  copilot/Azure 端点仍待验证,验证后同一点注册
 - K4 现有 tests/eval 黄金集(Hit@5=1.000 回归门)同时用作 **judge 准确性的元回归校准**;
-  LLM-judge 是补充不是替代【推导+调研】
+  LLM-judge 是补充不是替代【推导+调研】→ 校准跑法待做(手动脚本,记入欠账)
 
 ## 已排除
 

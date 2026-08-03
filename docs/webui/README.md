@@ -53,7 +53,12 @@
 - ✅ **C5 批量评审(backlog 第一项)— 完成**(2026-08-03):用户拍板(复选框+全选 /
   批准直接 / 拒绝 armed 二次确认带归档后果文案);/api/review-batch 单队列作业逐页
   容错(409/遍历/缺失不中断批次);队列页批量操作条;49 测试全绿,Playwright 验证
-- 🔵 **余量**:backlog(K 评测(LLM backend registry)→ J9 → B5)
+- ✅ **K 评测一期(backlog)— 完成**(2026-08-03):judge.mjs 注册点(LLM backend
+  registry 的 judge 半区,与 executor 镜像)+ claude 适配器(--disallowedTools,
+  判官无文件系统)+ /api/judge(固定 rubric 0-3,top-5 单次批量)+ 检索页异步
+  徽标(K1);Promptfoo 不落(依赖重),K4 校准跑法留欠账;54 测试全绿,
+  真实 claude 冒烟(评分梯度合理,26.1s 批量)
+- 🔵 **余量**:backlog(J9 闭环 → B5 查询历史;copilot/Azure judge 适配器待端点验证)
 - ⬜ 并行欠账:真实环境验收 docs/real-env-test.md(全系统级,排最前,需真实 PAT/服务器)
 
 硬约束(全程有效):现有三服务(acquisition/governance/retrieval)零改动、零反向依赖;
