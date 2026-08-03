@@ -1,5 +1,9 @@
 # Development Log (as of 2026-08-03, M0-M6 complete + cross-service test layer + M7a-d UI portal + A7 graph)
 
+> **项目定名 Weft(2026-08-03,用户拍板)**:纬线——wikilink 把页面织成网。
+> 仓库目录沿用 knowledge-extension;portal 品牌位(index.html title/brand)、
+> README、guide 已换新名。
+
 > Restart entry point after context compaction. Architecture decisions: `CONTEXT.md`;
 > three-party contract: `schema/contract.md` + `schema/governance.md` (§1 language
 > convention: wiki all-English, raw keeps source language); six ADRs in `docs/adr/`.

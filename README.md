@@ -1,4 +1,6 @@
-# Self-Governing Knowledge Base (knowledge-extension)
+# Weft — Self-Governing Knowledge Base
+
+> Weft(纬线):wikilink 把页面织成网。项目原名 knowledge-extension(仓库目录名沿用)。
 
 A self-governing knowledge base system for Claude Code: three fully decoupled services —
 **acquisition** (Jira / Confluence / local files → normalized `raw/`), **governance**
