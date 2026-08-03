@@ -5,12 +5,12 @@
   "type": "module",
   "private": true,
   "engines": {
-    "node": "^20"
+    "node": ">=20"
   },
   "scripts": {
     "test": "node --test test/"
   },
   "dependencies": {
-    "better-sqlite3": "^11.10.0"
+    "better-sqlite3": "~12.4.6"
   }
 }

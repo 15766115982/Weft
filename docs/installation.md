@@ -12,7 +12,7 @@ takes you from zero to a working knowledge base connected to intranet Jira/Confl
 
 | Requirement | Version | Why |
 |---|---|---|
-| Node.js | **20.x (pinned)** | global `fetch`, `AbortSignal.timeout`, `node --test`. **Do not use another major version**: `better-sqlite3` is the repo's only native dependency and its prebuilt binary is ABI-locked — on Node 21+ it fails with `ERR_DLOPEN_FAILED` and retrieval silently breaks (the UI shows HTTP 400 on search). If you must run a different major, reinstall `better-sqlite3` under that Node. |
+| Node.js | **≥ 20** (verified on 20 / 22 / 24) | global `fetch`, `AbortSignal.timeout`, `node --test`. The repo's only native dependency, `better-sqlite3`, is ranged `~12.4.x`: its prebuilt binaries cover Node 20–25 (12.5+ dropped the Node 20 prebuild, so the range is capped there). Switching Node majors needs no config change — `npm install` downloads the prebuilt binary matching your current Node. |
 | npm | bundled with Node | installs the single native dependency (`better-sqlite3`, prebuilt binary — no compiler needed) |
 | Git | any recent | the KB is a Git repository |
 | Claude Code | any recent | the three services are invoked as skills |

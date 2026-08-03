@@ -16,7 +16,7 @@
 
 - ✅ **M7a 只读全套 — 完成**(2026-08-02):slice 1-4,14 测试全绿;质量审核
   (M7a-review.zh-CN.md,零误判)全部修复,三项裁决已记录(J3-5→M7b /
-  A5 分屏对照+raw 反查现补 / Node 钉 20.x)
+  A5 分屏对照+raw 反查现补 / Node ≥ 20)
 - ✅ **M7b 采集控制台 — 完成**(2026-08-02):jobs.mjs(S10 per-KB 串行写队列,
   jobs.jsonl 持久化 + 死进程墓碑)+ 上传 E(raw bytes + X-Filename,32MB,入队后
   写 inbox → acquire 单作业)+ 源拉取 F(jql/cql/max 覆盖)+ raw 删除/移动 G

@@ -8,7 +8,7 @@
 > ① J3/J4/J5 由 M7a 正式挪至 **M7b**(与 jobs.mjs/fs-watch 一起设计);
 > J3 以过渡形态在 M7a 先行(写后刷新 + health 30s 轮询 + 手动刷新钮);
 > ② A5 升级为**并排分屏对照 + raw→wiki 反向溯源**(2026-08-02 交付,与 G5 共用 frontmatter 扫描);
-> ③ Node 版本钉 20.x(better-sqlite3 ABI 锁定),engines ^20。
+> ③ Node ≥ 20(better-sqlite3 ~12.4.x,预编译覆盖 Node 20–25),engines >=20。
 > **交付记录(2026-08-02):M7a(A-D 全套)与 M7b(E-G + J3-J6 + I6 作业中心)均已交付**;
 > J3 最终形态为 fs-watch + SSE(.kb 排除 + 400ms 防抖),30s 轮询保留为 SSE 失效兜底。
 > **裁决记录(2026-08-02,M7c 开工前用户拍板)**:
