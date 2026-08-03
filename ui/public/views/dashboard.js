@@ -8,6 +8,24 @@ const STAT = (ic, num, label) => `<div class="stat">
   <div class="stat-top"><span class="ic">${icon(ic, 14)}</span><span class="label">${esc(label)}</span></div>
   <div class="num">${esc(num)}</div></div>`;
 
+// F1: relative time for the last-governance-run card
+function relTime(iso) {
+  const ms = Date.now() - Date.parse(iso);
+  if (!Number.isFinite(ms) || ms < 0) return iso;
+  const m = Math.floor(ms / 60000);
+  if (m < 1) return '刚刚';
+  if (m < 60) return `${m} 分钟前`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} 小时前`;
+  return `${Math.floor(h / 24)} 天前`;
+}
+
+const RUN_STATUS = {
+  complete: ['✓ 完成', ''], failed: ['✗ 失败', 'color:#c0392b'],
+  cancelled: ['■ 已取消', ''], interrupted: ['⚠ 中断(未完成,需重跑)', 'color:#b8860b'],
+  running: ['… 进行中', ''],
+};
+
 export async function render(view) {
   const [h, log] = await Promise.all([
     api('/api/health'),
@@ -38,6 +56,19 @@ export async function render(view) {
   const dossier = el('div', { class: 'dossier' });
   html(dossier, `这座知识库${bits.join(',')}${last ? `;最近一次动作是 <b>${esc(last.actor)}:${esc(last.action)}</b>(${esc(last.ts.slice(0, 10))})` : ''}。`);
   view.append(dossier);
+
+  // F1: last agent-governance run (from .kb/govern_runs.jsonl via /api/health)
+  if (h.lastGovernRun) {
+    const r = h.lastGovernRun;
+    const [label, style] = RUN_STATUS[r.status] || [r.status, ''];
+    const bits = [`<span style="${style}"><b>${esc(label)}</b></span>`, esc(relTime(r.ts))];
+    if (r.durationMs != null) bits.push(`耗时 ${esc(Math.round(r.durationMs / 1000))}s`);
+    if (r.noop) bits.push('<span class="via">无变更</span>');
+    if (r.boundaryViolations) bits.push(`<span style="color:#c0392b">⚠ ${r.boundaryViolations} 个边界违规</span>`);
+    const card = el('div', { class: 'dossier' });
+    html(card, `上次 agent 治理:${bits.join(' · ')} — <a href="#/govern">治理控制台</a>`);
+    view.append(card);
+  }
 
   if (h.stale) {
     const ctaBits = [];

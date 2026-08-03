@@ -30,6 +30,7 @@ A knowledge base instance is a directory on disk, itself an independent Git repo
     ├── search_state.json    # incremental hash state of the index
     ├── candidates/          # query candidate spaces persisted to disk by the retrieval script (temporary)
     ├── acquire_runs.jsonl   # per-source pull records appended by the acquisition service (one JSON line per run; the only record of all-skipped incremental pulls)
+    ├── govern_runs.jsonl    # agent-governance run records appended by the UI portal (two lines per run: phase start/finish; a start with no finish reads as interrupted)
     └── ui/                  # UI portal derived artifacts (jobs.db, eval scores, snapshots/), exclusive write by the UI portal
 ```
 
@@ -39,8 +40,8 @@ A knowledge base instance is a directory on disk, itself an independent Git repo
 |---|---|---|---|---|---|
 | `raw/` | **write** | read | forbidden | read | read + **delete/move only** (see rules) |
 | `wiki/` | forbidden | **write** | read | only frontmatter `status` (candidate → approved / rejected) | same flip primitive + **human body edits** (demote rule, see ⑤) |
-| `log.md` | **append** | **append** | read | forbidden | **append** (manual-edit entries only) |
-| `.kb/` | only `acquire_runs.jsonl` append | forbidden | **write** | read | only `.kb/ui/` **write**, rest read |
+| `log.md` | **append** | **append** | read | forbidden | **append** (manual-edit entries: `candidate:manual`, `file:edit`) |
+| `.kb/` | only `acquire_runs.jsonl` append | forbidden | **write** | read | `.kb/ui/` **write** + `govern_runs.jsonl` append, rest read |
 | `kb.json` | read | read | read | read | read |
 
 Rules:
@@ -65,7 +66,10 @@ Rules:
   `govern | candidate:*` (pending-review semantics). Provenance fields
   (`source_ref`/`sources`) are never touched by this path — drift between edited
   content and provenance is reconciled by later agent governance rounds, not by the
-  editor. Everything else is read-only. Its write operations go
+  editor. ⑥ **KB-root whitelisted files** (GOVERNANCE.md — the user-owned governance
+  brief injected into every agent run's prompt; F3 2026-08-03): editable with the same
+  optimistic-lock discipline as ⑤, audited as `portal | file:edit` log.md entries;
+  the whitelist is a fixed set in code, never user-extensible. Everything else is read-only. Its write operations go
   through a per-KB serial queue; its destructive operations preserve a restorable
   snapshot (git commit when the KB is a repository, file-copy snapshot otherwise);
 - Everything inside `.kb/` can be fully rebuilt from `wiki/` (plus, for

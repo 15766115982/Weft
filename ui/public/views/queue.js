@@ -119,9 +119,36 @@ async function renderReview(container, rel, onDone) {
 export async function render(view, params) {
   // /api/queue is the queue's source of truth (P2-4 — no client-side filter
   // duplicating it); /api/tree only feeds the wikilink resolver
-  const [treeData, queueData] = await Promise.all([api('/api/tree'), api('/api/queue')]);
+  const [treeData, queueData, planData] = await Promise.all([
+    api('/api/tree'), api('/api/queue'), api('/api/plan').catch(() => null),
+  ]);
   setKnownPages(treeData.pages);
   queue = queueData.pages;
+
+  // F4 structure-findings banner: the queue is where users ACT on problems,
+  // so dangling links / anomalies / errors surface here (live plan data, not
+  // run history — this also covers partial changes from failed runs).
+  if (planData) {
+    const findings = [
+      ...planData.dangling_links.map((d) => ({ text: `悬空链接 [[${d.link}]]`, page: d.page })),
+      ...[...planData.anomalies, ...planData.errors].map((a) => ({
+        text: `${a.title || a.raw || a.page} — ${a.reason || a.error || ''}`, page: a.page && String(a.page).startsWith('wiki/') ? a.page : null,
+      })),
+    ];
+    if (findings.length) {
+      const banner = el('div', { class: 'stale-cta', style: 'margin-bottom:10px' });
+      html(banner, `${icon('circleAlert', 15)} <b>结构问题 ${findings.length} 项</b>(治理后校验/实时 plan):`);
+      const ul = el('ul', { style: 'margin:6px 0 0;padding-left:18px' });
+      for (const f of findings.slice(0, 8)) {
+        const li = el('li', { style: 'font-size:12.5px' });
+        html(li, f.page ? `<a href="#/page?path=${encodeURIComponent(f.page)}">${esc(f.text)}</a>` : esc(f.text));
+        ul.append(li);
+      }
+      if (findings.length > 8) ul.append(el('li', { class: 'dim', style: 'font-size:12px' }, `…共 ${findings.length} 项,完整清单见治理控制台`));
+      banner.append(ul);
+      view.append(banner);
+    }
+  }
 
   const wrap = el('div', { class: 'browse' });
   const list = el('nav', { class: 'tree', style: 'width:260px' });

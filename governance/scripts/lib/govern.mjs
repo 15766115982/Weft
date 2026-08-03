@@ -349,9 +349,16 @@ export function rebuildIndex(kbRoot) {
   const parts = ['# Wiki Index', ''];
   if (topics.length) parts.push('## Topics', ...topics.sort(), '');
   if (sources.length) parts.push('## Sources', ...sources.sort(), '');
-  fs.writeFileSync(path.join(kbRoot, 'wiki', 'index.md'), parts.join('\n'), 'utf8');
+  const out = parts.join('\n');
+  const indexAbs = path.join(kbRoot, 'wiki', 'index.md');
+  // No-op guard (openwiki-inspired): a byte-identical regeneration leaves the
+  // file and log.md untouched, so scheduled/manual rebuilds don't churn.
+  if (fs.existsSync(indexAbs) && fs.readFileSync(indexAbs, 'utf8') === out) {
+    return { topics: topics.length, sources: sources.length, skipped: true };
+  }
+  fs.writeFileSync(indexAbs, out, 'utf8');
   appendLog(kbRoot, 'govern', 'auto:rebuild-index', 'wiki/index.md', `topics:${topics.length} sources:${sources.length}`);
-  return { topics: topics.length, sources: sources.length };
+  return { topics: topics.length, sources: sources.length, skipped: false };
 }
 
 /* ---------------- candidate state machine (contract §4) ---------------- */

@@ -26,7 +26,7 @@
 
 三条硬约束,先知道不踩雷:
 
-1. **Node 必须 20.x**——唯一的原生依赖 better-sqlite3 按 ABI 钉版;
+1. **Node ≥ 20**(20 / 22 / 24 均可)——唯一原生依赖 better-sqlite3 的预编译二进制覆盖 Node 20–25;
 2. **一切都是本机单人的**——portal 只听 127.0.0.1,没有账号系统;
 3. **内网离线可跑**——全系统无 Python,唯一的 npm 依赖可以离线拷贝。
 
@@ -34,7 +34,7 @@
 
 | 要求 | 验证命令 | 预期 |
 |---|---|---|
-| Node.js **20.x** | `node --version` | `v20.x.y`。**不是 20 就去装 20**,别用 21/22/24 凑合(检索会静默坏掉:UI 搜索报 HTTP 400) |
+| Node.js **≥ 20** | `node --version` | `v20` / `v22` / `v24` 均可(预编译二进制覆盖 Node 20–25)。低于 20 才需要升级 |
 | npm | `npm --version` | 随 Node 自带 |
 | Git | `git --version` | 任意近期版本 |
 | Claude Code | `claude --version` | 任意近期版本;且 **`claude.cmd` 在 PATH 里**(portal 的 agent 治理要靠它,Windows 装完 Claude Code 默认就在) |
@@ -205,7 +205,7 @@ node <repo>/retrieval/scripts/kb_search.mjs search "test" --kb D:\kb\work
 # 预期:JSON;哪怕 0 命中也是正常输出,不是报错
 ```
 
-④如果报 `ERR_DLOPEN_FAILED` → Node 版本不对,回第 1 节。
+④如果报 `ERR_DLOPEN_FAILED` → better-sqlite3 二进制与当前 Node 不匹配,在 `retrieval/scripts` 下重跑 `npm install`。
 
 ## 7. 启动 KB Portal(核心)
 
@@ -258,11 +258,17 @@ note: run at most ONE portal per knowledge base (the serial write queue is per-p
    一目了然(pending 里是你刚传的文档);
 3. **发起 agent 治理**:点「发起 agent 治理」→ 提示词已预填好
    (通常不用改)→「启动运行」。转写区实时滚动:agent 读 skill、跑脚本、
-   读 raw、写候选页。一两分钟后作业变绿;
+   读 raw、写候选页。一两分钟后作业变绿,下方出现**治理后校验卡**
+   (悬空链接/异常/孤儿页计数,悬空链接可直接跳到所在页面);
    - **这一步在干什么**:portal 用你机器上的 `claude.cmd` 跑了一个
      headless agent,权限被限定在知识库目录内(acceptEdits + 自动生成的
      allow-list,细节见 `docs/webui/spike-p2-2.zh-CN.md`)——它**写不了
      KB 以外的地方**,跑完还有一道 git 越界检查;
+   - **治理纲要(GOVERNANCE.md)**:治理页「治理纲要」区可以给 agent 写
+     **常驻指令**(范围/优先级/页面粒度/语言约定,首次使用点「插入模板」)。
+     它由服务端注入每次运行的提示词前部,agent 无权修改它——与单次
+     提示词的关系 = 宪法与本期任务。首页会显示「上次 agent 治理」的
+     状态(完成/失败/中断/无变更);
 4. **评审**:点「评审」→ 队列里是 agent 起草的候选页。逐条看(左边列表
    勾选可**批量批准**;拒绝会二次确认,因为拒绝的页面会被归档);
 5. **检索**:点「检索」→ 输入文档里的词 → 命中卡片即时出现;几秒后
@@ -334,7 +340,7 @@ skill 链接始终指向仓库,不用重做;SKILL.md 有改动就重启 Claude C
 
 ```
 请按 D:\claude\knowledge-extension\docs\guide.zh-CN.md 给我完整安装这个项目:
-1) 先核对第 1 节前置要求(Node 必须 20.x,claude.cmd 在 PATH);
+1) 先核对第 1 节前置要求(Node ≥ 20,claude.cmd 在 PATH);
 2) 执行第 3 节(install.cmd 或手动 npm install + junction 链接三个 skill);
 3) 按第 4 节在 D:\kb\work 创建知识库(git init + .gitignore + 最小 kb.json);
 4) 跑第 6 节冒烟测试(只用 local 连接器,inbox 里放一个示例 .md);
@@ -349,7 +355,7 @@ Claude Code 会自己读这份指南逐步执行——本指南的写作精度�
 
 | 症状 | 原因 / 处理 |
 |---|---|
-| UI 搜索报 HTTP 400 / `ERR_DLOPEN_FAILED` | Node 不是 20.x——better-sqlite3 的预编译二进制按 ABI 钉版。换 Node 20,或在你的 Node 版本下重装 better-sqlite3 |
+| UI 搜索报 HTTP 400 / `ERR_DLOPEN_FAILED` | better-sqlite3 的预编译二进制与当前 Node 大版本不匹配——在 `retrieval/scripts` 下重跑 `npm install`(会按当前 Node 重新下载对应二进制) |
 | `SELF_SIGNED_CERT_IN_CHAIN` | 内部 CA——设 `NODE_EXTRA_CA_CERTS`(5.2);绝不关 TLS 校验 |
 | `authentication failed HTTP 401` | PAT 错/过期——网页端重建;`setx` 后要开**新**终端 |
 | 启动 portal 报 `EADDRINUSE` | 旧 portal 还占着 8322:`netstat -ano | findstr :8322` 找到 PID,`taskkill /PID <pid> /F` |
@@ -364,7 +370,7 @@ Claude Code 会自己读这份指南逐步执行——本指南的写作精度�
 
 ## 15. 安装完成自检单
 
-- [ ] `node --version` 是 v20.x
+- [ ] `node --version` ≥ 20(20 / 22 / 24 均可)
 - [ ] `~/.claude/skills/` 下有三个链接,各含 SKILL.md
 - [ ] 冒烟 ①-④ 全部符合预期
 - [ ] `http://127.0.0.1:8322` 打开,空库引导卡可见

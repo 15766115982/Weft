@@ -61,14 +61,24 @@ export function buildAgentSettings(kbRoot) {
   const dir = path.join(kbRoot, '.kb', 'ui');
   fs.mkdirSync(dir, { recursive: true });
   const p = path.join(dir, 'agent-settings.json');
-  fs.writeFileSync(p, JSON.stringify({ permissions: { allow: [
-    // /** glob, NOT the :* prefix form — spike round 8: Bash(prefix/:*) only
-    // matches the bare command; arguments break the match. The /** glob
-    // covers any repo script with any args. node -e stays denied.
-    `Bash(node ${repoFwd()}/**)`,
-    'Bash(git status:*)', 'Bash(git log:*)', 'Bash(git show:*)', 'Bash(git diff:*)',
-    `Read(${repoFwd()}/**)`,
-  ] } }, null, 2), 'utf8');
+  // F3: GOVERNANCE.md is user-owned — deny the agent's file tools on it
+  // (acceptEdits auto-accepts writes inside cwd, so this needs a hard rule).
+  // Forward slashes, same as repoFwd — spike round 8's matching lesson.
+  const kbFwd = kbRoot.split(path.sep).join('/');
+  fs.writeFileSync(p, JSON.stringify({ permissions: {
+    allow: [
+      // /** glob, NOT the :* prefix form — spike round 8: Bash(prefix/:*) only
+      // matches the bare command; arguments break the match. The /** glob
+      // covers any repo script with any args. node -e stays denied.
+      `Bash(node ${repoFwd()}/**)`,
+      'Bash(git status:*)', 'Bash(git log:*)', 'Bash(git show:*)', 'Bash(git diff:*)',
+      `Read(${repoFwd()}/**)`,
+    ],
+    deny: [
+      `Edit(${kbFwd}/GOVERNANCE.md)`,
+      `Write(${kbFwd}/GOVERNANCE.md)`,
+    ],
+  } }, null, 2), 'utf8');
   return p;
 }
 

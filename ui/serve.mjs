@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { EventEmitter } from 'node:events';
 import { createAuth } from './lib/auth.mjs';
 import { createKbRegistry } from './lib/kb.mjs';
-import { resolveUnder, normalizeWikiRelRead, normalizeRawRel, walkMd } from './lib/paths.mjs';
+import { resolveUnder, normalizeWikiRelRead, normalizeRawRel, normalizeKbFileName, walkMd } from './lib/paths.mjs';
 import { listWikiPages, rawRefs, health } from './lib/browse.mjs';
 import { buildGraph, backlinks } from './lib/graph.mjs';
 import { pageHistory } from './lib/history.mjs';
@@ -24,7 +24,9 @@ import { flipStatus, normalizeWikiRel, parseFrontmatter } from './lib/review.mjs
 import { createJobCenter } from './lib/jobs.mjs';
 import { createWatcher } from './lib/watch.mjs';
 import { governJob, governRunJob } from './lib/govern.mjs';
+import { governRunFreshness } from './lib/governruns.mjs';
 import { saveWikiEditJob } from './lib/edit.mjs';
+import { saveKbFileJob } from './lib/kbfile.mjs';
 import { judge, judgeNames } from './lib/judge.mjs';
 import { feedbackJob, readFeedback } from './lib/feedback.mjs';
 import { plan } from '../governance/scripts/lib/govern.mjs';
@@ -118,7 +120,15 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
         if (url.pathname === '/api/queue') {
           return json(res, 200, { pages: listWikiPages(kb).filter((p) => p.status === 'candidate') });
         }
-        if (url.pathname === '/api/health') return json(res, 200, health(kb));
+        if (url.pathname === '/api/health') {
+          // F1: lastGovernRun rides health so dashboard/govern views get it in
+          // the same poll; composed here (not inside lib/browse.mjs) to keep
+          // lib-to-lib coupling flat.
+          const active = new Set(jobs.list(kb)
+            .filter((j) => j.type === 'govern-run' && (j.status === 'queued' || j.status === 'running'))
+            .map((j) => j.id));
+          return json(res, 200, { ...health(kb), lastGovernRun: governRunFreshness(kb, active) });
+        }
         if (url.pathname === '/api/log') {
           // D2 governance timeline: parse log.md's uniform prefix
           // (## [ts] actor | action | target | note), newest first.
@@ -142,6 +152,16 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
           // hash: the M7d editor's optimistic-lock base (final-review P2)
           const hash = crypto.createHash('sha256').update(text, 'utf8').digest('hex');
           return json(res, 200, { path: rel, hash, ...parseFrontmatter(text) });
+        }
+        // F3: KB-root whitelisted files (GOVERNANCE.md) — free-form Markdown,
+        // no frontmatter parsing; hash is the editor's optimistic-lock base.
+        if (url.pathname === '/api/kbfile') {
+          const name = normalizeKbFileName(url.searchParams.get('path') || '');
+          const abs = resolveUnder(kb, name, '.');
+          if (!fs.existsSync(abs)) return json(res, 404, { error: `file does not exist: ${name}` });
+          const text = fs.readFileSync(abs, 'utf8');
+          const hash = crypto.createHash('sha256').update(text, 'utf8').digest('hex');
+          return json(res, 200, { path: name, hash, body: text });
         }
         if (url.pathname === '/api/raw') {
           const rel = normalizeRawRel(url.searchParams.get('path') || '');
@@ -321,6 +341,21 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
             throw err;
           }
           return json(res, 200, { page: job.result.path, demoted: job.result.demoted });
+        }
+
+        // F3: KB-root whitelisted file edit (GOVERNANCE.md). Same optimistic-
+        // lock 409 discipline as /api/edit.
+        if (url.pathname === '/api/kbfile-edit') {
+          const { path: p, body, base_hash, kb: kbName } = JSON.parse(await readBody(req, 512 * 1024) || '{}');
+          const kb = registry.resolve(kbName).path;
+          const spec = saveKbFileJob(kb, { path: p, body, baseHash: base_hash }); // factory validates → 400
+          const job = await jobs.waitFor(jobs.enqueue(kb, spec));
+          if (job.status === 'failed') {
+            const err = new Error(job.error);
+            if (/^edit conflict:/.test(job.error)) err.code = 409;
+            throw err;
+          }
+          return json(res, 200, { path: job.result.path, created: job.result.created });
         }
 
         // E1: upload raw bytes → inbox/ → acquire local (one queued job).

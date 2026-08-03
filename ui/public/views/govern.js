@@ -35,8 +35,18 @@ export async function render(view) {
   }
 
   async function loadPlan() {
-    lastPlan = await api('/api/plan');
+    const [plan, h] = await Promise.all([api('/api/plan'), api('/api/health').catch(() => null)]);
+    lastPlan = plan;
     planBox.textContent = '';
+    // F1: last agent-governance run summary (from .kb/govern_runs.jsonl)
+    if (h && h.lastGovernRun) {
+      const r = h.lastGovernRun;
+      const LABEL = { complete: '✓ 完成', failed: '✗ 失败', cancelled: '■ 已取消', interrupted: '⚠ 中断(需重跑)', running: '… 进行中' };
+      const line = el('p', { class: 'dim', style: 'font-size:11.5px;margin:0 0 4px' });
+      line.textContent = `上次 agent 治理:${LABEL[r.status] || r.status} · ${r.ts.slice(0, 16).replace('T', ' ')}`
+        + `${r.durationMs != null ? ` · 耗时 ${Math.round(r.durationMs / 1000)}s` : ''}${r.noop ? ' · 无变更' : ''}`;
+      planBox.append(line);
+    }
     // I5 freshness (M7c review): the preview is a confirm page — say how old it is
     const stamp = el('p', { class: 'dim', style: 'font-size:11.5px;margin:0 0 4px;text-align:right' },
       `计划清单刷新于 ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}(KB 有变更时自动刷新)`);
@@ -130,6 +140,7 @@ export async function render(view) {
       go.disabled = true;
       transcript.hidden = false;
       transcript.textContent = '';
+      runPanel.querySelector('.findings-card')?.remove(); // F4: clear last run's card
       try {
         const { job } = await apiPost('/api/govern-run', { prompt: ta.value });
         currentRunId = job.id;
@@ -152,6 +163,7 @@ export async function render(view) {
       if (j.status === 'done') {
         html(note, `运行完成 — <a href="#/queue">去评审队列</a> 批准候选页,wiki 变化见浏览页`);
         go.disabled = false;
+        renderFindings(j.result);
         loadPlan(); // P3: close the loop — pending should read zero now
       }
       if (j.status === 'failed') { note.textContent = `运行失败:${j.error || ''}`; go.disabled = false; }
@@ -159,6 +171,39 @@ export async function render(view) {
     });
     runPanel.append(head, helper, ta, row, transcript);
     row.append(go, note);
+  }
+
+  // F4 findings card: deterministic post-run plan() attached to the job
+  // result by the server (govern.mjs). Structure problems get surfaced here
+  // right after the run — and dangling links are actionable (jump to the
+  // page that contains the bad link).
+  function renderFindings(result) {
+    runPanel.querySelector('.findings-card')?.remove();
+    if (!result || !result.postPlan) return;
+    const pp = result.postPlan;
+    const card = el('div', { class: 'plan-list findings-card', style: 'margin-top:10px' });
+    const titleBits = [];
+    if (result.noop) titleBits.push('本次治理无 wiki 变更');
+    const counts = Object.entries(pp.counts).filter(([, n]) => n > 0);
+    titleBits.push(counts.length
+      ? counts.map(([k, n]) => `${{ dangling_links: '悬空链接', anomalies: '异常', errors: '错误', orphaned_pages: '孤儿页' }[k]} ${n}`).join(' · ')
+      : '结构校验通过');
+    card.append(el('h3', {}, `治理后校验 — ${titleBits.join(' · ')}`));
+    const row = (primary, secondaryHtml) => {
+      const r = el('div', { class: 'plan-item' });
+      html(r, `<span class="t">${esc(primary)}</span>${secondaryHtml || ''}`);
+      return r;
+    };
+    for (const d of pp.dangling_links) {
+      card.append(row(`[[${d.link}]]`, ` <a href="#/page?path=${encodeURIComponent(d.page)}">${esc(d.page)}</a>`));
+    }
+    for (const a of [...pp.anomalies, ...pp.errors]) {
+      card.append(row(a.title || a.raw || a.page, ` <span class="chip failed">${esc(a.reason || a.error || '')}</span>`));
+    }
+    for (const o of pp.orphaned_pages) {
+      card.append(row(o.title || o.page, ` <span class="dim mono">缺 ${esc(o.missing_raw)}</span>`));
+    }
+    runPanel.append(card);
   }
   buildRunPanel();
 
@@ -212,6 +257,93 @@ export async function render(view) {
   mergeCard.append(mergeRow);
   mech.append(sweepCard, reindexCard, mergeCard);
 
+  // ============================== F3: GOVERNANCE.md brief editor ==============================
+  // The user-owned governance brief. Server-side injected into every agent
+  // prompt (buildGovernPrompt) — editing here steers the next run. Same
+  // optimistic-lock 409 discipline as the wiki page editor (browse.js).
+  // (sec() is defined in the assemble section below; briefSec is built there.)
+  const DEFAULT_TEMPLATE = [
+    '# 治理纲要',
+    '',
+    '## 治理范围',
+    '(哪些来源/主题优先治理,哪些可以暂缓)',
+    '',
+    '## 优先级',
+    '(例:API 文档与故障排查优先,会议记录从简)',
+    '',
+    '## 页面粒度偏好',
+    '(例:主题页宁少勿多,相近主题合并;来源页保持 1:1)',
+    '',
+    '## 语言约定',
+    '(wiki 页面语言、标题风格的偏好)',
+  ].join('\n');
+
+  const briefBox = el('div');
+  let briefHash = null;
+  const briefTa = el('textarea', { rows: '10', class: 'run-prompt', spellcheck: 'false' });
+  const briefNote = el('span', { class: 'dim', style: 'font-size:12px' });
+  const briefSave = el('button', { class: 'primary sm' }, '保存纲要');
+  const briefTpl = el('button', { class: 'sm' }, '插入模板');
+  const briefRow = el('div', { class: 'pull-actions' });
+  briefRow.append(briefSave, briefTpl, briefNote);
+
+  async function loadBrief() {
+    try {
+      const f = await api('/api/kbfile', { path: 'GOVERNANCE.md' });
+      briefHash = f.hash;
+      briefTa.value = f.body;
+      briefNote.textContent = `已加载(${f.body.length} 字符)`;
+    } catch {
+      briefHash = null; // 404 → not created yet
+      briefTa.value = '';
+      briefTa.placeholder = '还没有治理纲要 — 点「插入模板」起草,或直接从空白写起。';
+      briefNote.textContent = 'GOVERNANCE.md 尚未创建,保存即创建。';
+    }
+  }
+
+  briefTpl.addEventListener('click', () => {
+    briefTa.value = DEFAULT_TEMPLATE;
+    briefNote.textContent = '模板已填入(未保存)——按你的库改一改再保存。';
+  });
+
+  async function saveBrief(baseHash) {
+    briefSave.disabled = true;
+    briefNote.textContent = '保存中…';
+    try {
+      await apiPost('/api/kbfile-edit', { path: 'GOVERNANCE.md', body: briefTa.value, base_hash: baseHash });
+      const fresh = await api('/api/kbfile', { path: 'GOVERNANCE.md' });
+      briefHash = fresh.hash;
+      briefNote.textContent = '已保存 — 下次 agent 治理运行生效。';
+    } catch (err) {
+      if (/^edit conflict:/.test(err.message)) { showBriefConflict(); return; }
+      briefNote.textContent = `保存失败:${err.message}`;
+    } finally {
+      briefSave.disabled = false;
+    }
+  }
+
+  function showBriefConflict() {
+    const card = el('div', { class: 'conflict-card' });
+    card.append(el('p', {}, '保存被拒绝:纲要在编辑期间被外部改动过。你的编辑还在文本框里。'));
+    const reload = el('button', { class: 'sm danger' }, '放弃我的修改,查看最新');
+    const force = el('button', { class: 'sm' }, '以我为准,强制覆盖');
+    const cNote = el('span', { class: 'dim', style: 'font-size:12.5px' });
+    reload.addEventListener('click', async () => { card.remove(); await loadBrief(); });
+    force.addEventListener('click', async () => {
+      cNote.textContent = '取最新版本号…';
+      const fresh = await api('/api/kbfile', { path: 'GOVERNANCE.md' }); // re-base, one locked retry
+      card.remove();
+      await saveBrief(fresh.hash);
+    });
+    const btnRow = el('div', { style: 'display:flex;gap:10px;align-items:center' });
+    btnRow.append(reload, force, cNote);
+    card.append(btnRow);
+    briefRow.after(card);
+  }
+
+  briefSave.addEventListener('click', () => saveBrief(briefHash));
+  loadBrief();
+
   // ============================== assemble ==============================
   const sec = (titleHtml, ...nodes) => {
     const s = el('section', { class: 'acq-sec' });
@@ -220,8 +352,13 @@ export async function render(view) {
     s.append(h, ...nodes);
     return s;
   };
+  const briefSec = sec(`${icon('fileText', 16)} 治理纲要 <span class="dim">GOVERNANCE.md · 用户所有 · 每次 agent 运行时由服务端注入提示词前部,agent 无权修改此文件</span>`,
+    el('p', { class: 'dim', style: 'font-size:12px;margin:0 0 6px' },
+      '写给治理 agent 的常驻指令:范围、优先级、页面粒度、语言约定。与下方单次提示词的关系 = 宪法与本期任务。'),
+    briefTa, briefRow);
   wrap.append(
     sec(`${icon('listChecks', 16)} 治理预览(plan-as-preview)<span class="dim">I5 · plan 是只读纯脚本,这里看到的就是将要发生的</span>`, planBox, ctaRow),
+    briefSec,
     runPanel,
     sec(`${icon('activity', 16)} 机械步骤 <span class="dim">I1 · approve/reject 在评审队列页</span>`, mech, el('p', { style: 'margin:8px 0 0' }, mechNote)),
   );

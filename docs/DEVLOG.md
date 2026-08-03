@@ -4,6 +4,23 @@
 > 仓库目录沿用 knowledge-extension;portal 品牌位(index.html title/brand)、
 > README、guide 已换新名。
 
+> **Node 钉版解除(2026-08-03,用户要求)**:engines ^20 → >=20(三处 package.json);
+> better-sqlite3 ^11.10.0 → ~12.4.x(预编译二进制覆盖 Node 20–25 全 ABI;12.5+
+> 砍了 Node 20 预编译故范围收在 12.4.x);package-lock.json 从仓库移除并 gitignore,
+> 让 npm 按目标机 Node 现解析。内网 Node 24 安装失败(ERR_DLOPEN_FAILED)由此根治。
+> 五套测试(37+39+52+56+36)在本机 Node 20 全绿。
+
+> **治理工程化四件套(2026-08-03,借鉴 langchain-ai/openwiki 调研)**:
+> ① F1 运行留痕——`.kb/govern_runs.jsonl` 两阶段(start/finish)记录,读侧推断
+> interrupted(同 jobs.jsonl 墓碑语义),`/api/health` 挂 lastGovernRun,dashboard
+> 卡片 + govern 页摘要;② F2 空转防抖——rebuildIndex 字节相同即跳过(不写不 log),
+> governRunJob 前后 wikiHash 标记 noop;③ F3 GOVERNANCE.md 用户纲要——服务端注入
+> 提示词(buildGovernPrompt,8KB 截断),agent-settings deny 硬防护 + prompt 明示 +
+> git 边界检查三层,portal 编辑器(409 乐观锁,克隆 edit 模式)落在治理台;
+> ④ F4 确定性收尾——done handler 跑只读 plan() 挂 postPlan 到 job result,
+> govern 页 findings 卡 + queue 页 banner(实时 /api/plan 数据源,兜住失败运行)。
+> contract.md 增补 govern_runs.jsonl + 白名单 ⑥。UI 测试 56 → 65 全绿。
+
 > Restart entry point after context compaction. Architecture decisions: `CONTEXT.md`;
 > three-party contract: `schema/contract.md` + `schema/governance.md` (§1 language
 > convention: wiki all-English, raw keeps source language); six ADRs in `docs/adr/`.
@@ -386,6 +403,7 @@ issue, 5 P2 consistency leaks, 6 P3 polish items. All handled:
   reviewer's node 24 run failed ERR_DLOPEN_FAILED with the error masked by a body-first
   assertion. Fixed: test asserts status before body (with "native module healthy?"
   message), engines ^20 ×3, installation.md(+zh-CN) pinning with the failure mode named
+  ⚠ SUPERSEDED 2026-08-03: pin lifted → engines >=20, better-sqlite3 ~12.4.x (see top note)
 - **P2 ×5**: header counts refresh after review (CustomEvent); queue hotkeys unbind
   before bind (hotkeys-js stacks duplicates); g k bound (ghost shortcut); queue view
   uses /api/queue (endpoint no longer dead surface); alpine script tag commented out

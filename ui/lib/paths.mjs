@@ -45,6 +45,18 @@ export function normalizeInboxName(input) {
   return name;
 }
 
+// F3 KB-root file gate (GOVERNANCE.md editing): bare filename + whitelist.
+// The whitelist — not a pattern — is the security boundary; add entries
+// deliberately, never user-controlled.
+const KBFILE_WHITELIST = new Set(['GOVERNANCE.md']);
+export function normalizeKbFileName(input) {
+  const name = normalizeInboxName(input);
+  if (!KBFILE_WHITELIST.has(name)) {
+    throw new Error(`KB-root file not editable via portal: ${input} (allowed: ${[...KBFILE_WHITELIST].join(', ')})`);
+  }
+  return name;
+}
+
 export function* walkMd(dir) {
   if (!fs.existsSync(dir)) return;
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
