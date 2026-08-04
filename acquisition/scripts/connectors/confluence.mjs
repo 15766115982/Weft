@@ -405,41 +405,179 @@ async function confFetchUrl(cfg, url, fetchImpl) {
   return res;
 }
 
-function confFetchRaw(cfg, pathAndQuery, fetchImpl) {
-  return confFetchUrl(cfg, cfg.baseUrl + pathAndQuery, fetchImpl);
-}
-
 /** Server-provided links are context-path-relative; make them absolute. */
 function absolutizeLink(cfg, link) {
   if (/^https?:\/\//i.test(link)) return link;
   return `${cfg.baseUrl}${link.startsWith('/') ? '' : '/'}${link}`;
 }
 
-/** Attachment download URL (real-env hardening 2026-08-04): the legacy
- *  /download/attachments/<id>/<name> servlet 404s on some Server/DC
- *  deployments (proxy rules, stored-name ≠ macro name). Resolve through the
- *  REST child/attachment API first — _links.download is the server's own
- *  canonical URL — with fallbacks: a same-extension listing match (the
- *  macro's name param doesn't always equal the stored filename), then the
- *  legacy servlet path. Returns { url, via } — via is value-free and feeds
- *  the --probe diagnostic. */
-async function attachmentUrl(cfg, pageId, fileName, fetchImpl) {
-  const legacy = { url: `${cfg.baseUrl}/download/attachments/${pageId}/${encodeURIComponent(fileName)}`, via: 'legacy' };
+// ---- Gliffy diagram attachment resolution (round-2 hardening 2026-08-04) ----
+// Round 1 assumed diagram filename = macro name + ".gliffy" and only changed
+// WHERE the URL came from — but the real failure was the NAME: a genuine
+// Gliffy diagram attachment is stored WITHOUT an extension ("the diagram name
+// without a file extension", help.gliffy.com), and Server/DC has NO REST binary
+// download endpoint (_links.download points right back at the
+// /download/attachments/ servlet). So resolution now lists the page's REAL
+// attachments and matches the macro name against their titles, then downloads
+// via the matched attachment's own _links.download. Research & decisions:
+// docs/research/gliffy-404-round2.md.
+
+const IMAGE_EXT = /\.(png|svg|jpe?g)$/i;
+
+/** Strip the final extension (ANY extension — the real attachment may carry
+ *  one we never guessed, or none at all). */
+function stripExt(s) {
+  const dot = s.lastIndexOf('.');
+  return dot > 0 ? s.slice(0, dot) : s;
+}
+
+/** Paginated attachment list for a content id (titles/extension metadata only). */
+async function listAttachments(cfg, pageId, fetchImpl) {
+  const base = `/rest/api/content/${encodeURIComponent(String(pageId))}/child/attachment`;
+  const out = [];
+  for (let start = 0; ; ) {
+    const data = await confGet(cfg, `${base}?${new URLSearchParams({ limit: '200', start: String(start) })}`, fetchImpl);
+    const batch = data.results || [];
+    out.push(...batch);
+    if (batch.length < 200) break;
+    start += batch.length;
+  }
+  return out;
+}
+
+/** D4: a Gliffy macro may carry page/space params pointing the diagram at a
+ *  DIFFERENT page (wiki syntax {gliffy:name=X|space=~u|page=p}). Resolve that
+ *  page's id; absent params → the macro's own page. `title` search is a LIKE
+ *  match, so the first hit is taken (residual fuzziness, accepted for a
+ *  rarely-used path). */
+async function resolveDiagramPageId(cfg, params, defaultPageId, fetchImpl) {
+  const pageParam = String(params?.page || '').trim();
+  if (!pageParam) return defaultPageId;
+  const q = new URLSearchParams({ title: pageParam, expand: 'version' });
+  const spaceParam = String(params?.space || '').trim();
+  if (spaceParam) q.set('spaceKey', spaceParam);
+  const data = await confGet(cfg, `/rest/api/content?${q}`, fetchImpl);
+  const hit = (data.results || [])[0];
+  if (!hit?.id) {
+    const err = new Error(`gliffy page param did not resolve: ${pageParam}`);
+    err.safe = true;
+    throw err;
+  }
+  return String(hit.id);
+}
+
+/** D1: match the macro's name against attachment titles by normalized name.
+ *  Priority: verbatim title == name → title-stripped == name → title-stripped
+ *  == base (name with any known diagram/image extension removed) → a UNIQUE
+ *  prefix candidate. Returns { att, via, name, base, prefix } — prefix holds
+ *  the ambiguous candidates for content-sniffing when nothing else matched. */
+function matchDiagramAttachment(list, params) {
+  const name = String(params?.name || params?.displayName || '').trim();
+  const base = gliffyBaseName(params);
+  const targetName = name.toLowerCase();
+  const targetBase = base.toLowerCase();
+  const pools = { exact: [], nameNoExt: [], baseNoExt: [], prefix: [] };
+  for (const a of list || []) {
+    const title = String(a.title || '').trim();
+    if (!title) continue;
+    const noExt = stripExt(title).toLowerCase();
+    if (title.toLowerCase() === targetName) pools.exact.push(a);
+    else if (noExt === targetName) pools.nameNoExt.push(a);
+    else if (noExt === targetBase) pools.baseNoExt.push(a);
+    else if (targetBase && noExt.startsWith(targetBase)) pools.prefix.push(a);
+  }
+  for (const key of ['exact', 'nameNoExt', 'baseNoExt']) {
+    if (pools[key].length) return { att: pools[key][0], via: key, name, base, prefix: pools.prefix };
+  }
+  if (pools.prefix.length === 1) return { att: pools.prefix[0], via: 'prefix', name, base, prefix: pools.prefix };
+  return { att: null, via: 'none', name, base, prefix: pools.prefix };
+}
+
+/** True when body parses as a Gliffy diagram JSON (stage.objects present). */
+function isGliffyJson(text) {
   try {
-    const base = `/rest/api/content/${encodeURIComponent(String(pageId))}/child/attachment`;
-    const exact = await confGet(cfg, `${base}?${new URLSearchParams({ filename: fileName, limit: '1' })}`, fetchImpl);
-    const hit = (exact.results || [])[0];
-    if (hit?._links?.download) return { url: absolutizeLink(cfg, hit._links.download), via: 'rest-exact' };
-    const dot = fileName.lastIndexOf('.');
-    const ext = dot > 0 ? fileName.slice(dot).toLowerCase() : '';
-    const wantBase = (dot > 0 ? fileName.slice(0, dot) : fileName).toLowerCase();
-    const list = await confGet(cfg, `${base}?${new URLSearchParams({ limit: '200' })}`, fetchImpl);
-    const sameExt = (list.results || []).filter((a) => String(a.title || '').toLowerCase().endsWith(ext));
-    const pick = sameExt.find((a) => String(a.title || '').toLowerCase().replace(/\.[^.]*$/, '') === wantBase)
-      || (sameExt.length === 1 ? sameExt[0] : null);
-    if (pick?._links?.download) return { url: absolutizeLink(cfg, pick._links.download), via: 'rest-list' };
-  } catch { /* REST lookup itself failed → the legacy path gives the real error */ }
-  return legacy;
+    return Array.isArray(JSON.parse(text)?.stage?.objects);
+  } catch { return false; }
+}
+
+/** D3 + download: fetch an attachment's bytes. Candidate order:
+ *  1. _links.download verbatim (server-canonical, carries version/modificationDate);
+ *  2. same, with &modificationDate= stripped (CONFSERVER-60328: proxies mangle it);
+ *  3. bare legacy /download/attachments/<id>/<encoded-title> (proxies that
+ *     choke on query strings to that path).
+ *  A non-404 failure stops the chain (auth/server problems hit every path
+ *  alike). Returns { res, via, attempts }; attempts = value-free {via, http}
+ *  per candidate, feeds the --probe diagnostic. */
+async function downloadAttachment(cfg, pageId, attachment, fetchImpl) {
+  const title = String(attachment?.title || '');
+  const candidates = [];
+  const dl = attachment?._links?.download;
+  if (dl) {
+    candidates.push({ url: absolutizeLink(cfg, dl), via: 'rest-download' });
+    const stripped = String(dl).replace(/&modificationDate=\d+/i, '');
+    if (stripped !== dl) candidates.push({ url: absolutizeLink(cfg, stripped), via: 'rest-download-stripped' });
+  }
+  if (title) candidates.push({ url: `${cfg.baseUrl}/download/attachments/${pageId}/${encodeURIComponent(title)}`, via: 'legacy' });
+  const attempts = [];
+  for (const cand of candidates) {
+    try {
+      return { res: await confFetchUrl(cfg, cand.url, fetchImpl), via: cand.via, attempts };
+    } catch (err) {
+      attempts.push({ via: cand.via, http: err.status || 0 });
+      if (err.status && err.status !== 404) break;
+    }
+  }
+  const last = attempts[attempts.length - 1] || {};
+  const err = new Error(`attachment download HTTP ${last.http || 'all routes failed'}`);
+  err.status = last.http || 0;
+  err.attempts = attempts;
+  throw err;
+}
+
+/** Download the diagram body given the macro + its page. Primary path: list
+ *  the page's attachments (D1 match → D3 download). When the REST list itself
+ *  FAILS (endpoint dead/auth), fall back to the round-1 guess path so
+ *  REST-down servers don't regress. When the list SUCCEEDS but nothing
+ *  matches, the diagram is genuinely missing (help.gliffy defines 404 exactly
+ *  that way) — degrade with a value-free count rather than guess. Ambiguous
+ *  prefix candidates get a content-sniff tie-break (cap 3): the one that
+ *  parses as Gliffy JSON IS the diagram.
+ *  Returns { text, attachments, via, attempts }. */
+async function fetchDiagramBody(cfg, params, pageId, fetchImpl) {
+  let attachments = [];
+  try {
+    attachments = await listAttachments(cfg, pageId, fetchImpl);
+  } catch (err) {
+    const base = gliffyBaseName(params);
+    const guesses = [...new Set([base, `${base}.gliffy`])].filter(Boolean);
+    let lastStatus = err.status || 0;
+    for (const g of guesses) {
+      try {
+        const { res, via, attempts } = await downloadAttachment(cfg, pageId, { title: g }, fetchImpl);
+        return { text: await res.text(), attachments: [], via, attempts };
+      } catch (e2) { lastStatus = e2.status || lastStatus; }
+    }
+    const e = new Error(`attachment download HTTP ${lastStatus || 'failed'}`);
+    e.status = lastStatus;
+    throw e;
+  }
+  const match = matchDiagramAttachment(attachments, params);
+  if (!match.att && match.prefix.length > 1) {
+    for (const cand of match.prefix.slice(0, 3)) {
+      try {
+        const { res, via } = await downloadAttachment(cfg, pageId, cand, fetchImpl);
+        const text = await res.text();
+        if (isGliffyJson(text)) return { text, attachments, via, attempts: [{ via, http: 200 }] };
+      } catch { /* not this one */ }
+    }
+  }
+  if (!match.att) {
+    const err = new Error(`no matching diagram attachment on page (${attachments.length} attachments listed)`);
+    err.safe = true;
+    throw err;
+  }
+  const { res, via, attempts } = await downloadAttachment(cfg, pageId, match.att, fetchImpl);
+  return { text: await res.text(), attachments, via, attempts };
 }
 
 /** .gliffy attachment JSON -> label strings, ordered top-to-bottom, left-to-
@@ -505,14 +643,23 @@ async function resolveGliffy(m, cfg, kbRoot, fetchImpl) {
     err.safe = true;
     throw err;
   }
-  const dl = async (file) => confFetchUrl(cfg, (await attachmentUrl(cfg, m.pageId, file, fetchImpl)).url, fetchImpl);
-  const text = await (await dl(`${base}.gliffy`)).text();
+  const diagramPageId = await resolveDiagramPageId(cfg, m.params, m.pageId, fetchImpl);
+  const { text, attachments } = await fetchDiagramBody(cfg, m.params, diagramPageId, fetchImpl);
   const labels = parseGliffyLabels(text);
-  // the PNG render is best-effort: a missing render must not kill the labels
+  // D2: the PNG render is best-effort and only from a REAL image attachment in
+  // the listing — a true Gliffy diagram is one extensionless attachment and the
+  // raster is rendered on the fly, so a blind <base>.png guess would only 404.
   let assetRel = '';
   try {
-    const buf = Buffer.from(await (await dl(`${base}.png`)).arrayBuffer());
-    assetRel = writeAsset(kbRoot, m.pageId, `${safeFileName(base)}.png`, buf);
+    const image = (attachments || []).find((a) => {
+      const t = String(a.title || '').trim();
+      return IMAGE_EXT.test(t) && stripExt(t).toLowerCase() === base.toLowerCase();
+    });
+    if (image) {
+      const { res } = await downloadAttachment(cfg, diagramPageId, image, fetchImpl);
+      const buf = Buffer.from(await res.arrayBuffer());
+      assetRel = writeAsset(kbRoot, m.pageId, `${safeFileName(base)}.png`, buf);
+    }
   } catch { /* no PNG available — image line omitted, labels still land */ }
   const parts = [`**Gliffy diagram: ${base}**`];
   if (assetRel) parts.push('', `![gliffy: ${base}](${assetRel})`);
@@ -590,7 +737,12 @@ export async function resolveMacros(body, pending, { cfg, kbRoot, kbConfig, jira
 }
 
 /** Shape probe (acquire.mjs `confluence --probe <pageId>`): download the
- *  page's first .gliffy attachment and report its structure — never values. */
+ *  page's first Gliffy diagram and report (a) the macro's own params, (b) the
+ *  page's REAL attachment titles — metadata, never bodies — (c) which one
+ *  matched and by which route, (d) per-attempt {url-ish via, http} status. The
+ *  point is to turn the next 404 into a two-line diagnosis: "name didn't
+ *  match" vs "the /download/attachments/ servlet itself is broken" vs
+ *  "the diagram attachment is genuinely missing". */
 export async function probeGliffy(kbConfig, pageId, { fetchImpl } = {}) {
   if (!pageId || !String(pageId).trim()) {
     throw new Error('confluence --probe requires a page id (pick any page containing a Gliffy diagram)');
@@ -599,40 +751,80 @@ export async function probeGliffy(kbConfig, pageId, { fetchImpl } = {}) {
   const page = await confGet(auth, `/rest/api/content/${encodeURIComponent(String(pageId))}?expand=body.storage`, fetchImpl);
   const xhtml = page?.body?.storage?.value || '';
   const root = parseStorage(xhtml);
-  let name = '';
+  let params = null;
   const walk = (n) => {
-    if (name) return;
-    if (n.tag === 'ac:structured-macro' && n.attrs['ac:name'] === 'gliffy') name = macroParam(n, 'name');
+    if (params) return;
+    if (n.tag === 'ac:structured-macro' && n.attrs['ac:name'] === 'gliffy') {
+      params = {};
+      for (const c of n.children) {
+        if (c.tag === 'ac:parameter') {
+          params[c.attrs['ac:name'] || ''] = (c.children || []).map((t) => t.text || '').join('').trim();
+        }
+      }
+    }
     (n.children || []).forEach(walk);
   };
   walk(root);
-  const base = name.replace(/\.(gliffy|png|svg|jpe?g)$/i, '');
-  if (!base) return { probe: true, page: String(pageId), note: 'no-gliffy-macro' };
+  if (!params) return { probe: true, page: String(pageId), note: 'no-gliffy-macro' };
+  const gliffy = { macro: {
+    name: params.name || '',
+    displayName: params.displayName || '',
+    page: params.page || '',
+    space: params.space || '',
+  } };
   try {
-    const resolved = await attachmentUrl(auth, pageId, `${base}.gliffy`, fetchImpl);
-    const text = await (await confFetchUrl(auth, resolved.url, fetchImpl)).text();
-    let g;
-    let jsonValid = true;
-    try { g = JSON.parse(text); } catch { jsonValid = false; }
-    const objects = g?.stage?.objects;
-    let labelCount = 0;
-    if (jsonValid && Array.isArray(objects)) {
-      try { labelCount = parseGliffyLabels(text).length; } catch { /* counted as 0 */ }
+    const diagramPageId = await resolveDiagramPageId(auth, params, pageId, fetchImpl);
+    gliffy.page_id = String(diagramPageId);
+    const attachments = await listAttachments(auth, diagramPageId, fetchImpl);
+    gliffy.attachment_count = attachments.length;
+    gliffy.attachments = attachments.map((a) => String(a.title || ''));
+    const match = matchDiagramAttachment(attachments, params);
+    let text = null;
+    if (match.att) {
+      try {
+        const { res, via, attempts } = await downloadAttachment(auth, diagramPageId, match.att, fetchImpl);
+        gliffy.matched = { title: String(match.att.title || ''), match: match.via, via };
+        gliffy.attempts = attempts;
+        gliffy.http = 200;
+        text = await res.text();
+      } catch (err) {
+        gliffy.matched = { title: String(match.att.title || ''), match: match.via };
+        gliffy.attempts = err.attempts || [];
+        gliffy.http = err.status || 0;
+        gliffy.error = 'download failed';
+      }
+    } else {
+      gliffy.matched = null;
+      // distinguishes "name mismatch" from "the servlet itself is broken":
+      // if the legacy <name>.gliffy guess ALSO 404s, the servlet is the
+      // problem; if it 200s, the real attachment is simply named differently
+      const guess = `${gliffyBaseName(params)}.gliffy`;
+      try {
+        await downloadAttachment(auth, diagramPageId, { title: guess }, fetchImpl);
+        gliffy.legacy_guess = { title: guess, http: 200 };
+      } catch (err) {
+        gliffy.legacy_guess = { title: guess, http: err.status || 0 };
+      }
     }
-    return {
-      probe: true,
-      page: String(pageId),
-      gliffy: {
-        http: 200,
-        via: resolved.via,
-        jsonValid,
-        hasStageObjects: Array.isArray(objects),
-        objectCount: Array.isArray(objects) ? objects.length : null,
-        labelCount,
-      },
-    };
+    if (text !== null) {
+      let g;
+      let jsonValid = true;
+      try { g = JSON.parse(text); } catch { jsonValid = false; }
+      const objects = g?.stage?.objects;
+      let labelCount = 0;
+      if (jsonValid && Array.isArray(objects)) {
+        try { labelCount = parseGliffyLabels(text).length; } catch { /* counted as 0 */ }
+      }
+      gliffy.jsonValid = jsonValid;
+      gliffy.hasStageObjects = Array.isArray(objects);
+      gliffy.objectCount = Array.isArray(objects) ? objects.length : null;
+      gliffy.labelCount = labelCount;
+    }
+    return { probe: true, page: String(pageId), gliffy };
   } catch (err) {
-    return { probe: true, page: String(pageId), gliffy: { http: err.status || 0, error: 'download failed' } };
+    gliffy.http = err.status || 0;
+    gliffy.error = err.safe ? err.message : 'probe failed';
+    return { probe: true, page: String(pageId), gliffy };
   }
 }
 

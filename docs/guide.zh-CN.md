@@ -295,7 +295,9 @@ note: run at most ONE portal per knowledge base (the serial write queue is per-p
 
 - **认证检查**按钮 = 第 6 步 `--check` 的 UI 化,先点它;
 - **形状探针**按钮 = `--probe` 的 UI 化:输出 Zephyr/Gliffy 响应的**结构摘要**
-  (类型/键名/数量,不含任何数据值)——内网诊断时把这段文本原样发给开发者即可;
+  (类型/键名/数量,不含任何数据值);Gliffy 探针还会列出页面**真实附件标题**、
+  宏名匹配命中的附件和下载通道、每次下载的 HTTP 状态——内网诊断时把这段文本
+  原样发给开发者即可;
 - 输入可选的范围覆盖(JQL / CQL / max)→「拉取」→ 作业中心看进度;
   卡片标题栏的 **? 按钮**是常用 CQL/JQL 速查(含「拉整棵子树」的
   `ancestor` 写法),每条带「填入」一键落进输入框;
@@ -303,9 +305,10 @@ note: run at most ONE portal per knowledge base (the serial write queue is per-p
   琥珀色);Jira 源还会显示 `zephyr available` 状态,Confluence 源显示宏解析计数;
 - **Zephyr(测试插件)**:Jira 里 Test 类型的 issue 会自动带上 Test Steps 表格
   (Test Steps/Test Data/Expected Result 三列,走 Zephyr API,不用配置);
-- **Confluence 宏**:Gliffy 图会提取全部文字标签并把 PNG 存到
-  `raw/confluence/<页面id>.assets/` 嵌进文档(浏览 raw 时能看到图)、Jira
-  Issue Filter 宏会变成实时查询的 issue 表格、Gallery 宏变成图片清单;
+- **Confluence 宏**:Gliffy 图按宏名在页面**真实附件列表**里匹配后提取全部文字标签
+  (图附件通常无扩展名,2026-08-04 起不再猜 `<name>.gliffy`);若页面真有一张图片附件
+  还会把它存到 `raw/confluence/<页面id>.assets/` 嵌进文档(浏览 raw 时能看到图)、
+  Jira Issue Filter 宏会变成实时查询的 issue 表格、Gallery 宏变成图片清单;
 - 拉进来的东西不满意?「浏览」切到 raw 页签,可删可移(删除前有影响
   预览和自动快照,不盲删)。raw 内容本身**永远不可改**(契约)——
   local 文档想改就同名文件重传 inbox;Jira/Confluence 的去源系统改。
@@ -373,6 +376,7 @@ Claude Code 会自己读这份指南逐步执行——本指南的写作精度�
 | UI 搜索报 HTTP 400 / `ERR_DLOPEN_FAILED` | better-sqlite3 的预编译二进制与当前 Node 大版本不匹配——在 `retrieval/scripts` 下重跑 `npm install`(会按当前 Node 重新下载对应二进制) |
 | `SELF_SIGNED_CERT_IN_CHAIN` | 内部 CA——设 `NODE_EXTRA_CA_CERTS`(5.2);绝不关 TLS 校验 |
 | `authentication failed HTTP 401` | PAT 错/过期——网页端重建;`setx` 后要开**新**终端 |
+| 拉取时 Gliffy 报 `[gliffy diagram: … — HTTP 404]` | 2026-08-04 起连接器会列出页面**真实附件**再按宏名匹配(不再猜 `<name>.gliffy`——真图附件通常无扩展名)。仍 404 时用「采集」页**形状探针**(`--probe <页面id>`)定位:`attachments` 看附件到底叫什么;`matched: null` 且 `legacy_guess.http` 也是 404 → `/download/attachments/` 被反代拦了,把 probe 输出整段发给开发者 |
 | 启动 portal 报 `EADDRINUSE` | 旧 portal 还占着 8322:`netstat -ano | findstr :8322` 找到 PID,`taskkill /PID <pid> /F` |
 | agent 治理立刻失败,日志说 spawn 失败/找不到命令 | `claude.cmd` 不在 PATH——装好 Claude Code 或把它的 bin 加进 PATH,重启 portal。报 `EINVAL` 是旧版直生 .cmd 被 Node 安全补丁禁止——2026-08-04 起 portal 改走 `cmd.exe /d /s /c` 路由,升级到含该修复的版本即可 |
 | agent 运行里某些命令"被权限拒绝" | 正常的——加固姿态只允许 `node <repo>/**` 裸命令、只读 git、KB 内写。正因如此,页面正文一律走 `--body-file`(agent 先用文件工具把摘要写进 `.kb/bodies/`,再跑裸 node 命令);管道/heredoc/stdin 重定向在这个模型下必被拦,不是故障 |

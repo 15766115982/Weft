@@ -53,10 +53,11 @@ const GLIFFY_MACRO = (name) => `<ac:structured-macro ac:name="gliffy" ac:schema-
   + `</ac:structured-macro>`;
 
 /** Mock Confluence: content/search keyed by CQL; attachments maps
- *  "pageId/filename" -> {status?, body(string|Buffer)}; contentById for probe.
+ *  "pageId/filename" -> {status?, body(string|Buffer), download?, modificationDate404?};
+ *  contentById for probe; pagesByTitle for the page-param cross-page lookup.
  *  rest:false simulates a server whose REST child/attachment endpoint is
  *  dead — exercises the legacy /download/attachments fallback. */
-async function mockConfluence(t, cqlSets, { attachments = {}, contentById = {}, rest = true } = {}) {
+async function mockConfluence(t, cqlSets, { attachments = {}, contentById = {}, pagesByTitle = {}, rest = true } = {}) {
   const requests = [];
   const server = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://mock');
@@ -73,6 +74,11 @@ async function mockConfluence(t, cqlSets, { attachments = {}, contentById = {}, 
       const limit = Number(u.searchParams.get('limit') || 50);
       return json(200, { results: set.slice(start, start + limit), start, limit, size: Math.min(limit, set.length - start), totalSize: set.length });
     }
+    // page-param resolution (D4): content?title=...&spaceKey=...
+    if (u.pathname === '/rest/api/content' && u.searchParams.get('title')) {
+      const hit = pagesByTitle[u.searchParams.get('title')];
+      return json(200, { results: hit ? [hit] : [], size: hit ? 1 : 0 });
+    }
     const childAtt = rest && u.pathname.match(/^\/rest\/api\/content\/(\d+)\/child\/attachment$/);
     if (childAtt) {
       const id = childAtt[1];
@@ -81,7 +87,11 @@ async function mockConfluence(t, cqlSets, { attachments = {}, contentById = {}, 
       const fn = u.searchParams.get('filename');
       const titles = fn ? names.filter((n) => n === fn) : names;
       return json(200, {
-        results: titles.map((n) => ({ title: n, _links: { download: `/download/attachments/${id}/${encodeURIComponent(n)}` } })),
+        results: titles.map((n) => {
+          const entry = attachments[`${id}/${n}`] || {};
+          const dl = entry.download || `/download/attachments/${id}/${encodeURIComponent(n)}`;
+          return { title: n, _links: { download: dl } };
+        }),
         size: titles.length,
       });
     }
@@ -92,6 +102,7 @@ async function mockConfluence(t, cqlSets, { attachments = {}, contentById = {}, 
       const hit = attachments[`${dl[1]}/${decodeURIComponent(dl[2])}`];
       if (!hit) return json(404, {});
       if (hit.status && hit.status !== 200) return json(hit.status, {});
+      if (hit.modificationDate404 && u.searchParams.has('modificationDate')) return json(404, {});
       res.writeHead(200, { 'content-type': 'application/octet-stream' });
       return res.end(hit.body);
     }
@@ -185,7 +196,10 @@ test('gliffy degrades: missing .gliffy / bad JSON / missing PNG (labels survive)
   assert.equal(s.macros.gliffy, 1, 'resolved ones count');
   assert.equal(s.macros.degraded, 2);
 
-  assert.match(readDoc('511').body, /\[gliffy diagram: gone — HTTP 404\]/);
+  // 511 has no attachments at all → the listing succeeds but nothing matches:
+  // degrade is value-free but counts, distinguishing "genuinely missing" from
+  // "download failed" (help.gliffy: 404 = diagram missing from the page list)
+  assert.match(readDoc('511').body, /\[gliffy diagram: gone — no matching diagram attachment on page \(0 attachments listed\)\]/);
   assert.match(readDoc('512').body, /\[gliffy diagram: broken — gliffy attachment: expected JSON document/);
   const okBody = readDoc('513').body;
   assert.match(okBody, /\*\*Gliffy diagram: norender\*\*/);
@@ -206,19 +220,93 @@ test('PNG sidecar updates independently of the doc content_hash skip', async (t)
     'asset still updates');
 });
 
-// real-env hardening 2026-08-04: the intranet 404'd the legacy servlet path
-test('gliffy resolution: REST-list fallback when stored filename ≠ macro name', async (t) => {
+// real-env hardening 2026-08-04 round 2: a genuine Gliffy diagram attachment
+// is stored WITHOUT an extension (help.gliffy.com) — round 1 requested
+// <name>.gliffy and 404'd; the list+match path must hit the extensionless form
+test('gliffy resolution: extensionless attachment (the real no-extension form)', async (t) => {
   const { baseUrl, requests } = await mockConfluence(t, {
     'space = "DEV" AND type = page': [makePage('561', GLIFFY_MACRO('arch-diagram'))],
-  }, { attachments: { '561/架构图.gliffy': { body: GLIFFY_JSON }, '561/架构图.png': { body: PNG_BYTES } } });
+  }, { attachments: { '561/arch-diagram': { body: GLIFFY_JSON } } });
   const s = await run(kb, { kbConfig: kbConf(baseUrl) });
   assert.deepEqual(s.errors, []);
   assert.deepEqual(s.macros, { gliffy: 1 });
   const { body } = readDoc('561');
   assert.match(body, /\*\*Gliffy diagram: arch-diagram\*\*/);
-  assert.match(body, /!\[gliffy: arch-diagram\]\(raw\/confluence\/561\.assets\/arch-diagram\.png\)/);
   assert.match(body, /- 下游服务/);
+  assert.ok(!body.includes('![gliffy:'), 'no image attachment → image line omitted');
   assert.ok(requests.some((r) => r.path.endsWith('/child/attachment')), 'went through the REST listing');
+});
+
+// round 2: a macro whose name matches NOTHING on the page is genuinely broken
+// (help.gliffy: 404 = diagram missing from the page's attachment list) — degrade
+test('gliffy resolution: no name match degrades with a value-free count', async (t) => {
+  const { baseUrl } = await mockConfluence(t, {
+    'space = "DEV" AND type = page': [makePage('562', GLIFFY_MACRO('arch-diagram'))],
+  }, { attachments: { '562/other.gliffy': { body: GLIFFY_JSON } } });
+  const s = await run(kb, { kbConfig: kbConf(baseUrl) });
+  assert.equal(s.macros.degraded, 1);
+  assert.match(readDoc('562').body, /\[gliffy diagram: arch-diagram — no matching diagram attachment on page \(1 attachments listed\)\]/);
+});
+
+// round 2: several attachments share the macro name's prefix → content-sniff
+// (the one whose body parses as Gliffy JSON IS the diagram)
+test('gliffy resolution: ambiguous prefix candidates resolved by content sniff', async (t) => {
+  const { baseUrl } = await mockConfluence(t, {
+    'space = "DEV" AND type = page': [makePage('563', GLIFFY_MACRO('plan'))],
+  }, {
+    attachments: {
+      '563/planning.gliffy': { body: '{not json' },
+      '563/planner.gliffy': { body: GLIFFY_JSON }, // the real diagram
+    },
+  });
+  const s = await run(kb, { kbConfig: kbConf(baseUrl) });
+  assert.deepEqual(s.errors, []);
+  assert.deepEqual(s.macros, { gliffy: 1 });
+  assert.match(readDoc('563').body, /- 下游服务/);
+});
+
+// round 2 D3: _links.download carrying &modificationDate= 404s through a
+// proxy (CONFSERVER-60328) → stripped retry must succeed
+test('gliffy resolution: modificationDate-carrying download retries stripped', async (t) => {
+  const { baseUrl, requests } = await mockConfluence(t, {
+    'space = "DEV" AND type = page': [makePage('564', GLIFFY_MACRO('flow'))],
+  }, {
+    attachments: {
+      '564/flow.gliffy': {
+        body: GLIFFY_JSON,
+        download: '/download/attachments/564/flow.gliffy?version=1&modificationDate=1519985997040&api=v2',
+        modificationDate404: true, // proxy eats the param → 404; the stripped retry works
+      },
+    },
+  });
+  const s = await run(kb, { kbConfig: kbConf(baseUrl) });
+  assert.deepEqual(s.errors, []);
+  assert.deepEqual(s.macros, { gliffy: 1 });
+  assert.match(readDoc('564').body, /- 下游服务/);
+  const downloads = requests.filter((r) => r.path.includes('/download/attachments/'));
+  assert.ok(downloads.some((r) => r.query.modificationDate === undefined && r.query.version === '1'),
+    'stripped URL was attempted');
+});
+
+// round 2 D4: the macro's page param points the diagram at another page
+test('gliffy resolution: page param resolves the diagram on another page', async (t) => {
+  const macro = `<ac:structured-macro ac:name="gliffy" ac:schema-version="1" ac:macro-id="m1">`
+    + `<ac:parameter ac:name="name">remote</ac:parameter>`
+    + `<ac:parameter ac:name="displayName">remote.png</ac:parameter>`
+    + `<ac:parameter ac:name="page">Diagram Home</ac:parameter>`
+    + `<ac:parameter ac:name="space">DEV</ac:parameter>`
+    + `</ac:structured-macro>`;
+  const { baseUrl } = await mockConfluence(t, {
+    'space = "DEV" AND type = page': [makePage('573', macro)],
+  }, {
+    attachments: { '999/remote': { body: GLIFFY_JSON } },
+    pagesByTitle: { 'Diagram Home': { id: '999', type: 'page', title: 'Diagram Home' } },
+  });
+  const s = await run(kb, { kbConfig: kbConf(baseUrl) });
+  assert.deepEqual(s.errors, []);
+  assert.deepEqual(s.macros, { gliffy: 1 });
+  assert.match(readDoc('573').body, /\*\*Gliffy diagram: remote\*\*/);
+  assert.match(readDoc('573').body, /- 下游服务/);
 });
 
 test('gliffy resolution: legacy servlet fallback when REST child/attachment is dead', async (t) => {
@@ -326,7 +414,19 @@ test('probeGliffy: shape summary; missing macro / missing pageId handled', async
   const out = await probeGliffy(kbConf(baseUrl), '551');
   assert.deepEqual(out, {
     probe: true, page: '551',
-    gliffy: { http: 200, via: 'rest-exact', jsonValid: true, hasStageObjects: true, objectCount: 5, labelCount: 4 },
+    gliffy: {
+      macro: { name: 'arch-diagram', displayName: 'arch-diagram.png', page: '', space: '' },
+      page_id: '551',
+      attachment_count: 1,
+      attachments: ['arch-diagram.gliffy'],
+      matched: { title: 'arch-diagram.gliffy', match: 'nameNoExt', via: 'rest-download' },
+      attempts: [],
+      http: 200,
+      jsonValid: true,
+      hasStageObjects: true,
+      objectCount: 5,
+      labelCount: 4,
+    },
   });
   const none = await probeGliffy(kbConf(baseUrl), '552');
   assert.equal(none.note, 'no-gliffy-macro');

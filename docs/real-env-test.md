@@ -99,13 +99,20 @@ node acquisition/scripts/acquire.mjs confluence --kb <scratch-kb> --probe <pageI
       **Scale** (`scale.http: 200` in the same output → report back; Squad steps
       do not apply). `note: no-test-issue-found` → widen the JQL or check
       `test_issue_types`.
-- [ ] `confluence --probe <pageId>` prints `gliffy: {http: 200, via: <route>,
-      jsonValid: true, hasStageObjects: true, ...}`. `via` (2026-08-04) names the
-      download route that worked: `rest-exact` / `rest-list` (REST child/attachment
-      API — expected after the intranet legacy-servlet 404) or `legacy`
-      (`/download/attachments/...` fallback). `jsonValid: false` → old XML-format
-      Gliffy (labels will degrade, placeholders stay). Any other shape: relay the
-      probe output verbatim.
+- [ ] `confluence --probe <pageId>` prints `gliffy: {...}`. **Diagnose by the
+      fields** (round-2 shape, 2026-08-04):
+      - `attachments` — the page's REAL attachment titles (metadata only): confirm the diagram
+        attachment exists and **what it is actually named** (a genuine Gliffy diagram is stored
+        **without an extension** — the round-1 `<name>.gliffy` guess 404'd for exactly this reason);
+      - `matched: {title, match, via}` — which title matched the macro name and by what rule
+        (`match:` exact / nameNoExt / baseNoExt / prefix) and which download route worked
+        (`via:` rest-download / rest-download-stripped / legacy);
+      - `matched: null` + `legacy_guess: {title, http}` — no name matched; if `legacy_guess.http`
+        is also `404` the `/download/attachments/` servlet itself is the problem (reverse proxy),
+        if `200` the real attachment is simply named differently from the macro name;
+      - `attempts` — per download-candidate `{via, http}`.
+      `jsonValid: false` → old XML-format Gliffy (labels will degrade, placeholders stay). Any
+      other shape: relay the probe output verbatim.
 
 **Zephyr steps:**
 

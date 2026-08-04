@@ -1,5 +1,21 @@
 # Development Log (as of 2026-08-03, M0-M6 complete + cross-service test layer + M7a-d UI portal + A7 graph)
 
+> **Gliffy 404 二轮修复(2026-08-04,一轮后内网依旧 404)**。调研推翻一轮核心假设
+> (docs/research/gliffy-404-round2.md):① Server/DC 无 REST 二进制下载端点,
+> `_links.download` 就指向 `/download/attachments/` servlet——一轮的"REST 优先"
+> 只换了 URL 出处没换通道;② 真根因大概率是**文件名**:Gliffy 官方文档明言图附件
+> "downloads without a file extension"(help.gliffy.com),MIT wiki 也确认宏 `name`
+> 即附件名——我们一直请求 `<name>.gliffy` 自然 404。**修复 = 列页面附件
+> (child/attachment)+ 名归一匹配(D1)**:宏 name 与附件标题按 原样/去扩展名/加
+> .gliffy/唯一前缀 匹配,用匹配附件自己的 `_links.download` 原样下载(D3:404 且带
+> `&modificationDate=` 时剥离重试,CONFSERVER-60328);PNG 边车只从列表里找真实
+> 图片附件(D2);宏带 page/space 参数时解析跨页(D4);列表成功但无匹配=图真丢了,
+> 值无关降级含附件计数(F5)。**probe 大改(D5)**:输出宏参数+页面附件标题清单+
+> 匹配命中的 {title, match规则, via下载通道}+ 每次下载 {via,http},把下次 404
+> 摊成两行诊断。红线不动:附件正文不进 degrade/日志(D6)。测试 acquisition
+> 61→65(+无扩展名核心回归/无名匹配降级/前缀歧义内容嗅探/modificationDate 重试/
+> 跨页 page 参数),六套件全绿。待内网复测看 probe 的 attachments/matched/legacy_guess。
+
 > **内网实测修复轮(2026-08-04,real-env-test.md §3a 验收中回传的四个问题,
 > 逐条修复)**:
 > ① **better-sqlite3 版本范围**——`~12.4.6` 内网受管镜像只有 13.0.2 可下,

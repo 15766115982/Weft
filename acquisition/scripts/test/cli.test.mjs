@@ -222,6 +222,12 @@ test('confluence --probe requires a page id and reports the gliffy shape', async
     };
     if (req.headers.authorization !== 'Bearer cli-pat') return json(401, {});
     if (u.pathname === '/rest/api/content/777') return json(200, page);
+    if (u.pathname === '/rest/api/content/777/child/attachment') {
+      return json(200, {
+        results: [{ title: 'dia.gliffy', _links: { download: '/download/attachments/777/dia.gliffy' } }],
+        size: 1,
+      });
+    }
     if (u.pathname === '/download/attachments/777/dia.gliffy') {
       res.writeHead(200, { 'content-type': 'application/octet-stream' });
       return res.end(gliffy);
@@ -247,5 +253,17 @@ test('confluence --probe requires a page id and reports the gliffy shape', async
   assert.equal(ok.code, 0, ok.stderr);
   const out = JSON.parse(ok.stdout);
   assert.equal(out.probe, true);
-  assert.deepEqual(out.gliffy, { http: 200, via: 'legacy', jsonValid: true, hasStageObjects: true, objectCount: 1, labelCount: 1 });
+  assert.deepEqual(out.gliffy, {
+    macro: { name: 'dia', displayName: '', page: '', space: '' },
+    page_id: '777',
+    attachment_count: 1,
+    attachments: ['dia.gliffy'],
+    matched: { title: 'dia.gliffy', match: 'nameNoExt', via: 'rest-download' },
+    attempts: [],
+    http: 200,
+    jsonValid: true,
+    hasStageObjects: true,
+    objectCount: 1,
+    labelCount: 1,
+  });
 });

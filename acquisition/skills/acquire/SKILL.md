@@ -45,7 +45,9 @@ node <skill-dir>/../../scripts/acquire.mjs confluence --kb <kb-root>
 # One-off CQL override (does not edit kb.json) / result cap / PAT sanity check
 node <skill-dir>/../../scripts/acquire.mjs confluence --kb <kb-root> --cql "space = DEV AND label = kb" --max 100
 node <skill-dir>/../../scripts/acquire.mjs confluence --kb <kb-root> --check
-# Shape probe: the first Gliffy attachment's structure on a given page (value-free)
+# Shape probe: on a given page, the macro's params + the page's REAL attachment
+# titles + which matched and by which download route (value-free metadata, never
+# bodies). Use this to diagnose a Gliffy 404: see docs/real-env-test.md §3a.
 node <skill-dir>/../../scripts/acquire.mjs confluence --kb <kb-root> --probe <pageId>
 ```
 
@@ -89,9 +91,10 @@ preserved, unknown macros degrade to a visible `[macro: name]` placeholder, and
 the original XHTML is discarded (contract §2). Comments are not pulled (v1).
 
 Macro adaptation (phase 1): three macros resolve to real content instead of the
-placeholder — **gliffy** (labels extracted from the `.gliffy` attachment JSON plus
-the PNG render stored as a sidecar at `raw/confluence/<page-id>.assets/` and embedded
-as an image link), **jira** (`key` → a one-line issue card; `jql`/`jqlQuery` → an
+placeholder — **gliffy** (labels extracted from the diagram attachment JSON — the
+attachment is matched by the macro's `name` against the page's REAL attachment
+list, which may be extensionless; the PNG sidecar is only written when a real
+image attachment exists, at `raw/confluence/<page-id>.assets/`), **jira** (`key` → a one-line issue card; `jql`/`jqlQuery` → an
 issue table executed against the configured Jira, capped at 20 rows, identical JQLs
 run once per pull — the macro's `serverId` cannot be resolved without the applinks
 API, so a **single-Jira assumption** applies), **gallery** (renders its attachment
