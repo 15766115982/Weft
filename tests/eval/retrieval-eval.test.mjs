@@ -47,20 +47,32 @@ function writeReport() {
   const hit1 = scored.filter((r) => r.firstRank === 0).length / scored.length;
   const hit5 = scored.filter((r) => r.firstRank >= 0 && r.firstRank < 5).length / scored.length;
   const mrr = scored.reduce((s, r) => s + (r.firstRank >= 0 ? 1 / (r.firstRank + 1) : 0), 0) / scored.length;
+  // ADR-0007 candidate-space dilution observation: how many candidates each
+  // query produces and how many arrive via graph expansion (authored via:link
+  // + derived via:provenance, appended after all search hits at score 0). The
+  // Hit@5 gate is preview-based so expansion cannot break it structurally, but
+  // a runaway expansion would silently inflate `total` / the on-disk candidate
+  // file — that growth must stay visible.
+  const exp = scored.filter((r) => r.expansionTotal).map((r) => r.expansionTotal);
+  const dilutionLine = exp.length
+    ? `expansion per query: avg ${(exp.reduce((s, x) => s + x, 0) / exp.length).toFixed(1)} candidates · max ${Math.max(...exp)}`
+    : 'no graph expansion in this run';
   const lines = [
     '# Retrieval Evaluation Report',
     '',
-    `Date: ${new Date().toISOString()} · KB: fixture corpus (${Object.keys(rows).length ? '' : ''}${scored.length + 1} queries, ${scored.length} scored + 1 negative)`,
+    `Date: ${new Date().toISOString()} · KB: fixture corpus (${scored.length + 1} queries, ${scored.length} scored + 1 negative)`,
     '',
     `**Hit@1 = ${hit1.toFixed(3)} · Hit@5 = ${hit5.toFixed(3)} (threshold ${HIT5_THRESHOLD}) · MRR = ${mrr.toFixed(3)}**`,
     '',
-    '| id | query | expected | first-rank | top-5 pages | routed | result |',
-    '|---|---|---|---|---|---|---|',
-    ...rows.map((r) => `| ${r.id} | \`${r.q}\` | ${r.expect.join('<br>') || '(empty expected)'} | ${r.expectEmpty ? '—' : (r.firstRank < 0 ? 'MISS' : r.firstRank + 1)} | ${r.top5.join('<br>')} | ${r.routed} | ${r.ok ? '✅' : '❌'} |`),
+    `candidate dilution: ${dilutionLine}`,
+    '',
+    '| id | query | expected | first-rank | top-5 pages | routed | total | result |',
+    '|---|---|---|---|---|---|---|---|',
+    ...rows.map((r) => `| ${r.id} | \`${r.q}\` | ${r.expect.join('<br>') || '(empty expected)'} | ${r.expectEmpty ? '—' : (r.firstRank < 0 ? 'MISS' : r.firstRank + 1)} | ${r.top5.join('<br>')} | ${r.routed} | ${r.total} | ${r.ok ? '✅' : '❌'} |`),
     '',
   ];
   fs.writeFileSync(path.join(dir, 'retrieval-eval-latest.md'), lines.join('\n'));
-  console.log(`\n[eval] Hit@1=${hit1.toFixed(3)} Hit@5=${hit5.toFixed(3)} MRR=${mrr.toFixed(3)} → docs/test-reports/retrieval-eval-latest.md`);
+  console.log(`\n[eval] Hit@1=${hit1.toFixed(3)} Hit@5=${hit5.toFixed(3)} MRR=${mrr.toFixed(3)} · ${dilutionLine} → docs/test-reports/retrieval-eval-latest.md`);
 }
 
 test('retrieval effectiveness: golden query set', async (t) => {
@@ -74,7 +86,7 @@ test('retrieval effectiveness: golden query set', async (t) => {
         id: q.id, q: q.q, expect: expectPages, expectEmpty: !!q.expectEmpty,
         firstRank, top5: preview.slice(0, 5).map((p) => p.replace('wiki/', '')),
         routed: Object.entries(res.routed).filter(([, v]) => v.length).map(([k, v]) => `${k}:${v.join('/')}`).join(' ') || '(filters only)',
-        ok: true,
+        total: res.total, expansionTotal: 0, ok: true,
       };
       rows.push(row);
       try {
@@ -99,6 +111,11 @@ test('retrieval effectiveness: golden query set', async (t) => {
           assert.ok(full.candidates.some((c) => c.page === target && c.via === 'link'),
             `${target} must appear via graph expansion`);
         }
+        // ADR-0007 dilution observation: expansion neighbors (link + provenance)
+        // are appended after all search hits; count them so their growth is visible
+        const full = JSON.parse(fs.readFileSync(path.join(kb, res.candidates_file), 'utf8'));
+        row.expansionTotal = full.candidates.filter((c) => c.via === 'link' || c.via === 'provenance').length;
+        row.total = full.candidates.length;
       } catch (err) {
         row.ok = false;
         throw err;

@@ -86,6 +86,29 @@ test('wikilink graph expansion (via:link)', () => {
   assert.equal(link.page, 'wiki/sources/local-pay.md');
 });
 
+test('provenance expansion: approved topic covers a hit source (via:provenance, forward + reverse)', () => {
+  // ADR-0007: an approved topic's sources: frontmatter yields derived edges —
+  // forward (topic→source) and read-time reverse (source→topic). A source hit
+  // must pull in its covering topic tagged via:'provenance' (distinct from
+  // authored via:'link').
+  writePage('wiki/topics/pay-synthesis.md', {
+    type: 'topic', status: 'approved', title: 'Pay Synthesis',
+    sources: ['raw/local/pay.md'], updated_at: '2026-08-01T00:00:00Z',
+  }, '## Umbrella\n\nSynthesis across the payment materials.');
+  ensureFresh(kb);
+  const r = search(kb, 'timeout');
+  const prov = r.preview.find(c => c.via === 'provenance');
+  assert.ok(prov, 'covering topic must be pulled in via provenance');
+  assert.equal(prov.page, 'wiki/topics/pay-synthesis.md');
+  // forward: the topic hit expands to its covered source ('synthesis' is only
+  // in the topic body, so the source arrives solely via provenance, not search)
+  const r2 = search(kb, 'synthesis');
+  assert.ok(r2.preview.some(c => c.via === 'provenance' && c.page === 'wiki/sources/local-pay.md'),
+    'topic hit expands to its covered source (forward)');
+  fs.unlinkSync(path.join(kb, 'wiki', 'topics', 'pay-synthesis.md'));
+  ensureFresh(kb);
+});
+
 test('read #anchor returns section', () => {
   const body = '## A\n\nfoo\n\n## B\n\nbar\n';
   assert.equal(readSection(body, 'B'), '## B\n\nbar\n');

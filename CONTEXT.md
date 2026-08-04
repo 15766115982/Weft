@@ -163,7 +163,9 @@ exploration, reranking, full-text reading).
     (Qwen3-Embedding-0.6B for CJK corpora, not embeddinggemma); RRF (k=60) fusion; silently
     skipped when unconfigured;
   - wikilink graph expansion: outbound-link neighbors of top-10 hit pages are merged into the
-    candidates (annotated via:link);
+    candidates (annotated via:link), plus ADR-0007 provenance neighbors — a topic hit pulls in
+    its `sources:` (via:provenance) and a source hit pulls in its covering topics (read-time
+    reverse, never stored); per-page fan-out capped;
   - Outputs a **candidate space** rather than one-shot snippets: top-10 preview + full top-K
     persisted to disk + `--within` scoped iterative digging + `read <path>#<anchor>` to fetch
     a whole section; ≤2 snippets per page.
@@ -174,7 +176,9 @@ exploration, reranking, full-text reading).
   expansion.
 - **No offline graph-building pipeline** (GraphRAG-style): wiki backlinks + index.md already
   constitute explicit structure; agentic iterative retrieval suffices; re-evaluate only if
-  complex multi-hop demands emerge in the future.
+  complex multi-hop demands emerge in the future. (ADR-0007's in-process provenance derivation
+  is consistent with this: it is an index-time reconcile over the derived SQLite artifact —
+  the copied `sources` column and `provlinks` — not an offline graph build stage.)
 
 ### Governance risk tiers and triggering
 

@@ -19,7 +19,11 @@ const sha256 = (s) => crypto.createHash('sha256').update(s, 'utf8').digest('hex'
 // 5 = mtime/size columns on docs+skips so ensureFresh can skip re-hashing
 // files whose stat is unchanged (review 2026-08-04: the per-request full-corpus
 // re-hash made every search O(N files) of disk reads)
-const SCHEMA_VERSION = 5;
+// 6 = ADR-0007: provlinks (forward topic→source provenance edges, separate from
+// authored outlinks) + a copied `sources` column (so the post-reconcile derived
+// pass joins via pure SQL — reading topic frontmatter directly would revive
+// O(topics) disk reads on deletion-heavy reconciles)
+const SCHEMA_VERSION = 6;
 
 export function openDb(kbRoot) {
   const dir = path.join(kbRoot, '.kb');
@@ -35,7 +39,7 @@ export function openDb(kbRoot) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS docs(
       path TEXT PRIMARY KEY, type TEXT, title TEXT, source_ref TEXT,
-      source TEXT, tags TEXT, outlinks TEXT, hash TEXT, updated TEXT, src_updated TEXT,
+      source TEXT, tags TEXT, outlinks TEXT, provlinks TEXT, sources TEXT, hash TEXT, updated TEXT, src_updated TEXT,
       mtime REAL, size INTEGER);
     CREATE TABLE IF NOT EXISTS chunks(
       id INTEGER PRIMARY KEY, doc_path TEXT, anchor TEXT, heading TEXT, text TEXT);
@@ -74,6 +78,68 @@ export function resolveLinks(links, knownPaths) {
   return out;
 }
 
+/**
+ * ADR-0007: join a topic's `sources:` frontmatter entries (raw paths) to the
+ * approved source pages they trace to. Forward-only (topic → source); reverse
+ * edges are computed at read time. Join caliber (review round 2 R3.2, pinned):
+ *   exact `entry === source_ref` primary;
+ *   fallback `entry.endsWith('/' + basename(source_ref))` — the '/' anchor
+ *   follows resolveLinks' `endsWith('/' + norm)` (above), deliberately stricter
+ *   than browse.mjs rawRefs' loose caliber so `…/aaaa1111-pay.md` cannot
+ *   mis-match a `pay.md` source_ref.
+ * Unmatched → dropped, counted. Ambiguous (two source pages share the basename
+ * and both anchor-match) → dropped, counted. Never silently: the caller
+ * reports the counts (retrieval-side reindex output / health — NOT governance
+ * plan(), which has zero import of retrieval).
+ * Exported so the UI portal's candidate scan (ui/lib/graph.mjs) reuses the
+ * same function — one caliber, one implementation (resolveLinks precedent).
+ */
+export function deriveProvlinks(sourcePages, entries) {
+  const byRef = new Map();
+  const byBase = new Map();
+  for (const sp of sourcePages) {
+    if (!sp.source_ref) continue;
+    if (!byRef.has(sp.source_ref)) byRef.set(sp.source_ref, sp.path);
+    const base = String(sp.source_ref).split('/').pop();
+    if (!byBase.has(base)) byBase.set(base, []);
+    byBase.get(base).push(sp.path);
+  }
+  const links = [];
+  let unmatched = 0, ambiguous = 0;
+  for (const raw of entries) {
+    const e = String(raw);
+    const exact = byRef.get(e);
+    if (exact) { links.push(exact); continue; }
+    const base = e.split('/').pop();
+    const cands = (byBase.get(base) || []).filter(p => e.endsWith('/' + base));
+    if (cands.length === 1) links.push(cands[0]);
+    else if (cands.length === 0) unmatched++;
+    else ambiguous++;
+  }
+  return { links, unmatched, ambiguous };
+}
+
+/** Post-reconcile derived pass (ADR-0007): recompute `provlinks` for every
+ *  approved topic from its copied `sources` column, pure SQL — no disk reads
+ *  (R3.1: reading topic frontmatter would revive O(topics) disk reads on
+ *  deletion-heavy reconciles). Runs after the reconcile transaction, when the
+ *  whole approved source_ref set is visible (fixes the A.3.10 join-window). */
+function recomputeProvlinks(db) {
+  const rows = db.prepare('SELECT path, source_ref, sources FROM docs').all();
+  const sourcePages = rows.filter(r => r.source_ref);
+  const update = db.prepare('UPDATE docs SET provlinks=? WHERE path=?');
+  let edges = 0, unmatched = 0, ambiguous = 0;
+  for (const r of rows) {
+    let entries;
+    try { entries = JSON.parse(r.sources || '[]'); } catch { entries = []; }
+    if (!Array.isArray(entries) || !entries.length) continue;
+    const { links, unmatched: u, ambiguous: a } = deriveProvlinks(sourcePages, entries);
+    edges += links.length; unmatched += u; ambiguous += a;
+    update.run(JSON.stringify(links), r.path);
+  }
+  return { edges, unmatched, ambiguous };
+}
+
 function indexDoc(db, kbRoot, rel, knownPaths, hash, stat) {
   const abs = path.join(kbRoot, rel);
   const text = fs.readFileSync(abs, 'utf8');
@@ -81,7 +147,7 @@ function indexDoc(db, kbRoot, rel, knownPaths, hash, stat) {
   if (fields.status !== 'approved') return false; // contract: approved only
 
   const insertDoc = db.prepare(
-    'INSERT INTO docs VALUES(?,?,?,?,?,?,?,?,?,?,?,?)');
+    'INSERT INTO docs VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
   const insertChunk = db.prepare(
     'INSERT INTO chunks(doc_path,anchor,heading,text) VALUES(?,?,?,?)');
   const insertLatin = db.prepare('INSERT INTO fts_latin(rowid,text) VALUES(?,?)');
@@ -102,8 +168,13 @@ function indexDoc(db, kbRoot, rel, knownPaths, hash, stat) {
     return Number.isNaN(d.getTime()) ? v : d.toISOString();
   };
   const srcUpdated = toUtc(fields.source_version);
+  // sources copy column (ADR-0007): topic frontmatter `sources:` array, copied
+  // so the post-reconcile derived pass joins pure SQL without touching disk.
+  // provlinks is written empty here; the derived pass fills it after the
+  // reconcile transaction (it needs the whole approved source_ref set in one pass).
   insertDoc.run(rel, fields.type || '', fields.title || '', fields.source_ref || '',
-    source, JSON.stringify(fields.tags || []), JSON.stringify(outlinks), hash,
+    source, JSON.stringify(fields.tags || []), JSON.stringify(outlinks),
+    JSON.stringify([]), JSON.stringify(fields.sources || []), hash,
     toUtc(fields.updated_at) || String(fields.updated_at || ''), srcUpdated,
     stat.mtime, stat.size);
   for (const c of chunkPage(body)) {
@@ -177,7 +248,16 @@ export function ensureFresh(kbRoot) {
     }
   });
   tx();
-  const stats = { added_or_updated: toIndex.length, removed: toRemove.length, total: onDisk.size };
+  // ADR-0007 derived pass: run whenever the reconcile changed anything — a pure
+  // deletion (toRemove non-empty, toIndex empty) must still refresh ambiguity
+  // resolution (two same-basename sources, one removed → the surviving unique
+  // match must reappear). Never on the read path (keeps the fixed per-request
+  // O(N) disk-scan regression dead); reads only the copied sources column.
+  const provlinks = (toIndex.length || toRemove.length) ? recomputeProvlinks(db) : null;
+  const stats = {
+    added_or_updated: toIndex.length, removed: toRemove.length, total: onDisk.size,
+    provlinks,
+  };
   db.close();
   return stats;
 }

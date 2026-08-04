@@ -159,10 +159,26 @@ function infoTab(fields, sourcesResolved) {
 
 function backlinksTab(backlinks, rel) {
   const box = el('div');
-  if (!backlinks.length) box.append(el('p', { class: 'dim' }, '没有页面引用这篇 — 它是知识图的一个端点。'));
-  for (const b of backlinks) {
-    box.append(el('a', { href: `#/page?path=${encodeURIComponent(b.path)}`, style: 'display:block;padding:2px 0' }, b.title));
+  // ADR-0007: two groups — authored references vs derived coverage sources
+  // (the topics built on this source). A source page's coverage group answers
+  // "which topics are built on this", the relationship this ADR exists to show.
+  const refs = backlinks.filter((b) => b.kind !== 'coverage');
+  const cov = backlinks.filter((b) => b.kind === 'coverage');
+  if (!refs.length && !cov.length) {
+    box.append(el('p', { class: 'dim' }, '没有页面引用这篇 — 它是知识图的一个端点。'));
   }
+  const group = (label, list) => {
+    if (!list.length) return;
+    const g = el('div', { style: 'margin-bottom:8px' });
+    g.append(el('div', { class: 'dim', style: 'font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px' },
+      `${label} · ${list.length}`));
+    for (const b of list) {
+      g.append(el('a', { href: `#/page?path=${encodeURIComponent(b.path)}`, style: 'display:block;padding:2px 0' }, b.title));
+    }
+    box.append(g);
+  };
+  group('引用 References', refs);
+  group('覆盖来源 Coverage', cov);
   // A7: jump into the graph centered on this page
   box.append(el('a', { href: `#/graph?focus=${encodeURIComponent(rel)}`, class: 'dim', style: 'display:block;margin-top:10px;font-size:12px' }, '在图谱中查看 →'));
   return box;

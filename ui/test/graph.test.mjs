@@ -75,6 +75,40 @@ test('backlinks over the shared edge list keep the old shape and caliber', async
   assert.deepEqual(none.pages, [], 'nobody links the candidate');
 });
 
+test('ADR-0007 derived edges: approved + candidate topics, kind + coverage, reverse backlinks', async () => {
+  // approved topic covering local-a1 (raw/local/a1.md) → derived topic→source
+  writePage('wiki/topics/topic-a.md', {
+    type: 'topic', status: 'approved', title: 'Topic A',
+    sources: ['raw/local/a1.md'], updated_at: '2026-08-01T00:00:00Z',
+  }, 'Synthesis over source a1.');
+  // candidate topic covering local-a1 → derived edge via the UI-side scan
+  writePage('wiki/topics/cand-topic.md', {
+    type: 'topic', status: 'candidate', title: 'Cand Topic',
+    sources: ['raw/local/a1.md'], updated_at: '2026-08-01T00:00:00Z',
+  }, 'Draft over a1.');
+  const g = await (await fetch(base + '/api/graph')).json();
+  const derived = g.edges.filter((e) => e.kind === 'derived');
+  const dFrom = derived.map((e) => `${e.from} → ${e.to}`).sort();
+  assert.ok(dFrom.includes('wiki/topics/topic-a.md → wiki/sources/local-a1.md'), 'approved topic derived edge');
+  assert.ok(dFrom.includes('wiki/topics/cand-topic.md → wiki/sources/local-a1.md'), 'candidate topic derived edge (UI scan)');
+  assert.ok(derived.every((e) => e.kind === 'derived'), 'kind tag present');
+  // per-topic coverage count on nodes
+  const topicA = g.nodes.find((n) => n.path === 'wiki/topics/topic-a.md');
+  assert.equal(topicA.coverage, 1, 'coverage = number of derived sources');
+  // reverse: source page backlinks include covering topics, grouped as coverage
+  const bl = await (await fetch(base + '/api/backlinks?path=wiki/sources/local-a1.md')).json();
+  const cov = bl.pages.filter((p) => p.kind === 'coverage').map((p) => p.path);
+  assert.ok(cov.includes('wiki/topics/topic-a.md'), 'approved covering topic appears in coverage group');
+  assert.ok(cov.includes('wiki/topics/cand-topic.md'), 'candidate covering topic appears in coverage group');
+  // no authored edge points at local-a1 in this fixture → every backlink is
+  // a coverage entry (the hub is local-a1's OUT-link, not an in-link)
+  assert.ok(bl.pages.every((p) => p.kind === 'coverage'),
+    `source's in-edges are all derived coverage: ${JSON.stringify(bl.pages)}`);
+  // cleanup — restore the fixture for later tests
+  fs.rmSync(path.join(kb, 'wiki', 'topics', 'topic-a.md'));
+  fs.rmSync(path.join(kb, 'wiki', 'topics', 'cand-topic.md'));
+});
+
 test('graph endpoint passes through the loopback Host gate (P2-2)', async () => {
   const status = await new Promise((resolve) => {
     const req = http.request({ host: '127.0.0.1', port: new URL(base).port, path: '/api/graph', headers: { host: 'evil.example' } }, (res) => resolve(res.statusCode));

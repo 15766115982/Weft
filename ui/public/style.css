@@ -393,6 +393,15 @@ button.danger-solid { background: var(--wine); border-color: var(--wine); color:
 /* full-bleed: cancel #view padding so the canvas owns the viewport between
    the 44px top bar and the 28px statusbar */
 .graph { display: flex; flex-direction: column; margin: -20px -24px -52px; height: calc(100vh - 72px); }
+/* ADR-0007 dual view: tab bar + navigation tree / semantic graph panes */
+.graph-tabs { flex: none; display: flex; gap: 2px; padding: 8px 14px 0; background: var(--paper-raise); border-bottom: 1px solid var(--line); }
+.graph-tabs button { border: none; background: none; padding: 6px 14px; font-size: 13px; color: var(--ink-dim); cursor: pointer; border-bottom: 2px solid transparent; }
+.graph-tabs button.active { color: var(--celadon); border-bottom-color: var(--celadon); font-weight: 600; }
+.graph-tree-pane { flex: 1; overflow-y: auto; padding: 12px 14px; background: var(--paper); }
+.graph-tree-pane .tree { display: block; }
+.graph-tree-pane .tree a { padding: 4px 8px; font-size: 13px; }
+.graph-canvas-pane { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.graph-legend .lg-deriv { color: var(--ink-dim); }
 .graph-bar { flex: none; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--paper-raise); }
 .graph-bar .graph-focus { flex: none; width: 190px; margin: 0; padding: 5px 10px; font-size: 13px;

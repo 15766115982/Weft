@@ -1,9 +1,13 @@
-// views/graph.js — A7 relationship graph: the wikilink map as a force-directed
-// canvas. Hand-rolled simulation (zero new vendor deps — intranet rule):
-// uniform-grid repulsion keeps each tick ~O(n) at the ≤2k-node scale the
-// requirements cap the KB at. Visual unity with the signature [[ reference
-// chip ]]: hovered/focused nodes show it in the tooltip; topics are filled
-// celadon, sources hollow, candidates dashed amber (status chip semantics).
+// views/graph.js — ADR-0007 dual view: a NAVIGATION TREE ("find things",
+// node-scan driven, never parses index.md) and a SEMANTIC GRAPH ("understand
+// relationships", force-directed canvas). The semantic view excludes index.md
+// (view-layer only — buildGraph's contract is unchanged) and distinguishes
+// authored edges (solid) from ADR-0007 derived provenance edges (dashed).
+// Hand-rolled simulation (zero new vendor deps — intranet rule): uniform-grid
+// repulsion keeps each tick ~O(n) at the ≤2k-node scale the requirements cap
+// the KB at. Visual unity with the signature [[ reference chip ]]: hovered /
+// focused nodes show it in the tooltip; topics are filled celadon, sources
+// hollow, candidates dashed amber (status chip semantics).
 import { api } from '../lib/api.js';
 import { el, html, esc } from '../lib/render.js';
 import { icon } from '../lib/icons.js';
@@ -18,7 +22,65 @@ export async function render(view, params) {
   const wrap = el('div', { class: 'graph' });
   view.append(wrap);
 
-  // ---------- toolbar ----------
+  // ---------- ADR-0007 tab bar: navigation tree / semantic graph ----------
+  const tabs = el('div', { class: 'graph-tabs' });
+  const tabTree = el('button', { class: 'active' }, '导航树');
+  const tabGraph = el('button', {}, '语义图');
+  tabs.append(tabTree, tabGraph);
+  wrap.append(tabs);
+
+  const treePane = el('div', { class: 'graph-tree-pane', hidden: '' });
+  const graphPane = el('div', { class: 'graph-canvas-pane' });
+  wrap.append(treePane, graphPane);
+
+  tabTree.addEventListener('click', () => {
+    tabTree.classList.add('active'); tabGraph.classList.remove('active');
+    treePane.hidden = false; graphPane.hidden = true;
+  });
+  tabGraph.addEventListener('click', () => {
+    tabGraph.classList.add('active'); tabTree.classList.remove('active');
+    treePane.hidden = true; graphPane.hidden = false;
+    if (graphPane.hidden === false && !fitted) { fitView(); fitted = true; }
+  });
+
+  // ---------- navigation tree ----------
+  // Node-scan driven (ADR-0007 Decision 2): the directory tree is the type
+  // system. Topics/Sources groups mirror contract.md's structure 1:1; the
+  // candidate status badge needs the scan; coverage count comes from the graph
+  // layer (derived topic→source edge count).
+  const treeFilter = el('input', { class: 'tree-filter', placeholder: '过滤导航树…' });
+  const treeList = el('nav', { class: 'tree' });
+  treePane.append(treeFilter, treeList);
+  let treeNodes = [];
+
+  function renderTree() {
+    treeList.textContent = '';
+    const q = treeFilter.value.trim().toLowerCase();
+    const groups = [
+      { label: '主题 Topics', nodes: treeNodes.filter((n) => n.path.startsWith('wiki/topics/')) },
+      { label: '来源 Sources', nodes: treeNodes.filter((n) => n.path.startsWith('wiki/sources/')) },
+    ];
+    for (const g of groups) {
+      let list = g.nodes;
+      if (q) list = list.filter((n) => (n.title || '').toLowerCase().includes(q) || n.path.toLowerCase().includes(q));
+      if (!list.length) continue;
+      const head = el('div', { class: 'dim', style: 'padding:8px 4px 2px;font-size:11px;text-transform:uppercase;letter-spacing:.08em' },
+        `${g.label} · ${list.length}`);
+      treeList.append(head);
+      for (const n of list) {
+        const a = el('a', { href: `#/page?path=${encodeURIComponent(n.path)}` });
+        const t = el('span', { class: 't' }, n.title || n.path);
+        a.append(t);
+        if (n.status === 'candidate') a.append(el('span', { class: 'badge candidate' }, '候选'));
+        if (n.coverage) a.append(el('span', { class: 'src' }, `${n.coverage} 覆盖`));
+        treeList.append(a);
+      }
+    }
+    if (!treeList.childElementCount) treeList.append(el('p', { class: 'dim', style: 'padding:8px 4px' }, '没有匹配的页面。'));
+  }
+  treeFilter.addEventListener('input', renderTree);
+
+  // ---------- semantic graph toolbar ----------
   const focusInput = el('input', { class: 'graph-focus', placeholder: '定位页面…', list: 'graph-titles', title: '输入页面名,回车定位' });
   const candBtn = el('button', { class: 'graph-toggle on', title: '显示 / 隐藏候选页' }, '候选');
   const isoBtn = el('button', { class: 'graph-toggle on', title: '显示 / 隐藏没有连线的孤立页' }, '孤立点');
@@ -30,14 +92,14 @@ export async function render(view, params) {
   // fresh link is missing while dangling_links (live-scanned) disagrees.
   const lag = el('span', { class: 'dim', style: 'font-size:11px', title: '边取自检索索引,页面重建索引前是冻结的:指向新建页面的边会迟到,plan 的悬空链接(实时扫描)可能已经算它有效。治理台 rebuild-index 可强制重建。' }, '边可能滞后');
   const legend = el('span', { class: 'graph-legend dim' });
-  html(legend, '<span class="lg-topic">●</span> 主题页 <span class="lg-source">○</span> 来源页 <span class="lg-cand">◌</span> 候选 <span class="lg-index">◎</span> 索引');
+  html(legend, '<span class="lg-topic">●</span> 主题页 <span class="lg-source">○</span> 来源页 <span class="lg-cand">◌</span> 候选 <span class="lg-deriv">┅</span> 溯源边');
   const bar = el('div', { class: 'graph-bar' }, focusInput, candBtn, isoBtn, relayBtn, legend, lag, stats);
 
   const stage = el('div', { class: 'graph-stage' });
   const canvas = el('canvas');
   const tip = el('div', { class: 'graph-tip', hidden: '' });
   stage.append(canvas, tip);
-  wrap.append(bar, stage);
+  graphPane.append(bar, stage);
   const ctx = canvas.getContext('2d');
 
   // ---------- state ----------
@@ -64,7 +126,9 @@ export async function render(view, params) {
 
   // ---------- simulation ----------
   function rebuild() {
-    let list = raw.nodes;
+    // ADR-0007: the SEMANTIC view excludes index.md — a view-layer decision;
+    // buildGraph still returns it as a node (backlinks depends on its edges).
+    let list = raw.nodes.filter((n) => !n.isIndex);
     if (!showCandidates) list = list.filter((n) => n.status !== 'candidate');
     const kept = new Set(list.map((n) => n.path));
     let es = raw.edges.filter((e) => kept.has(e.from) && kept.has(e.to));
@@ -86,10 +150,10 @@ export async function render(view, params) {
       };
     });
     byPath = new Map(nodes.map((n) => [n.path, n]));
-    edges = es.map((e) => ({ a: byPath.get(e.from), b: byPath.get(e.to) })).filter((e) => e.a && e.b);
+    edges = es.map((e) => ({ a: byPath.get(e.from), b: byPath.get(e.to), kind: e.kind })).filter((e) => e.a && e.b);
     hover = null; tip.hidden = true; // node objects are fresh — drop stale refs
     const cand = raw.nodes.filter((n) => n.status === 'candidate').length;
-    stats.textContent = `${raw.nodes.length} 节点 · ${raw.edges.length} 边` + (cand ? ` · ${cand} 候选` : '');
+    stats.textContent = `${raw.nodes.length - (raw.nodes.some((n) => n.isIndex) ? 1 : 0)} 节点 · ${edges.length} 边` + (cand ? ` · ${cand} 候选` : '');
   }
 
   function tick(forcesOnly) {
@@ -182,20 +246,18 @@ export async function render(view, params) {
       // --line is a hairline at rest; edges need the dim-ink to stay visible
       ctx.strokeStyle = c.dim;
       ctx.globalAlpha = on ? (dimAll ? 0.85 : 0.4) : 0.06;
+      // ADR-0007: authored solid, derived provenance dashed (explicit > implicit)
+      ctx.setLineDash(e.kind === 'derived' ? [5 / cam.k, 4 / cam.k] : []);
       ctx.beginPath(); ctx.moveTo(e.a.x, e.a.y); ctx.lineTo(e.b.x, e.b.y); ctx.stroke();
     }
+    ctx.setLineDash([]);
     for (const n of nodes) {
       const on = !dimAll || focusSet.has(n.path);
       ctx.globalAlpha = on ? 1 : 0.18;
       const r = radius(n);
       const isTopic = n.path.startsWith('wiki/topics/');
       ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, 6.2832);
-      if (n.isIndex) {
-        ctx.fillStyle = c.celadon; ctx.globalAlpha = on ? 0.25 : 0.08; ctx.fill();
-        ctx.globalAlpha = on ? 1 : 0.18;
-        ctx.setLineDash([]); ctx.lineWidth = 1.6 / cam.k; ctx.strokeStyle = c.celadon; ctx.stroke();
-        ctx.beginPath(); ctx.arc(n.x, n.y, r * 0.45, 0, 6.2832); ctx.fillStyle = c.celadon; ctx.fill();
-      } else if (n.status === 'candidate') {
+      if (n.status === 'candidate') {
         ctx.fillStyle = c.soft; ctx.fill();
         ctx.setLineDash([3 / cam.k, 3 / cam.k]); ctx.lineWidth = 1.4 / cam.k;
         ctx.strokeStyle = '#b45309'; ctx.stroke(); ctx.setLineDash([]);
@@ -235,7 +297,7 @@ export async function render(view, params) {
   }
   function showTip(n, mx, my) {
     if (!n) { tip.hidden = true; return; }
-    const meta = [n.isIndex ? '索引' : n.path.startsWith('wiki/topics/') ? '主题页' : '来源页',
+    const meta = [n.path.startsWith('wiki/topics/') ? '主题页' : '来源页',
       STATUS_LABEL[n.status] || n.status || '', `${n.deg} 连接`].filter(Boolean).join(' · ');
     html(tip, `<span class="br">[[</span>${esc(n.title)}<span class="br">]]</span><span class="dim">${esc(meta)}</span>`);
     tip.hidden = false;
@@ -319,6 +381,8 @@ export async function render(view, params) {
   // ---------- data ----------
   async function load() {
     raw = await api('/api/graph');
+    treeNodes = raw.nodes;
+    renderTree();
     rebuild();
     // datalist for the focus box (native autocomplete, zero extra code)
     let dl = document.getElementById('graph-titles');
@@ -342,7 +406,7 @@ export async function render(view, params) {
     alpha = 1;
     for (let i = 0; i < 180; i++) tick(true);
     alpha = 0.3;
-    if (!fitted) { fitView(); fitted = true; }
+    if (graphPane.hidden === false && !fitted) { fitView(); fitted = true; }
     if (focusedPath && byPath.has(focusedPath)) centerOn(focusedPath);
     reheat(0.3);
   }

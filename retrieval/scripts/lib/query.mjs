@@ -137,18 +137,42 @@ export function search(kbRoot, input, { within = [], limit = 50 } = {}) {
       if (candidates.length >= limit) break;
     }
 
-    // 4. wikilink graph expansion: outlink neighbors of top-hit pages join the
-    // candidates (the retrieval dividend of governance structure)
+    // 4. graph expansion: outlink neighbors of top-hit pages join the
+    // candidates (the retrieval dividend of governance structure), plus
+    // ADR-0007 provenance neighbors — forward (topic→source, from the provlinks
+    // column) and reverse (source→covering topics, computed at read time from
+    // the in-memory docs — all docs are loaded above, so the reverse map is
+    // free; the "bidirectional default-on" behavior kept without storing
+    // reverse edges). Derived neighbors are tagged via:'provenance' so the LLM
+    // agent and portal chips can weigh them separately from authored via:'link'.
     const GRAPH_EXPAND_TOP = 10; // expand links only from the top-10 most relevant pages, bounding candidate growth
+    const GRAPH_EXPAND_FANOUT_CAP = 20; // per-page per-direction cap for provenance neighbors (ADR-0007 tuning knob; default ≈ ≤20)
+    // read-time reverse provenance map: source page → covering approved topics
+    const revProv = new Map();
+    const provByTopic = new Map();
+    for (const d of docRows) {
+      const prov = JSON.parse(d.provlinks || '[]');
+      if (!prov.length) continue;
+      provByTopic.set(d.path, prov);
+      for (const target of prov) {
+        if (!revProv.has(target)) revProv.set(target, []);
+        revProv.get(target).push(d.path);
+      }
+    }
     const seen = new Set(candidates.map(c => c.page));
+    const pushCandidate = (link, via) => {
+      if (seen.has(link) || !allowedDocs.has(link)) return;
+      seen.add(link);
+      const nm = docMeta.get(link);
+      candidates.push({ page: link, anchor: '', heading: '', score: 0, snippet: '', title: nm?.title || '', via });
+    };
     for (const c of candidates.slice(0, GRAPH_EXPAND_TOP)) {
       const meta = docMeta.get(c.page);
-      for (const link of JSON.parse(meta?.outlinks || '[]')) {
-        if (seen.has(link) || !allowedDocs.has(link)) continue;
-        seen.add(link);
-        const nm = docMeta.get(link);
-        candidates.push({ page: link, anchor: '', heading: '', score: 0, snippet: '', title: nm?.title || '', via: 'link' });
-      }
+      for (const link of JSON.parse(meta?.outlinks || '[]')) pushCandidate(link, 'link');
+      // forward: this topic's sources
+      for (const link of (provByTopic.get(c.page) || []).slice(0, GRAPH_EXPAND_FANOUT_CAP)) pushCandidate(link, 'provenance');
+      // reverse: sources that cover this page (source hit pulls in its topics)
+      for (const link of (revProv.get(c.page) || []).slice(0, GRAPH_EXPAND_FANOUT_CAP)) pushCandidate(link, 'provenance');
     }
 
     // 5. Candidate space on disk: preview (top-10) + full list written to
