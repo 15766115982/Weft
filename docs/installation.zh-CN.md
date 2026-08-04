@@ -114,6 +114,13 @@ git init
 
 > 知识库的 `raw/` 会存放真实内网内容，提交进 Git 前请先确认单位的安全政策。
 
+> git 在这里是承重的，不只是卫生习惯：治理运行会把 `wiki/` + `log.md` 的变更
+> 自动提交（一次治理一次提交——portal 在服务端自动做，skill 驱动的会话按
+> SKILL.md 第 6 步做），查看器的冲突 diff 和 portal 的页面历史都读这段历史。
+> 非 git 知识库一切照常，只是快照退化为文件副本。治理提交自带固定机器身份
+> （`kb-portal` / `kb-govern`,`-c` 旗标注入）——机器上**不需要**配置 git 的
+> user.name/user.email。
+
 ## 6. 配置连接器与密钥
 
 ### 6.1 密钥——只走环境变量
@@ -204,7 +211,14 @@ node <repo>/retrieval/scripts/kb_search.mjs search "语料里的某个词" --kb 
 
 # 6. 薄查看器(候选评审界面;Ctrl+C 停止)
 node <repo>/governance/viewer/serve.mjs --kb D:\kb\work
-# → http://127.0.0.1:8321(仅监听本机,无登录——单用户工具)
+# → http://127.0.0.1:8321(仅监听本机,无登录——单用户工具。写操作带每次启动
+#   生成的一次性 token(注入页面 meta)+ Origin/Host 校验;正常使用无感,
+#   重启查看器后刷新一下页面即可)
+
+# 7. UI portal(此处可选;完整控制台——浏览/检索/评审/采集/治理,
+#    见 guide.zh-CN.md §7-8)
+node <repo>/ui/serve.mjs --kb D:\kb\work
+# → http://127.0.0.1:8322(同样的本机 + token + Origin/Host 姿态)
 ```
 
 第 4 步的 `apply-source`/`apply-topic` 和整个检索循环，正常使用中由 Claude Code 的
@@ -216,12 +230,14 @@ skill(kb-govern / kb-search）驱动——它们负责读原文、写摘要、�
 
 ## 8. 可选：跑测试套件
 
-125 个测试，全部打 mock——不需要网络、不需要 PAT:
+258 个测试、五个套件，全部打 mock——不需要网络、不需要 PAT:
 
 ```bash
-cd <repo>/acquisition/scripts && npm test     # 36 个
-cd <repo>/governance/scripts && npm test      # 52 个(含查看器)
-cd <repo>/retrieval/scripts  && npm test      # 37 个(需先 npm install)
+cd <repo>/acquisition/scripts && npm test            # 59 个
+cd <repo>/governance/scripts && npm test             # 54 个(含薄查看器)
+cd <repo>/retrieval/scripts  && npm test             # 37 个(需先 npm install)
+cd <repo>/ui                 && node --test test/    # 69 个(零依赖)
+cd <repo> && node --test tests/e2e/ tests/eval/      # 39 个(e2e 全流程 + 检索评测)
 ```
 
 ## 9. 日常使用
@@ -233,13 +249,19 @@ cd <repo>/retrieval/scripts  && npm test      # 37 个(需先 npm install)
    sweep、plan、写摘要、主题综合、候选评审（对话式或查看器）;
 3. **检索**——直接问知识问题 → kb-search：构造结构化查询、CSQE 迭代、带引用作答。
 
+也可以全在浏览器里驱动：`node <repo>/ui/serve.mjs --kb <路径>` 启动按需
+UI portal(http://127.0.0.1:8322；浏览/检索/评审/采集控制台/agent 治理
+控制台/图谱；多知识库切换器见 `<repo>/ui/kbs.json`)。portal 与对话可混用——
+它们只通过知识库目录通信。完整走查见 `guide.zh-CN.md` §7-8。
+
 各服务的行为规则写在各自的 SKILL.md 里；三方契约是 `schema/contract.md`。
 
 ## 10. 升级
 
 ```bash
 cd <repo> && git pull
-cd retrieval/scripts && npm install   # 仅当 package-lock.json 有变化
+cd retrieval/scripts && npm install   # 刷新 better-sqlite3 预编译二进制
+                                      # (仓库不含 package-lock.json——按当前 Node 现解析)
 ```
 
 skill 链接始终指向仓库，无需重做。若 SKILL.md 本身有改动，重启 Claude Code。
@@ -257,6 +279,7 @@ skill 链接始终指向仓库，无需重做。若 SKILL.md 本身有改动，�
 | Claude Code 里看不到 skill | 重启 Claude Code；检查链接目标目录里有 `SKILL.md`；确认是链接不是复制（见第 4 步） |
 | `node: bad option: --test` 或 `fetch is not defined` | Node 版本低于 20——升级（见第 1 步） |
 | 查看器空白 / 翻转返回 409 | 有治理操作在同时进行——关掉查看器，跑 `sweep` 再试（单操作者纪律） |
+| 查看器/portal 写操作返回 403 `write requests require the per-startup token` | 开着的页面是上一次启动的，持的是已失效的旧令牌——刷新页面 |
 
 ## 12. 卸载
 

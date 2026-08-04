@@ -179,8 +179,8 @@ Collect and bring back:
 2. Any page where the markdown is **wrong** (not just degraded) — keep the source XHTML
    (Confluence UI → page → `···` → View storage format) as a fixture.
 3. Auth/cert/scope surprises from steps 1–2.
-4. Timing for the full-scope pull (drives the ensureFresh full-rehash concern in DEVLOG
-   TODO if the KB is large).
+4. Timing for the full-scope pull (still worth recording on a large corpus; the
+   ensureFresh full-rehash concern was closed 2026-08-04 — schema v5 stat fast path).
 
 Exit criterion: no **wrong** conversions (degraded-with-placeholder is acceptable, silent
 corruption is not), incremental skip works on the real servers, and the governance →

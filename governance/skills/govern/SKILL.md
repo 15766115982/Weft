@@ -53,10 +53,13 @@ node <skill-dir>/../../scripts/govern.mjs rebuild-index --kb <kb-root>
 # 6. One commit per governance run (CONTEXT.md: the KB's git history is the
 #    audit/rollback backbone — the viewer's diff view and J7 page history read
 #    from it). Skip silently when the KB is not a git repository. Pathspec-
-#    scoped so unrelated worktree changes are never swept in:
+#    scoped so unrelated worktree changes are never swept in; a FIXED machine
+#    identity (-c flags) keeps run commits greppable and works on machines
+#    with no git user.name/user.email configured (fresh intranet installs):
 git -C <kb-root> status --porcelain -- wiki log.md   # empty → nothing to commit
 git -C <kb-root> add -- wiki log.md
-git -C <kb-root> commit -m "govern: <one-line summary of this run>" -- wiki log.md
+git -C <kb-root> -c user.name=kb-govern -c user.email=kb-govern@localhost \
+  commit -m "govern: <one-line summary of this run>" -- wiki log.md
 ```
 
 Step 6 closes every run that changed anything: exactly one commit covering the

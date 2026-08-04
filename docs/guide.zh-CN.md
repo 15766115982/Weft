@@ -1,4 +1,4 @@
-# Weft 完整安装与上手指南(2026-08-03)
+# Weft 完整安装与上手指南(2026-08-03;2026-08-04 校订:测试数、治理自动提交、写操作 token、CQL 速查)
 
 > 项目名 **Weft**(纬线——wikilink 把页面织成网);仓库目录沿用旧名
 > knowledge-extension。Web 控制台即 Weft(原称 KB Portal)。
@@ -132,7 +132,9 @@ git init
 `raw/`、`wiki/`、`log.md`、`.kb/` 不用建,脚本首次运行时自动创建。
 
 > 不 `git init` 也能用——portal 的快照会退化为文件副本,页面历史只剩
-> 快照清单,界面上会提示"建议 git init"。建议一开始就 init。
+> 快照清单,治理运行的自动 git 提交静默跳过,界面上会提示"建议 git init"。
+> 建议一开始就 init(治理提交自带固定机器身份 kb-portal/kb-govern,
+> 不需要配置 git 的 user.name/user.email)。
 
 ## 5. 配置连接器与密钥(只用 local 可跳过)
 
@@ -264,6 +266,10 @@ note: run at most ONE portal per knowledge base (the serial write queue is per-p
      headless agent,权限被限定在知识库目录内(acceptEdits + 自动生成的
      allow-list,细节见 `docs/webui/spike-p2-2.zh-CN.md`)——它**写不了
      KB 以外的地方**,跑完还有一道 git 越界检查;
+   - **一次治理一次提交**:运行成功后,portal 自动把本次的 `wiki/` +
+     `log.md` 变更提交进知识库的 git(作者署名 kb-portal,只提交本次运行
+     弄脏的路径,不会卷入你自己未提交的手改)——治理历史因此可回溯、
+     可 diff。非 git 知识库静默跳过;
    - **治理纲要(GOVERNANCE.md)**:治理页「治理纲要」区可以给 agent 写
      **常驻指令**(范围/优先级/页面粒度/语言约定,首次使用点「插入模板」)。
      它由服务端注入每次运行的提示词前部,agent 无权修改它——与单次
@@ -291,6 +297,8 @@ note: run at most ONE portal per knowledge base (the serial write queue is per-p
 - **形状探针**按钮 = `--probe` 的 UI 化:输出 Zephyr/Gliffy 响应的**结构摘要**
   (类型/键名/数量,不含任何数据值)——内网诊断时把这段文本原样发给开发者即可;
 - 输入可选的范围覆盖(JQL / CQL / max)→「拉取」→ 作业中心看进度;
+  卡片标题栏的 **? 按钮**是常用 CQL/JQL 速查(含「拉整棵子树」的
+  `ancestor` 写法),每条带「填入」一键落进输入框;
 - **新鲜度面板**显示每个源上次拉取时间、文档数、滞后天数(超 7 天变
   琥珀色);Jira 源还会显示 `zephyr available` 状态,Confluence 源显示宏解析计数;
 - **Zephyr(测试插件)**:Jira 里 Test 类型的 issue 会自动带上 Test Steps 表格
@@ -320,10 +328,10 @@ portal 与对话**可以混用**:它们只通过知识库目录通信,互不依�
 
 ```bash
 cd <repo>/acquisition/scripts && npm test     # 59
-cd <repo>/governance/scripts && npm test      # 53(含薄查看器)
+cd <repo>/governance/scripts && npm test      # 54(含薄查看器)
 cd <repo>/retrieval/scripts  && npm test      # 37(需先 npm install)
-cd <repo>/ui                 && node --test test/   # 67
-cd <repo>                    && node --test tests/  # 39(e2e + 检索评测)
+cd <repo>/ui                 && node --test test/   # 69
+cd <repo>                    && node --test tests/e2e/ tests/eval/  # 39(e2e + 检索评测)
 ```
 
 全绿即环境无误。检索评测还会把命中率报告写到
@@ -333,7 +341,7 @@ cd <repo>                    && node --test tests/  # 39(e2e + 检索评测)
 
 ```bash
 cd <repo> && git pull
-cd retrieval/scripts && npm install   # 仅当 package-lock.json 变了
+cd retrieval/scripts && npm install   # 刷新 better-sqlite3 预编译二进制(仓库不含 lockfile,按当前 Node 现解析)
 ```
 
 skill 链接始终指向仓库,不用重做;SKILL.md 有改动就重启 Claude Code。
@@ -372,6 +380,7 @@ Claude Code 会自己读这份指南逐步执行——本指南的写作精度�
 | Claude Code 里看不到 skill | 重启 Claude Code;确认 `~/.claude/skills/kb-*/SKILL.md` 存在;确认是链接不是复制(3.2) |
 | `no knowledge base specified` | 命令忘了 `--kb <路径>`,或设 `KB_PATH` 环境变量 |
 | 页面编辑保存返回 409 | 编辑期间页面被别处改过(agent 治理或另一次保存)——按冲突卡选"查看最新"或"强制覆盖" |
+| 批准/保存/上传等写操作突然 403(提示 per-startup token) | portal/viewer 重启过,开着的页面持的是旧令牌——刷新页面即可 |
 | 治理后图谱里某条边不出现 | 边取自检索索引,页面重建索引前是冻结的——治理台跑「重建索引」 |
 | `node: bad option: --test` / `fetch is not defined` | Node 低于 20 |
 

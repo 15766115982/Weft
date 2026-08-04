@@ -54,15 +54,17 @@ through the knowledge base directory per `schema/contract.md`.
 
 ## Tests / 测试
 
-125 unit tests (all mocked, no network, no PATs) + a cross-service layer
-(scratch-KB pipeline regression + retrieval effectiveness eval):
+258 tests (all mocked, no network, no PATs) across five suites — three service
+suites, the UI portal suite, and a cross-service layer (scratch-KB pipeline
+regression + retrieval effectiveness eval):
 
 ```bash
-cd acquisition/scripts && npm test     # 36
-cd governance/scripts && npm test      # 52 (includes viewer)
-cd retrieval/scripts  && npm test      # 37 (npm install first)
+cd acquisition/scripts && npm test            # 59
+cd governance/scripts && npm test             # 54 (includes the thin viewer)
+cd retrieval/scripts  && npm test             # 37 (npm install first)
+cd ui                 && node --test test/    # 69 (no dependencies)
 
-node --test tests/                     # 39: e2e pipeline (20) + retrieval eval (19)
+node --test tests/e2e/ tests/eval/            # 39: e2e pipeline (20) + retrieval eval (19)
 ```
 
 `tests/` builds a scratch KB from a fixture corpus (`tests/fixtures/inbox/`) and

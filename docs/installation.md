@@ -116,6 +116,14 @@ variable once (`--kb` wins when both are present).
 > The KB will contain real intranet content under `raw/`. Check your org's policy on
 > committing it to Git before you do.
 
+> Git is load-bearing, not just hygiene: governance runs commit their `wiki/` +
+> `log.md` changes automatically (one commit per run — the portal does it
+> server-side, skill-driven sessions do it as SKILL.md step 6), and the viewer's
+> conflict diff and the portal's page history read from that history. On a
+> non-git KB everything degrades gracefully (file-copy snapshots instead).
+> Governance commits carry a fixed machine identity (`kb-portal` / `kb-govern`,
+> via `-c` flags) — no git `user.name`/`user.email` setup is needed on the machine.
+
 ## 6. Configure connectors and secrets
 
 ### 6.1 Secrets — environment variables ONLY
@@ -207,7 +215,14 @@ node <repo>/retrieval/scripts/kb_search.mjs search "a term from your corpus" --k
 
 # 6. Thin viewer (candidate review UI; Ctrl+C to stop)
 node <repo>/governance/viewer/serve.mjs --kb D:\kb\work
-# → http://127.0.0.1:8321  (localhost only, no login — single-user tool)
+# → http://127.0.0.1:8321  (localhost only, no login — single-user tool.
+#   Writes carry a per-startup token injected into the page + Origin/Host
+#   checks; transparent in normal use — just reload the tab after a relaunch)
+
+# 7. UI portal (optional here; the full console — browse/search/review/acquire/
+#    govern — see guide.zh-CN.md §7-8)
+node <repo>/ui/serve.mjs --kb D:\kb\work
+# → http://127.0.0.1:8322  (same localhost + token + Origin/Host posture)
 ```
 
 Steps 4's `apply-source`/`apply-topic` and the whole search loop are normally driven by the
@@ -220,12 +235,14 @@ XHTML fidelity audit), follow `real-env-test.md`.
 
 ## 8. Optional: run the test suite
 
-125 tests, all against mocks — no network, no PATs needed:
+258 tests across five suites, all against mocks — no network, no PATs needed:
 
 ```bash
-cd <repo>/acquisition/scripts && npm test     # 36 tests
-cd <repo>/governance/scripts && npm test      # 52 tests (includes viewer)
-cd <repo>/retrieval/scripts  && npm test      # 37 tests (needs npm install first)
+cd <repo>/acquisition/scripts && npm test            # 59 tests
+cd <repo>/governance/scripts && npm test             # 54 tests (includes the thin viewer)
+cd <repo>/retrieval/scripts  && npm test             # 37 tests (needs npm install first)
+cd <repo>/ui                 && node --test test/    # 69 tests (no dependencies)
+cd <repo> && node --test tests/e2e/ tests/eval/      # 39 tests (e2e pipeline + retrieval eval)
 ```
 
 ## 9. Daily usage
@@ -238,6 +255,12 @@ In any Claude Code session (the skills are global):
 3. **Search** — ask knowledge questions → kb-search: structured query, CSQE iteration,
    cited answers.
 
+Or drive all of it from the browser: `node <repo>/ui/serve.mjs --kb <path>` starts the
+on-demand UI portal at http://127.0.0.1:8322 (browse/search/review/acquisition console/
+agent-governance console/graph; multi-KB switcher via `<repo>/ui/kbs.json`). The portal
+and the skills mix freely — they only share the KB directory. Full walkthrough:
+`guide.zh-CN.md` §7-8 (Chinese).
+
 Each service's behavioral rules live in its SKILL.md; the three-party contract is
 `schema/contract.md`.
 
@@ -245,7 +268,8 @@ Each service's behavioral rules live in its SKILL.md; the three-party contract i
 
 ```bash
 cd <repo> && git pull
-cd retrieval/scripts && npm install   # only if package-lock.json changed
+cd retrieval/scripts && npm install   # refreshes the prebuilt better-sqlite3 binary
+                                      # (the repo carries no package-lock.json — install resolves fresh)
 ```
 
 The skill links keep pointing at the repo — nothing else to redo. Restart Claude Code if a
@@ -264,6 +288,7 @@ SKILL.md itself changed.
 | skills don't appear in Claude Code | restart Claude Code; check the junction target contains `SKILL.md`; you linked, not copied (§4) |
 | `node: bad option: --test` or `fetch is not defined` | Node < 20 — upgrade (§1) |
 | viewer page empty / 409 on flip | a governance run is in flight — close the viewer, run `sweep`, retry (single-operator discipline) |
+| viewer/portal write returns 403 `write requests require the per-startup token` | the open tab predates the latest launch and holds a dead token — reload the page |
 
 ## 12. Uninstalling
 
