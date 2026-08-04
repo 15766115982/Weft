@@ -65,7 +65,7 @@ function rawGroups(rawDocs, current, filter) {
   return frag;
 }
 
-function buildTreeFrame(wrap, { onSegment, onRefresh }) {
+function buildTreeFrame({ onRefresh }) {
   const tree = el('nav', { class: 'tree' });
   tree.style.width = store.get('treeWidth', '248') + 'px';
 
@@ -76,9 +76,15 @@ function buildTreeFrame(wrap, { onSegment, onRefresh }) {
   seg.append(segWiki, segRaw);
 
   const input = el('input', { class: 'tree-filter', placeholder: '过滤… (Esc 清空)' });
-  input.addEventListener('input', () => onRefresh(input.value));
+  // debounce (review 2026-08-04): a full tree rebuild + DOMPurify pass per
+  // keystroke stalls the main thread at the 2k-page scale
+  let filterTimer = 0;
+  input.addEventListener('input', () => {
+    clearTimeout(filterTimer);
+    filterTimer = setTimeout(onRefresh, 150);
+  });
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { input.value = ''; onRefresh(''); e.stopPropagation(); }
+    if (e.key === 'Escape') { clearTimeout(filterTimer); input.value = ''; onRefresh(); e.stopPropagation(); }
   });
 
   const groups = el('div', { class: 'tree-groups' });
@@ -559,10 +565,7 @@ export async function render(view, params) {
   const wrap = el('div', { class: 'browse' });
   const rail = el('div', { class: 'rail-nav' });
 
-  const frame = buildTreeFrame(wrap, {
-    onSegment: (seg) => { segment = seg; store.set('treeSeg', seg); refreshTree(); syncChrome(); },
-    onRefresh: () => refreshTree(),
-  });
+  const frame = buildTreeFrame({ onRefresh: () => refreshTree() });
 
   function refreshTree() {
     frame.groups.textContent = '';
@@ -615,6 +618,32 @@ export async function render(view, params) {
   const content = el('div', { style: 'display:contents' });
   wrap.append(rail, frame.tree, content);
   view.append(wrap);
+
+  // SSE freshness (review 2026-08-04): re-pull the tree lists in place after
+  // KB changes (a governance run used to leave the tree stale until a manual
+  // refresh). In-place refresh keeps the open page and scroll position; the
+  // observer drops the listener once the view is detached.
+  let reloadTimer = 0;
+  const onKbChange = () => {
+    clearTimeout(reloadTimer);
+    reloadTimer = setTimeout(async () => {
+      try {
+        const [td, rl] = await Promise.all([api('/api/tree'), api('/api/rawlist')]);
+        pages.length = 0; pages.push(...td.pages);
+        rawDocs.length = 0; rawDocs.push(...rl.docs);
+        setKnownPages(pages);
+        refreshTree();
+      } catch { /* the next change event retries */ }
+    }, 400);
+  };
+  window.addEventListener('ui:kb-change', onKbChange);
+  new MutationObserver((_, obs) => {
+    if (!document.contains(wrap)) {
+      clearTimeout(reloadTimer);
+      window.removeEventListener('ui:kb-change', onKbChange);
+      obs.disconnect();
+    }
+  }).observe(document.getElementById('view'), { childList: true });
 
   if (rawPath) return renderRaw(content, rawPath);
   try {

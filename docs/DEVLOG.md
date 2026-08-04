@@ -1,5 +1,53 @@
 # Development Log (as of 2026-08-03, M0-M6 complete + cross-service test layer + M7a-d UI portal + A7 graph)
 
+> **四轴全项目审查修复轮(2026-08-04,外部审查报告 HEAD=47c9592,逐条核验后
+> 落地)**:审查四轴(Standards/Spec/架构性能/UI 交互)共命中 1 条三轴红线 +
+> 一批真实缺陷,全部核验属实并修复;2 条判定为有意设计不动(跨服务
+> walk/normalizeRawRel 复制 = frontmatter 三拷贝同纪律,已补头注;review.mjs
+> 两行门面)。要点:
+> ① **viewer 写防护红线**——governance/viewer 新增 auth.mjs(portal
+> ui/lib/auth.mjs 的有意镜像,服务边界禁 import):每次启动令牌注入 index.html
+> meta,POST /api/review 须带 x-viewer-token + Origin/Host 检查,全请求(含读)
+> 过 loopback Host 检查(DNS rebinding);viewer 前端 api() 自动带头;三处测试
+> (viewer 单测新增 S8 用例、governance e2e、跨服务 pipeline e2e)改为从
+> index.html 取令牌;
+> ② **ensureFresh 全量哈希根治**——schema v5:docs/skips 增加 mtime/size 列,
+> stat 未变即复用已录哈希,每次搜索/图谱/反链从 O(N 文件读+sha256) 降为 O(N
+> stat);留痕盲区:同 mtime 同尺寸改写漏检(与 git stat 缓存同级信任)。
+> DEVLOG 旧条目「Deferred on record: ensureFresh re-hashes everything」由此关闭;
+> ③ **治理一次一提交落地**(CONTEXT.md:190 原为空转)——portal agent 治理运行
+> 成功后服务端自动 git 提交(pathspec 限 wiki/+log.md,kb-portal 固定身份,
+> 边界检查之后、hash/HEAD 捕获之前;非 git KB 静默跳过,记
+> govern_runs.gitCommitted);governance SKILL.md 补第 6 步提交指令;
+> ④ 运行时/契约文档:app.js 快捷键帮助 esc() 未导入(按 ? 必抛
+> ReferenceError);contract §5 actor 词汇表补 portal(与 §1⑤⑥ 对齐);
+> real-env-test.md 验收命令 search.mjs → kb_search.mjs search(原命令直接卡住
+> 内网验收);govern.mjs stripCode 围栏正则对齐 retrieval(允许前导空白);
+> confluence 脚手架 Gliffy 占位文本中→英(同步测试/SKILL/文档);
+> ⑤ 性能:两处 /api/diff 的 execFileSync git(5s 阻塞事件循环)改异步;
+> /api/health 每 30s 全量双扫 → 服务端缓存 + watcher/job 双失效(连带修
+> watch.mjs:常驻内部订阅者不得把订阅前的变更冲进新挂上的 SSE 流,且
+> server close 必须解订阅否则进程挂起);query.mjs LIKE 路径 doc 过滤下推
+> SQL、逐 chunk N+1 改 json_each 批量;静态资源 Last-Modified/304
+> (index.html 恒 no-cache——缓存副本带死令牌);
+> ⑥ UI 交互:mount() 路由竞态(序号守卫 + 每次挂载独立 staging div,过期渲染
+> 落已分离节点);j/k 翻页 selected 提升模块级 + 按新队列修剪(批量选择不再
+> 无声丢失);树过滤 150ms 防抖 + buildTreeFrame 死参数(wrap/onSegment)删除;
+> portal lineDiff 补 4M 上限(与 viewer 对齐,顺带消 Uint16 溢出);
+> browse/dashboard 订阅 ui:kb-change(graph.js 的 MutationObserver 分离清理
+> 模式);viewer 无路径 wikilink 由「猜 wiki/topics/」改为按已知页面列表解析
+> (resolveLinks 同口径);
+> ⑦ Fowler 清理:连接器日期/实体解码逐字重复 → connectors/shared.mjs(原导出名
+> 保留为别名,测试面不动);ui 内 tail/isGitRepo 各两份 → lib/sys.mjs;
+> store.mjs 导出 resolveLinks 供 ui/lib/graph.mjs 复用(消手工复制);
+> acquire.mjs 三处硬编码连接器名单收口为 REMOTE_CONNECTORS/ALL_CONNECTORS;
+> confConf → connectorConfig。
+> 未修(留痕):F1 拉取的 space/issue key 独立入口(CLI 本就只收
+> JQL/CQL/max,JQL 可表达;新增 CLI 旗标属功能变更走变更流程);graph.js 180
+> tick 同步预热、waitJob 轮询与 SSE 并存(有意后备)。测试:59+54+37+67+39
+> 全绿(256);viewer 单测 +1(S8),e2e 适配令牌。
+
+
 > **采集适配一期(2026-08-03,Zephyr + Confluence 宏,调研 docs/research/
 > zephyr-confluence-macros.md)**:① Jira Zephyr Squad——Test 类型 issue 的
 > Test Steps 走 ZAPI `/rest/zapi/latest/teststep/<numeric-id>`(同 PAT;steps 在
@@ -1017,8 +1065,9 @@ Review report hit 2 high + 2 medium, all fixed with pinned regressions:
   capped at the 20 most recent with auto-cleanup; SKILL.md script path changed to resolve
   relative to the skill install directory (under plugin distribution cwd is not the repo root),
   with a note that score is heuristic-only and source: only matches source pages
-- **Deferred on record**: ensureFresh re-hashes everything each run (large KBs will need
-  search_state.json, already reserved in contract §1); snippets not centered on stem matches
+- **Deferred on record**: ~~ensureFresh re-hashes everything each run~~ (**closed
+  2026-08-04**: schema v5 mtime/size stat fast path — see the four-axis review-fix
+  round at the top); snippets not centered on stem matches
   (degrades to the first 200 characters, cosmetic only); the vector leg (OpenAI endpoint /
   GGUF + RRF k=60) **deferred until an intranet embedding endpoint exists** — kb.json
   `retrieval.embedding` config is already defined in contract §6, not an omission

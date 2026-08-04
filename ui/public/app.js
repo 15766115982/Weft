@@ -2,7 +2,7 @@
 // Ctrl+K palette, global hotkeys. Kernel discipline (P2-1): wiring only;
 // DOM construction in views/ via lib/render.js. Kernel budget: <600 lines.
 import { api, setKb, getKb } from './lib/api.js';
-import { el, html } from './lib/render.js';
+import { el, html, esc } from './lib/render.js';
 import { icon } from './lib/icons.js';
 import { openPalette } from './lib/palette.js';
 import { render as dashboardView } from './views/dashboard.js';
@@ -61,7 +61,14 @@ function parseHash() {
   return { route: ROUTES[route] ? route : 'dashboard', params: new URLSearchParams(qs || '') };
 }
 
+// Route-switch race guard (review 2026-08-04): each mount renders into its own
+// staging div. A slow view that resolves after a newer mount has cleared #view
+// keeps appending into its detached stage — invisible, and the views' own
+// MutationObserver cleanup fires on detachment. The sequence number guards the
+// loader and error paint.
+let mountSeq = 0;
 async function mount() {
+  const seq = ++mountSeq;
   const { route, params } = parseHash();
   hotkeys.setScope('all'); // route change kills any view-scoped bindings (P0-2)
   currentRoute = route;
@@ -72,12 +79,16 @@ async function mount() {
   }
   const view = document.getElementById('view');
   view.textContent = '';
+  const stage = el('div');
+  view.append(stage);
   try {
-    await ROUTES[route](view, params);
+    await ROUTES[route](stage, params);
+    if (seq !== mountSeq) return; // superseded by a newer navigation mid-flight
   } catch (err) {
-    view.append(el('pre', { class: 'error' }, err.message));
+    if (seq !== mountSeq) return;
+    stage.append(el('pre', { class: 'error' }, err.message));
   } finally {
-    loader.classList.remove('on');
+    if (seq === mountSeq) loader.classList.remove('on');
   }
   tippy('[title]', { delay: [300, 0], placement: 'bottom' });
 }

@@ -122,7 +122,7 @@ node acquisition/scripts/acquire.mjs jira --kb <scratch-kb> --jql "project = <P>
 node acquisition/scripts/acquire.mjs confluence --kb <scratch-kb> --cql "space = <S> AND type = page" --max 20
 ```
 
-- [ ] A page with a Gliffy diagram: raw body has `**Gliffy 图: <name>**`, an
+- [ ] A page with a Gliffy diagram: raw body has `**Gliffy diagram: <name>**`, an
       `![gliffy: ...](raw/confluence/<id>.assets/<name>.png)` image line, and the
       diagram's text labels as bullets; the PNG exists on disk under
       `raw/confluence/<id>.assets/` and **renders in the portal browse view**
@@ -131,7 +131,7 @@ node acquisition/scripts/acquire.mjs confluence --kb <scratch-kb> --cql "space =
       (Key/Summary/Status/Assignee) — compare against the live filter in Jira.
 - [ ] A page with a Gallery macro: attachment filenames listed.
 - [ ] Summary `macros.degraded` is 0 (or every degraded entry is explainable —
-      e.g. a deleted attachment); `grep -r "\[gliffy 图:\|\[jira filter:" raw/confluence/`
+      e.g. a deleted attachment); `grep -r "\[gliffy diagram:\|\[jira filter:" raw/confluence/`
       shows only explainable degrades.
 
 ## 4. Incremental behavior (10 min)
@@ -157,7 +157,7 @@ node acquisition/scripts/acquire.mjs confluence --kb <scratch-kb> --cql "space =
 node governance/scripts/govern.mjs plan          --kb <scratch-kb>
 # ... apply-source / apply-topic flow per governance skill ...
 node governance/scripts/govern.mjs rebuild-index --kb <scratch-kb>
-node retrieval/scripts/search.mjs --kb <scratch-kb> "a real query term"
+node retrieval/scripts/kb_search.mjs search "a real query term" --kb <scratch-kb>
 ```
 
 - [ ] plan lists look sane on real data (pending / anomalies / orphaned_pages / errors).
@@ -175,7 +175,7 @@ Collect and bring back:
 1. The `[macro: ...]` histogram from step 3 (decides XHTML fidelity upgrade).
 2. The `--probe` outputs from step 3a (value-free by design — the one artifact
    you may paste verbatim) plus any `macros.degraded` entries with their
-   `[gliffy 图: ... — reason]` / `[jira filter: ... — reason]` placeholder text.
+   `[gliffy diagram: ... — reason]` / `[jira filter: ... — reason]` placeholder text.
 2. Any page where the markdown is **wrong** (not just degraded) — keep the source XHTML
    (Confluence UI → page → `···` → View storage format) as a fixture.
 3. Auth/cert/scope surprises from steps 1–2.

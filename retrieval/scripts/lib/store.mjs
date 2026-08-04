@@ -15,8 +15,11 @@ const sha256 = (s) => crypto.createHash('sha256').update(s, 'utf8').digest('hex'
 // contract §1: deleting .kb/ does not affect correctness).
 // History: 2 = docs.updated column; 3 = docs.src_updated column;
 // 4 = both date columns normalized to UTC at index time (existing rows kept
-// their raw offsets, which mis-sort lexicographically — force a rebuild)
-const SCHEMA_VERSION = 4;
+// their raw offsets, which mis-sort lexicographically — force a rebuild);
+// 5 = mtime/size columns on docs+skips so ensureFresh can skip re-hashing
+// files whose stat is unchanged (review 2026-08-04: the per-request full-corpus
+// re-hash made every search O(N files) of disk reads)
+const SCHEMA_VERSION = 5;
 
 export function openDb(kbRoot) {
   const dir = path.join(kbRoot, '.kb');
@@ -32,10 +35,11 @@ export function openDb(kbRoot) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS docs(
       path TEXT PRIMARY KEY, type TEXT, title TEXT, source_ref TEXT,
-      source TEXT, tags TEXT, outlinks TEXT, hash TEXT, updated TEXT, src_updated TEXT);
+      source TEXT, tags TEXT, outlinks TEXT, hash TEXT, updated TEXT, src_updated TEXT,
+      mtime REAL, size INTEGER);
     CREATE TABLE IF NOT EXISTS chunks(
       id INTEGER PRIMARY KEY, doc_path TEXT, anchor TEXT, heading TEXT, text TEXT);
-    CREATE TABLE IF NOT EXISTS skips(path TEXT PRIMARY KEY, hash TEXT);
+    CREATE TABLE IF NOT EXISTS skips(path TEXT PRIMARY KEY, hash TEXT, mtime REAL, size INTEGER);
     CREATE VIRTUAL TABLE IF NOT EXISTS fts_latin USING fts5(text, tokenize='porter unicode61');
     CREATE VIRTUAL TABLE IF NOT EXISTS fts_cjk USING fts5(text, tokenize='trigram');
   `);
@@ -54,8 +58,11 @@ function* walk(dir) {
 // wikilink target → page path resolution: [[x]] may be sources/local-a1, a
 // bare slug, or carry #anchor (the anchor only affects read positioning; graph
 // expansion takes the page); with multiple same-basename pages, take the first
-// in sorted path order (deterministic)
-function resolveLinks(links, knownPaths) {
+// in sorted path order (deterministic).
+// Exported for the UI portal's graph layer (ui/lib/graph.mjs imports it
+// in-process) — one caliber, one implementation (review 2026-08-04: the
+// hand-copy had drift risk).
+export function resolveLinks(links, knownPaths) {
   const out = [];
   for (const l of links) {
     const norm = l.split('#')[0].replace(/\.md$/i, '');
@@ -67,14 +74,14 @@ function resolveLinks(links, knownPaths) {
   return out;
 }
 
-function indexDoc(db, kbRoot, rel, knownPaths, hash) {
+function indexDoc(db, kbRoot, rel, knownPaths, hash, stat) {
   const abs = path.join(kbRoot, rel);
   const text = fs.readFileSync(abs, 'utf8');
   const { fields, body } = parseFrontmatter(text);
   if (fields.status !== 'approved') return false; // contract: approved only
 
   const insertDoc = db.prepare(
-    'INSERT INTO docs VALUES(?,?,?,?,?,?,?,?,?,?)');
+    'INSERT INTO docs VALUES(?,?,?,?,?,?,?,?,?,?,?,?)');
   const insertChunk = db.prepare(
     'INSERT INTO chunks(doc_path,anchor,heading,text) VALUES(?,?,?,?)');
   const insertLatin = db.prepare('INSERT INTO fts_latin(rowid,text) VALUES(?,?)');
@@ -97,7 +104,8 @@ function indexDoc(db, kbRoot, rel, knownPaths, hash) {
   const srcUpdated = toUtc(fields.source_version);
   insertDoc.run(rel, fields.type || '', fields.title || '', fields.source_ref || '',
     source, JSON.stringify(fields.tags || []), JSON.stringify(outlinks), hash,
-    toUtc(fields.updated_at) || String(fields.updated_at || ''), srcUpdated);
+    toUtc(fields.updated_at) || String(fields.updated_at || ''), srcUpdated,
+    stat.mtime, stat.size);
   for (const c of chunkPage(body)) {
     const { lastInsertRowid } = insertChunk.run(rel, c.anchor, c.heading, c.text);
     insertLatin.run(lastInsertRowid, c.text);
@@ -124,33 +132,48 @@ function removeDoc(db, rel) {
 export function ensureFresh(kbRoot) {
   const db = openDb(kbRoot);
   const wikiDir = path.join(kbRoot, 'wiki');
-  const onDisk = new Map(); // rel → hash
+  // stat-only pass first (review 2026-08-04): hashing every file on every call
+  // made each search/graph/backlinks request read the whole wiki. A file whose
+  // mtime+size both match the indexed row keeps its recorded hash — the same
+  // trust level git gives its own stat cache. Residual blind spot, documented:
+  // a same-size rewrite within one mtime tick is missed until the next real change.
+  const stat = new Map(); // rel → {mtime, size}
   for (const abs of walk(wikiDir)) {
     const rel = path.relative(kbRoot, abs).replace(/\\/g, '/');
     if (rel === 'wiki/index.md') continue;
     // archive/ is never in the candidate space (contract §4: archived = void;
     // the status flip is the governance-side double protection)
     if (rel.startsWith('wiki/archive/')) continue;
-    onDisk.set(rel, sha256(fs.readFileSync(abs, 'utf8')));
+    const st = fs.statSync(abs);
+    stat.set(rel, { mtime: st.mtimeMs, size: st.size });
   }
-  const indexed = new Map(db.prepare('SELECT path, hash FROM docs').all().map(r => [r.path, r.hash]));
+  const indexed = new Map(db.prepare('SELECT path, hash, mtime, size FROM docs').all().map(r => [r.path, r]));
   // non-approved pages never enter docs, but their hash must still be recorded
   // — otherwise every ensureFresh would re-parse them for nothing
-  const skipped = new Map(db.prepare('SELECT path, hash FROM skips').all().map(r => [r.path, r.hash]));
+  const skipped = new Map(db.prepare('SELECT path, hash, mtime, size FROM skips').all().map(r => [r.path, r]));
+
+  const onDisk = new Map(); // rel → hash (read+hashed only when the stat changed)
+  for (const [rel, st] of stat) {
+    const row = indexed.get(rel) || skipped.get(rel);
+    onDisk.set(rel, row && row.mtime === st.mtime && row.size === st.size
+      ? row.hash
+      : sha256(fs.readFileSync(path.join(kbRoot, rel), 'utf8')));
+  }
 
   // reconciliation keys on both docs ∪ skips must be cleaned: when a skipped
   // candidate page is deleted, its skips row must go too
   const toRemove = [...new Set([...indexed.keys(), ...skipped.keys()])].filter(p => !onDisk.has(p));
   const toIndex = [...onDisk.entries()]
-    .filter(([p, h]) => indexed.get(p) !== h && skipped.get(p) !== h).map(([p]) => p);
+    .filter(([p, h]) => indexed.get(p)?.hash !== h && skipped.get(p)?.hash !== h).map(([p]) => p);
 
   const tx = db.transaction(() => {
     for (const p of toRemove) removeDoc(db, p);
     const known = [...onDisk.keys()].sort();
     for (const p of toIndex) {
       removeDoc(db, p);
-      const ok = indexDoc(db, kbRoot, p, known, onDisk.get(p));
-      if (!ok) db.prepare('INSERT OR REPLACE INTO skips VALUES(?,?)').run(p, onDisk.get(p));
+      const ok = indexDoc(db, kbRoot, p, known, onDisk.get(p), stat.get(p));
+      if (!ok) db.prepare('INSERT OR REPLACE INTO skips VALUES(?,?,?,?)')
+        .run(p, onDisk.get(p), stat.get(p).mtime, stat.get(p).size);
     }
   });
   tx();

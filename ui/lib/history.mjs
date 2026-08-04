@@ -5,14 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-
-function isGitRepo(kb) {
-  try {
-    execFileSync('git', ['-C', kb, 'rev-parse', '--is-inside-work-tree'],
-      { stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 });
-    return true;
-  } catch { return false; }
-}
+import { isGitRepo } from './sys.mjs';
 
 export function pageHistory(kbRoot, rel) {
   if (isGitRepo(kbRoot)) {

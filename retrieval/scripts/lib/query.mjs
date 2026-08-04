@@ -84,7 +84,13 @@ export function search(kbRoot, input, { within = [], limit = 50 } = {}) {
       routed[mode].push(t);
       let hits = new Map(); // chunkId → termScore
       if (mode === 'like') {
-        for (const r of db.prepare('SELECT id, text FROM chunks').all()) {
+        // review 2026-08-04: the LIKE path used to load the WHOLE chunks table
+        // into JS; push the allowed-docs filter down into SQL first
+        const rows = allowedDocs.size
+          ? db.prepare('SELECT id, text FROM chunks WHERE doc_path IN (SELECT value FROM json_each(?))')
+            .all(JSON.stringify([...allowedDocs]))
+          : [];
+        for (const r of rows) {
           const n = r.text.split(t).length - 1;
           if (n > 0) hits.set(r.id, Math.min(n, 5));
         }
@@ -106,9 +112,14 @@ export function search(kbRoot, input, { within = [], limit = 50 } = {}) {
     }
 
     // 3. Filter to allowed docs, rank, ≤2 snippets per page
-    const chunkStmt = db.prepare('SELECT * FROM chunks WHERE id=?');
-    const hits = [...candidate]
-      .map(id => ({ ...chunkStmt.get(id), score: score.get(id) || 0 }))
+    // one batched fetch (review 2026-08-04: per-chunk SELECT was an N+1)
+    const candidateIds = [...candidate];
+    const chunkById = new Map(candidateIds.length
+      ? db.prepare('SELECT * FROM chunks WHERE id IN (SELECT value FROM json_each(?))')
+        .all(JSON.stringify(candidateIds)).map((r) => [r.id, r])
+      : []);
+    const hits = candidateIds
+      .map(id => ({ ...chunkById.get(id), score: score.get(id) || 0 }))
       .filter(c => allowedDocs.has(c.doc_path))
       .sort((a, b) => b.score - a.score);
     const perPage = new Map();

@@ -8,6 +8,7 @@ import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { spawnJob } from './jobs.mjs';
+import { tail } from './sys.mjs';
 import { startRun, executorNames } from './executor.mjs';
 import { appendGovernRun } from './governruns.mjs';
 // F4: read-only post-run validation (serve.mjs's in-process plan() precedent —
@@ -78,6 +79,26 @@ export function boundaryViolations(before, after) {
     if (!GOVERN_WRITE_ROOTS.some((r) => p === r || p.startsWith(r))) out.push(p);
   }
   return out.sort();
+}
+
+// One commit per governance run (CONTEXT.md:190 — the KB's git history is the
+// audit/rollback backbone; the review 2026-08-04 found this discipline had no
+// landing). Pathspec-scoped to the governance write set so unrelated worktree
+// changes are never swept in; fixed machine author keeps run commits greppable.
+// Returns true when a commit was created, false when nothing changed, null on
+// non-git KBs (S4 graceful). Call AFTER boundaryViolations — the commit cleans
+// the porcelain it reads.
+function commitGovernRun(kb, jobId) {
+  try {
+    const dirty = execFileSync('git', ['-C', kb, 'status', '--porcelain', '--', 'wiki', 'log.md'],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    if (!dirty.trim()) return false;
+    const GIT_ID = ['-c', 'user.name=kb-portal', '-c', 'user.email=kb-portal@localhost'];
+    execFileSync('git', ['-C', kb, 'add', '--', 'wiki', 'log.md'], { stdio: 'ignore' });
+    execFileSync('git', ['-C', kb, ...GIT_ID, 'commit', '-m', `govern: agent run ${jobId}`, '--', 'wiki', 'log.md'],
+      { stdio: ['ignore', 'ignore', 'ignore'] });
+    return true;
+  } catch { return null; } // not a git repo / no git
 }
 
 // F2 content snapshot (openwiki-inspired): whole-tree hash of wiki/ so a run
@@ -170,6 +191,15 @@ export function governRunJob(kb, { prompt, executor = 'claude' }, onChunk) {
           job.log = (job.log + warn).slice(-64 * 1024);
           onChunk?.(job, 'system', warn);
         }
+        // one commit per governance run (CONTEXT.md) — after the boundary
+        // check (its porcelain must see the run's changes), before the
+        // wikiHash/gitHead capture so the record reflects the commit
+        const committed = ok ? commitGovernRun(kb, job.id) : null;
+        if (committed) {
+          const note = `\n— 本次治理变更已提交 git(govern: agent run ${job.id})—`;
+          job.log = (job.log + note).slice(-64 * 1024);
+          onChunk?.(job, 'system', note);
+        }
         const hashAfter = wikiHash(kb);
         const noop = ok && hashBefore !== null && hashBefore === hashAfter;
         if (noop) {
@@ -208,11 +238,13 @@ export function governRunJob(kb, { prompt, executor = 'claude' }, onChunk) {
           gitHeadBefore: headBefore, gitHeadAfter: gitHead(kb),
           wikiHashBefore: hashBefore, wikiHashAfter: hashAfter, noop,
           boundaryViolations: violations.length,
+          gitCommitted: committed,
           postPlanCounts: postPlan ? postPlan.counts : null,
         });
         if (ok) resolve({
           result: tail(text),
           wikiHashBefore: hashBefore, wikiHashAfter: hashAfter, noop,
+          ...(committed !== null ? { gitCommitted: committed } : {}),
           ...(postPlan ? { postPlan } : {}),
           ...(violations.length ? { boundaryViolations: violations } : {}),
         });
@@ -220,9 +252,4 @@ export function governRunJob(kb, { prompt, executor = 'claude' }, onChunk) {
       });
     }),
   };
-}
-
-function tail(s, n = 4000) {
-  s = String(s ?? '');
-  return s.length > n ? s.slice(-n) : s;
 }

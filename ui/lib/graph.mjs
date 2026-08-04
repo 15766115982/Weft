@@ -16,24 +16,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { walkMd } from './paths.mjs';
 import { parseFrontmatter } from './review.mjs';
-import { ensureFresh, openDb } from '../../retrieval/scripts/lib/store.mjs';
+import { ensureFresh, openDb, resolveLinks } from '../../retrieval/scripts/lib/store.mjs';
 import { extractWikilinks } from '../../retrieval/scripts/lib/chunk.mjs';
-
-// wikilink target → page path, replicated from retrieval store.mjs
-// resolveLinks (not exported there; the calibers must match): full relative
-// form first, then unique-suffix match; anchors/.md stripped by callers'
-// convention — here done inline.
-function resolveLinks(links, knownPaths) {
-  const out = [];
-  for (const l of links) {
-    const norm = l.split('#')[0].replace(/\.md$/i, '');
-    if (!norm) continue;
-    const hit = knownPaths.find((p) => p.replace(/\.md$/i, '') === norm)
-      || knownPaths.find((p) => p.replace(/\.md$/i, '').endsWith('/' + norm));
-    if (hit) out.push(hit);
-  }
-  return out;
-}
 
 export function buildGraph(kbRoot) {
   ensureFresh(kbRoot); // same lazy reconciliation the search read path runs

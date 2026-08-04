@@ -5,6 +5,10 @@ export function lineDiff(oldText, newText) {
   const a = String(oldText ?? '').split('\n');
   const b = String(newText ?? '').split('\n');
   const m = a.length, n = b.length;
+  // Size cap (review 2026-08-04; same limit as the thin viewer): the LCS table
+  // is O(m×n) memory+time, and past ~4M cells min(m,n) can also overflow the
+  // Uint16 cells. Returns null — the caller shows a notice instead.
+  if (m * n > 4_000_000) return null;
   // LCS table (trim guard: KB pages are ≤ a few thousand lines at our scale)
   const dp = Array.from({ length: m + 1 }, () => new Uint16Array(n + 1));
   for (let i = m - 1; i >= 0; i--) {

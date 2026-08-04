@@ -11,20 +11,26 @@ import path from 'node:path';
 const DEBOUNCE_MS = 400;
 
 export function createWatcher() {
-  const perKb = new Map(); // kbRoot -> { watcher, clients: Set<fn>, timer }
+  const perKb = new Map(); // kbRoot -> { watcher, clients: Map<fn, since>, timer, lastEvent }
 
   function subscribe(kb, onEvent) {
     let s = perKb.get(kb);
     if (!s) {
-      s = { watcher: null, clients: new Set(), timer: null };
+      s = { watcher: null, clients: new Map(), timer: null, lastEvent: 0 };
       try {
         s.watcher = fs.watch(kb, { recursive: true }, (_type, rel) => {
           if (!rel) return;
           const top = rel.replace(/\\/g, '/').split('/')[0];
           if (top === '.kb') return; // guard ①: derived artifacts are not "KB changed"
+          s.lastEvent = Date.now();
           clearTimeout(s.timer);
           s.timer = setTimeout(() => {
-            for (const cb of s.clients) {
+            // deliver only to clients attached BEFORE the change (review
+            // 2026-08-04: long-lived internal subscribers — the health-cache
+            // invalidator — keep the watcher alive across SSE attach, and a
+            // pre-attach write must not flush into a freshly attached stream)
+            for (const [cb, since] of s.clients) {
+              if (since > s.lastEvent) continue;
               try { cb({ kind: 'change' }); } catch { /* client vanished mid-flush */ }
             }
           }, DEBOUNCE_MS); // guard ②
@@ -33,7 +39,7 @@ export function createWatcher() {
       } catch { /* fs.watch unsupported/failed — SSE clients just get job events */ }
       perKb.set(kb, s);
     }
-    s.clients.add(onEvent);
+    s.clients.set(onEvent, Date.now());
     return () => {
       s.clients.delete(onEvent);
       if (s.clients.size === 0) {

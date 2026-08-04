@@ -192,10 +192,17 @@ test('viewer: queue, flip over HTTP, 409 on double flip, unlogged-flip guard, sw
     viewer.stdout.on('data', (d) => { const m = String(d).match(/127\.0\.0\.1:(\d+)/); if (m) resolve(Number(m[1])); });
     viewer.on('exit', () => reject(new Error('viewer exited before listening')));
   });
-  const api = async (p, opts) => {
+  const api = async (p, opts = {}) => {
+    if ((opts.method || 'GET') !== 'GET') {
+      opts.headers = { ...(opts.headers || {}), 'x-viewer-token': viewerToken };
+    }
     const r = await fetch(`http://127.0.0.1:${port}${p}`, opts);
     return { status: r.status, body: await r.json() };
   };
+  // S8: viewer writes need the per-startup token, injected into index.html
+  const viewerToken = await (await fetch(`http://127.0.0.1:${port}/`)).text()
+    .then((h) => h.match(/name="viewer-token" content="([^"]+)"/)?.[1]);
+  assert.ok(viewerToken, 'index.html carries the per-startup token');
   try {
     const q = await api('/api/queue');
     assert.deepEqual(q.body.pages.map((i) => i.path), ['wiki/topics/recon-ops.md']);

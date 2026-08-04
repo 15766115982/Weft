@@ -213,19 +213,25 @@ export function applySourcePage(kbRoot, rawRelInput, summaryBody, { tags } = {})
 }
 
 /** Remove fenced code blocks and inline code spans so wikilink detection agrees with
- * retrieval's chunker. Fence rules match retrieval: ``` or ~~~ (3+), closing fence
- * same char with length >= opening; an opening line whose remainder contains the
- * fence char again is inline code (```code```), not a fence. */
+ * retrieval's chunker. Fence rules match retrieval (chunk.mjs stripCode — keep in
+ * sync): ``` or ~~~ (3+), up to 3 leading spaces (CommonMark), closing fence same
+ * char with length >= opening; an opening line whose remainder contains the fence
+ * char again is inline code (```code```), not a fence. */
 function stripCode(body) {
   const out = [];
-  let fence = null;
+  let fence = null; // {char,len}
   for (const line of body.split('\n')) {
-    const m = line.match(/^(`{3,}|~{3,})(.*)$/);
-    if (fence) {
-      if (m && m[1][0] === fence[0] && m[1].length >= fence.length && !m[2].includes(fence[0])) fence = null;
-      continue;
+    const fm = line.match(/^\s*(`{3,}|~{3,})/);
+    if (fm) {
+      if (!fence) {
+        const rest = line.slice(fm[0].length);
+        if (!rest.includes(fm[1][0])) { fence = { char: fm[1][0], len: fm[1].length }; continue; }
+      } else if (fm[1][0] === fence.char && fm[1].length >= fence.len) {
+        fence = null;
+        continue;
+      }
     }
-    if (m && !m[2].includes(m[1][0])) { fence = m[1]; continue; }
+    if (fence) continue;
     out.push(line);
   }
   return out.join('\n').replace(/`[^`\n]*`/g, '');

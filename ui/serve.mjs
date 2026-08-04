@@ -10,7 +10,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { EventEmitter } from 'node:events';
 import { createAuth } from './lib/auth.mjs';
@@ -37,6 +38,9 @@ import {
 
 const UI_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(UI_DIR, 'public');
+// async git: a 5s blocking execFileSync inside the request handler would stall
+// every other request on the event loop (review 2026-08-04)
+const execFileP = promisify(execFile);
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8',
@@ -57,6 +61,26 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
     res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify(obj));
   };
+
+  // /api/health is polled every 30s by every open client AND on every SSE
+  // change event; health() walks the whole wiki and plan() scans raw+wiki
+  // (review 2026-08-04). Cache per KB; invalidate on watcher events (debounced
+  // fs.watch) and on job completion (portal-originated writes, so the post-
+  // write header refresh never reads a stale cache).
+  const healthCache = new Map(); // kb -> { value, unwatch }
+  const invalidateHealth = (kb) => { const e = healthCache.get(kb); if (e) e.value = null; };
+  function cachedHealth(kb) {
+    let e = healthCache.get(kb);
+    if (!e) {
+      e = { value: null, unwatch: watcher.subscribe(kb, () => invalidateHealth(kb)) };
+      healthCache.set(kb, e);
+    }
+    if (!e.value) e.value = health(kb);
+    return e.value;
+  }
+  jobs.subscribe((job) => {
+    if (job.status !== 'queued' && job.status !== 'running') invalidateHealth(job.kb);
+  });
 
   const readBody = (req, max = 64 * 1024) => new Promise((resolveBody, rejectBody) => {
     let body = '';
@@ -127,7 +151,7 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
           const active = new Set(jobs.list(kb)
             .filter((j) => j.type === 'govern-run' && (j.status === 'queued' || j.status === 'running'))
             .map((j) => j.id));
-          return json(res, 200, { ...health(kb), lastGovernRun: governRunFreshness(kb, active) });
+          return json(res, 200, { ...cachedHealth(kb), lastGovernRun: governRunFreshness(kb, active) });
         }
         if (url.pathname === '/api/log') {
           // D2 governance timeline: parse log.md's uniform prefix
@@ -250,8 +274,8 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
           if (!fs.existsSync(abs)) return json(res, 404, { error: `page does not exist: ${rel}` });
           let baseline = null;
           try {
-            baseline = execFileSync('git', ['-C', kb, 'show', `HEAD:${rel}`],
-              { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 8 * 1024 * 1024 });
+            ({ stdout: baseline } = await execFileP('git', ['-C', kb, 'show', `HEAD:${rel}`],
+              { encoding: 'utf8', timeout: 5000, maxBuffer: 8 * 1024 * 1024 }));
           } catch { baseline = null; }
           const current = fs.readFileSync(abs, 'utf8');
           return json(res, 200, { baseline, current, changed: baseline !== null && baseline !== current });
@@ -471,10 +495,20 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
         if (!abs.startsWith(path.resolve(PUBLIC_DIR) + path.sep)) return json(res, 400, { error: 'bad static path' });
         if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) return json(res, 404, { error: 'not found' });
         const ext = path.extname(abs);
-        res.writeHead(200, { 'content-type': MIME[ext] });
+        // index.html carries the per-startup token → always revalidate (a
+        // cached copy holds a DEAD token and every write would 403). Other
+        // assets get Last-Modified revalidation (review 2026-08-04: no caching
+        // headers at all meant a full refetch of every asset per launch).
         if (ext === '.html') {
+          res.writeHead(200, { 'content-type': MIME[ext], 'cache-control': 'no-cache' });
           return res.end(fs.readFileSync(abs, 'utf8').replace('%%UI_TOKEN%%', auth.token));
         }
+        const mtime = fs.statSync(abs).mtime;
+        if (req.headers['if-modified-since'] && new Date(req.headers['if-modified-since']) >= mtime) {
+          res.writeHead(304);
+          return res.end();
+        }
+        res.writeHead(200, { 'content-type': MIME[ext], 'last-modified': mtime.toUTCString() });
         return res.end(fs.readFileSync(abs));
       }
       return json(res, 404, { error: 'not found' });
@@ -488,6 +522,9 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
       res.end();
     }
   });
+  // the internal health watcher holds fs.watch handles — release them on
+  // shutdown or the process hangs past server.close() (test suites hit this)
+  server.on('close', () => { for (const e of healthCache.values()) e.unwatch(); healthCache.clear(); });
   return server;
 }
 

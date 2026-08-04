@@ -15,6 +15,7 @@
 import { upsertRawDoc, sha256 } from '../lib/rawdoc.mjs';
 import { appendLog } from '../lib/log.mjs';
 import { describeShape, shapeError } from '../lib/shape.mjs';
+import { normalizeConnectorDate, decodeEntities } from './shared.mjs';
 
 export const CONNECTOR_ID = 'jira@1.0.0';
 
@@ -35,13 +36,9 @@ function person(p) {
 }
 
 /** Jira Server emits "+0800" offsets; normalize to strict ISO 8601.
- *  Unparseable values pass through unchanged (kept visible, not invented). */
-export function normalizeJiraDate(s) {
-  if (!s) return '';
-  const fixed = String(s).replace(/([+-]\d{2})(\d{2})$/, '$1:$2');
-  const d = new Date(fixed);
-  return Number.isNaN(d.getTime()) ? String(s) : d.toISOString();
-}
+ *  Unparseable values pass through unchanged (kept visible, not invented).
+ *  Implementation lives in shared.mjs (same code as the Confluence side). */
+export const normalizeJiraDate = normalizeConnectorDate;
 
 /** Minimal ADF (Jira Cloud rich text) → plain text fallback; Server/DC
  *  descriptions are already plain strings and pass through untouched. */
@@ -116,17 +113,9 @@ export function issueToMarkdown(issue, baseUrl, { testSteps } = {}) {
 
 const ZAPI_TIMEOUT_MS = 30_000;
 
-function decodeBasicEntities(s) {
-  return String(s)
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
-    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, '&'); // must run last
-}
+// decodeBasicEntities: shared.mjs decodeEntities (was a verbatim copy of the
+// Confluence decoder — review 2026-08-04)
+const decodeBasicEntities = decodeEntities;
 
 /** ZAPI teststep JSON -> [{n, step, data, result}] ordered by orderId.
  *  Shape-tolerant (only the relayed error text may cross the intranet border):

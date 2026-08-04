@@ -52,7 +52,8 @@ test('CLI end-to-end: govern → candidate → viewer reject → sweep → index
     'A draft synthesis whose retry-budget claim conflicts with the source.\n');
   assert.equal(topic.status, 'candidate');
 
-  // viewer rejects (writes no log — that is the design)
+  // viewer rejects (writes no log — that is the design). S8: the write needs
+  // the per-startup token, which the server injects into index.html.
   const viewer = spawn('node', [VIEWER, '--kb', kb, '--port', '0'], { stdio: ['ignore', 'pipe', 'ignore'] });
   const port = await new Promise((resolve, reject) => {
     viewer.stdout.on('data', (d) => {
@@ -61,8 +62,11 @@ test('CLI end-to-end: govern → candidate → viewer reject → sweep → index
     });
     viewer.on('exit', () => reject(new Error('viewer exited before listening')));
   });
+  const viewerToken = await (await fetch(`http://127.0.0.1:${port}/`)).text()
+    .then((h) => h.match(/name="viewer-token" content="([^"]+)"/)?.[1]);
+  assert.ok(viewerToken, 'index.html carries the per-startup token');
   const r = await fetch(`http://127.0.0.1:${port}/api/review`, {
-    method: 'POST', headers: { 'content-type': 'application/json' },
+    method: 'POST', headers: { 'content-type': 'application/json', 'x-viewer-token': viewerToken },
     body: JSON.stringify({ path: 'wiki/topics/retry-budget.md', action: 'reject' }),
   });
   assert.equal(r.status, 200);

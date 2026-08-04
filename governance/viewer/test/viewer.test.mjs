@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import http from 'node:http';
 import { createViewer } from '../serve.mjs';
 import { buildFrontmatter } from '../../scripts/lib/frontmatter.mjs';
 
@@ -40,7 +41,44 @@ after(() => {
 });
 
 const get = async (p) => ({ status: (await fetch(base + p)).status, data: await (await fetch(base + p)).json().catch(() => null) });
-const post = (p, obj) => fetch(base + p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(obj) });
+const post = (p, obj) => fetch(base + p, { method: 'POST',
+  headers: { 'content-type': 'application/json', 'x-viewer-token': server.viewerToken }, body: JSON.stringify(obj) });
+
+test('S8 write protection: no token / bad Origin / bad Host are all refused', async () => {
+  // missing token → 403, page untouched
+  let r = await fetch(base + '/api/review', { method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ path: 'wiki/topics/cand-one.md', action: 'approve' }) });
+  assert.equal(r.status, 403);
+  assert.match((await r.json()).error, /x-viewer-token/);
+  // wrong token → 403
+  r = await fetch(base + '/api/review', { method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-viewer-token': 'wrong' },
+    body: JSON.stringify({ path: 'wiki/topics/cand-one.md', action: 'approve' }) });
+  assert.equal(r.status, 403);
+  // cross-origin Origin → 403 even with the token
+  r = await fetch(base + '/api/review', { method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-viewer-token': server.viewerToken, origin: 'https://evil.example' },
+    body: JSON.stringify({ path: 'wiki/topics/cand-one.md', action: 'approve' }) });
+  assert.equal(r.status, 403);
+  assert.match((await r.json()).error, /cross-origin write/);
+  // non-loopback Host (DNS rebinding) → 403 on reads too. fetch() forbids
+  // overriding Host, so go one level down to node:http for this one.
+  const rebinding = await new Promise((resolve, reject) => {
+    const req = http.request(`${base}/api/pages`, { headers: { host: 'evil.example' } }, (res) => {
+      let body = '';
+      res.on('data', (c) => { body += c; });
+      res.on('end', () => resolve({ status: res.statusCode, body }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+  assert.equal(rebinding.status, 403);
+  assert.match(JSON.parse(rebinding.body).error, /DNS-rebinding/);
+  // index.html serves the token to the real page
+  const home = await (await fetch(base + '/')).text();
+  assert.match(home, new RegExp(`name="viewer-token" content="${server.viewerToken}"`));
+});
 
 test('queue lists candidate pages only; pages lists everything', async () => {
   const queue = await (await fetch(base + '/api/queue')).json();

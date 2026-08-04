@@ -144,7 +144,7 @@ test('gliffy happy: labels y/x-ordered + PNG sidecar embedded, macros counted', 
   assert.deepEqual(s.macros, { gliffy: 1 });
 
   const { body } = readDoc('501');
-  assert.match(body, /\*\*Gliffy 图: arch-diagram\*\*/);
+  assert.match(body, /\*\*Gliffy diagram: arch-diagram\*\*/);
   assert.match(body, /!\[gliffy: arch-diagram\]\(raw\/confluence\/501\.assets\/arch-diagram\.png\)/);
   const order = ['侧注', '登录页 Login', '下游服务', '嵌套子标签'];
   const at = order.map((l) => body.indexOf(`- ${l}`));
@@ -171,10 +171,10 @@ test('gliffy degrades: missing .gliffy / bad JSON / missing PNG (labels survive)
   assert.equal(s.macros.gliffy, 1, 'resolved ones count');
   assert.equal(s.macros.degraded, 2);
 
-  assert.match(readDoc('511').body, /\[gliffy 图: gone — HTTP 404\]/);
-  assert.match(readDoc('512').body, /\[gliffy 图: broken — gliffy attachment: expected JSON document/);
+  assert.match(readDoc('511').body, /\[gliffy diagram: gone — HTTP 404\]/);
+  assert.match(readDoc('512').body, /\[gliffy diagram: broken — gliffy attachment: expected JSON document/);
   const okBody = readDoc('513').body;
-  assert.match(okBody, /\*\*Gliffy 图: norender\*\*/);
+  assert.match(okBody, /\*\*Gliffy diagram: norender\*\*/);
   assert.ok(!okBody.includes('![gliffy:'), 'PNG 404 omits the image line only');
   assert.match(okBody, /- 下游服务/);
 });

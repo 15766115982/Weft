@@ -96,7 +96,7 @@ issue table executed against the configured Jira, capped at 20 rows, identical J
 run once per pull — the macro's `serverId` cannot be resolved without the applinks
 API, so a **single-Jira assumption** applies), **gallery** (renders its attachment
 filenames synchronously, cross-page/external noted by name only). Per-macro failures
-degrade in place to `[gliffy 图: name — reason]` / `[jira filter: <jql> — reason]`
+degrade in place to `[gliffy diagram: name — reason]` / `[jira filter: <jql> — reason]`
 and count into `summary.macros.degraded` — they never fail the page. The summary's
 `macros` object counts `{gliffy, jira_filter, gallery, degraded}`.
 By design there is no orphan reconcile for Confluence (same as Jira): a CQL/space

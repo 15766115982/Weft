@@ -10,6 +10,11 @@ import { lineDiff } from '../lib/diff.js';
 import { icon } from '../lib/icons.js';
 
 let queue = [];
+// Module scope on purpose (review 2026-08-04): j/k navigation changes the hash,
+// which remounts the whole view — a render-local Set silently discarded the
+// batch selection on every step. Entries are pruned against the fresh queue on
+// each render (a page reviewed elsewhere must not stay selected).
+const selected = new Set();
 
 function bindQueueHotkeys() {
   // unbind first: hotkeys-js stacks duplicate handlers for the same key+scope
@@ -73,7 +78,9 @@ async function renderReview(container, rel, onDone) {
   if (diff.changed) {
     const box = el('details', { class: 'card' });
     const pre = el('div', { class: 'diff' });
-    html(pre, diffHtml(lineDiff((diff.baseline || '').replace(/^---\n[\s\S]*?\n---\n/, ''), page.body)));
+    const ops = lineDiff((diff.baseline || '').replace(/^---\n[\s\S]*?\n---\n/, ''), page.body);
+    if (ops) html(pre, diffHtml(ops));
+    else pre.append(el('p', { class: 'dim', style: 'padding:8px' }, '文件过大,差异视图省略(与薄 viewer 同一上限);请直接对照正文。'));
     box.append(el('summary', {}, '与上一版(HEAD)的差异'), pre);
     reader.append(box);
   }
@@ -124,6 +131,7 @@ export async function render(view, params) {
   ]);
   setKnownPages(treeData.pages);
   queue = queueData.pages;
+  for (const p of [...selected]) if (!queue.some((q) => q.path === p)) selected.delete(p);
 
   // F4 structure-findings banner: the queue is where users ACT on problems,
   // so dangling links / anomalies / errors surface here (live plan data, not
@@ -159,7 +167,6 @@ export async function render(view, params) {
   // ---- C5 batch review (ruling 2026-08-03: checkboxes + select-all; approve
   // direct — recoverable via edit-demote; reject armed two-click + archive
   // consequence copy, merge-topic discipline) ----
-  const selected = new Set();
   const batchBar = el('div', { class: 'batchbar', hidden: '' });
   const selNote = el('span', { class: 'dim', style: 'font-size:12px' });
   const approveBtn = el('button', { class: 'sm approve' });
@@ -238,6 +245,7 @@ export async function render(view, params) {
     list.append(row);
   }
   if (!queue.length) list.append(el('p', { class: 'dim', style: 'padding:4px' }, '队列已清空 🎉'));
+  syncBatchBar(); // restore checkbox/batchbar state after a j/k remount (selected is module-scoped)
 
   const spacer = el('div');
   const content = el('div');

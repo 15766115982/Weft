@@ -278,7 +278,8 @@ append-only; every entry starts with a uniform prefix (parseable with Unix tools
 ```
 
 Format: `## [<ISO8601>] <actor> | <action> | <object path> | <note>`,
-actor ∈ `govern | review | acquire`.
+actor ∈ `govern | review | acquire | portal` (`portal` = human actions through
+the UI portal, per §1 whitelist ⑤⑥: `candidate:manual`, `file:edit`).
 
 Action vocabulary (non-exhaustive): `auto:create-source`, `auto:update-source`,
 `auto:rebuild-index`, `auto:create-topic`, `auto:update-topic`, `candidate:*` (any

@@ -27,6 +27,23 @@ const RUN_STATUS = {
 };
 
 export async function render(view) {
+  // SSE freshness (review 2026-08-04): stats/timeline used to go stale after a
+  // governance run until a manual refresh. Remount on KB changes while this
+  // view is mounted; the observer drops the listener once detached.
+  let reloadTimer = 0;
+  const onChange = () => {
+    clearTimeout(reloadTimer);
+    reloadTimer = setTimeout(() => window.dispatchEvent(new CustomEvent('ui:remount')), 400);
+  };
+  window.addEventListener('ui:kb-change', onChange);
+  new MutationObserver((_, obs) => {
+    if (!document.contains(view)) {
+      clearTimeout(reloadTimer);
+      window.removeEventListener('ui:kb-change', onChange);
+      obs.disconnect();
+    }
+  }).observe(document.getElementById('view'), { childList: true });
+
   const [h, log] = await Promise.all([
     api('/api/health'),
     api('/api/log', { limit: 12 }).catch(() => ({ entries: [] })),

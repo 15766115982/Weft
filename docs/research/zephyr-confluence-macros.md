@@ -115,13 +115,13 @@ execution。结论:端点格式可参照,代码无可抄——但我们自己的
 - **L1 确定性提取(默认,零 LLM)**:下载 `<name>.gliffy` 附件
   (`GET /download/attachments/{pageId}/{filename}`,同 PAT),解析 JSON,
   按 y→x 排序提取全部 `graphic.Text.html` 去标签 → 渲染为
-  `**Gliffy 图:name**` + 标签列表。文字全部可检索,永不出错。
+  `**Gliffy diagram: name**` + 标签列表。文字全部可检索,永不出错。
 - **L2 多模态语义描述(可选增强)**:下载 `<name>.png` → Azure OpenAI
   vision(SPN,支持多模态)→ 生成"这张图表达了什么流程/关系"的一段话,
   追加在标签列表后。配置驱动,缺省关。Copilot gateway 无多模态,不能干这个。
 - **L3 OCR(最后手段)**:`.gliffy` JSON 缺失(老图/导入图)且 vision 未配
   时,Azure OCR 提 PNG 文字。排在最后符合用户排序。
-- 附件缺失/全部失败 → 保留占位符但带名字:`[gliffy 图: name]`。
+- 附件缺失/全部失败 → 保留占位符但带名字:`[gliffy diagram: name]`。
 
 **不做的**:Gliffy→Mermaid 结构重建(理论上连线 constraints 可生成
 flowchart,但样本显示导出图的连线常无约束,投入产出差,列为远期候选)。

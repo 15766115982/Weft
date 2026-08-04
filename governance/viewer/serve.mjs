@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 // Thin viewer server (ADR-0004): on-demand localhost review UI for the candidate
 // state machine. Three red lines: (1) launch on demand, no resident service;
-// (2) no user system / permissions / config UI; (3) dumb consumer — the ONLY
+// (2) no user system / permissions / config UI — but localhost write requests
+// still carry the per-startup token + Origin/Host checks, and every request
+// (reads included) must arrive with a loopback Host (CONTEXT.md red line 2,
+// shared with the portal; see auth.mjs); (3) dumb consumer — the ONLY
 // write operation anywhere in this file is flipStatus (frontmatter status).
 // Logging of review outcomes is the governance sweep's job, not the viewer's.
 //
@@ -9,14 +12,23 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { createAuth } from './auth.mjs';
 import { flipStatus, normalizeWikiRel } from '../scripts/lib/statusflip.mjs';
 import { parseFrontmatter } from '../scripts/lib/frontmatter.mjs';
+
+// async git: a 5s blocking execFileSync inside the request handler would stall
+// every other request on the event loop (review 2026-08-04)
+const execFileP = promisify(execFile);
 
 const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
 
+// walk/normalizeRawRel duplicate logic that also lives in governance/scripts —
+// INTENTIONAL copies across the viewer↔service boundary (same discipline as
+// the three frontmatter.mjs copies: zero cross-side imports; keep in sync).
 function* walk(dir) {
   if (!fs.existsSync(dir)) return;
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -50,6 +62,7 @@ function resolveUnder(kbRoot, rel, mustStartWith) {
 }
 
 export function createViewer(kbRoot) {
+  const auth = createAuth();
   const json = (res, code, obj) => {
     res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify(obj));
@@ -73,10 +86,14 @@ export function createViewer(kbRoot) {
     return parseFrontmatter(fs.readFileSync(abs, 'utf8'));
   };
 
-  const server = http.createServer((req, res) => {
+  const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1');
     console.log(`${req.method} ${url.pathname}${url.search}`);
     try {
+      // Every request (reads included) must carry a loopback Host — CORS
+      // cannot stop DNS-rebinding reads (same discipline as the portal, P2-2).
+      const badHost = auth.checkHost(req);
+      if (badHost) return json(res, badHost.code, { error: badHost.error });
       if (req.method === 'GET' && url.pathname === '/api/pages') return json(res, 200, { pages: listPages() });
       if (req.method === 'GET' && url.pathname === '/api/queue') {
         return json(res, 200, { pages: listPages().filter((p) => p.status === 'candidate') });
@@ -100,13 +117,17 @@ export function createViewer(kbRoot) {
         const { body } = readPage(rel);   // 404s for missing pages
         let baseline = null;
         try {
-          baseline = execFileSync('git', ['-C', kbRoot, 'show', `HEAD:${rel}`],
-            { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 8 * 1024 * 1024 });
+          ({ stdout: baseline } = await execFileP('git', ['-C', kbRoot, 'show', `HEAD:${rel}`],
+            { encoding: 'utf8', timeout: 5000, maxBuffer: 8 * 1024 * 1024 }));
         } catch { baseline = null; }
         const current = fs.readFileSync(resolveUnder(kbRoot, rel, 'wiki'), 'utf8');
         return json(res, 200, { baseline, current, changed: baseline !== null && baseline !== current, body });
       }
       if (req.method === 'POST' && url.pathname === '/api/review') {
+        // S8: token + Origin/Host before anything else — a malicious page can
+        // simple-POST here without a preflight (review 2026-08-04, red line).
+        const refusal = auth.checkWrite(req);
+        if (refusal) return json(res, refusal.code, { error: refusal.error });
         let body = '';
         let refused = false;
         req.on('data', (c) => {
@@ -142,6 +163,8 @@ export function createViewer(kbRoot) {
         if (!abs.startsWith(path.resolve(PUBLIC_DIR) + path.sep)) return json(res, 400, { error: 'bad static path' });
         if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) return json(res, 404, { error: 'not found' });
         res.writeHead(200, { 'content-type': MIME[path.extname(abs)] || 'application/octet-stream' });
+        // index.html carries the per-startup write token in a meta tag
+        if (abs.endsWith('.html')) return res.end(fs.readFileSync(abs, 'utf8').replace('%%VIEWER_TOKEN%%', auth.token));
         return res.end(fs.readFileSync(abs));
       }
       return json(res, 404, { error: 'not found' });
@@ -149,6 +172,8 @@ export function createViewer(kbRoot) {
       return json(res, err.code === 404 ? 404 : 400, { error: err.message });
     }
   });
+  // tests (and only tests) read the per-startup token off the server object
+  server.viewerToken = auth.token;
   return server;
 }
 

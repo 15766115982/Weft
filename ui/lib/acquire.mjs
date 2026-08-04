@@ -9,12 +9,19 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { spawnJob } from './jobs.mjs';
 import { normalizeInboxName, normalizeRawRel, resolveUnder } from './paths.mjs';
+import { tail, isGitRepo } from './sys.mjs';
 
 const ACQUIRE = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'acquisition', 'scripts', 'acquire.mjs',
 );
 
 export const UPLOAD_MAX = 32 * 1024 * 1024; // 32MB raw-bytes cap (E: no multipart)
+
+// Connector name lists, one place (review 2026-08-04: the three hardcoded
+// ['jira','confluence'] / ['local','jira','confluence'] literals were a
+// shotgun-surgery trap — a new connector had to find every list).
+const REMOTE_CONNECTORS = ['jira', 'confluence']; // --check / --probe exist for these
+const ALL_CONNECTORS = ['local', ...REMOTE_CONNECTORS];
 
 // ---- job runners (on-queue only) ----
 
@@ -41,7 +48,7 @@ export function uploadJob(kb, { filename, bytes }) {
 // F1: source pull with UI-supplied scope overrides (spawn the same CLI the
 // skill uses; kb.json supplies defaults when a param is omitted).
 export function pullJob(kb, { connector, jql, cql, max }) {
-  if (!['local', 'jira', 'confluence'].includes(connector)) {
+  if (!ALL_CONNECTORS.includes(connector)) {
     throw new Error(`unknown connector: ${connector}`);
   }
   const args = [ACQUIRE, connector, '--kb', kb];
@@ -136,19 +143,11 @@ export function snapshot(kb, rels, job) {
   return { kind: 'copy', path: path.relative(kb, dir).replace(/\\/g, '/') };
 }
 
-function isGitRepo(kb) {
-  try {
-    execFileSync('git', ['-C', kb, 'rev-parse', '--is-inside-work-tree'],
-      { stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 });
-    return true;
-  } catch { return false; }
-}
-
 // ---- read-only helpers (off-queue) ----
 
 // J5/F4: auth probe. Read-only — runs off-queue straight from the endpoint.
 export function authCheck(kb, connector) {
-  if (!['jira', 'confluence'].includes(connector)) throw new Error(`--check exists for jira|confluence: ${connector}`);
+  if (!REMOTE_CONNECTORS.includes(connector)) throw new Error(`--check exists for jira|confluence: ${connector}`);
   return new Promise((resolve, reject) => {
     const pseudo = { log: '' };
     spawnJob(pseudo, process.execPath, [ACQUIRE, connector, '--kb', kb, '--check'])
@@ -164,7 +163,7 @@ export function authCheck(kb, connector) {
 // read-only pattern as authCheck; the CLI output is value-free by design, so
 // what the UI shows is exactly what may be relayed out of the intranet.
 export function probeCheck(kb, connector, pageId) {
-  if (!['jira', 'confluence'].includes(connector)) throw new Error(`--probe exists for jira|confluence: ${connector}`);
+  if (!REMOTE_CONNECTORS.includes(connector)) throw new Error(`--probe exists for jira|confluence: ${connector}`);
   const args = [ACQUIRE, connector, '--kb', kb, '--probe'];
   if (connector === 'confluence') args.push(String(pageId || ''));
   return new Promise((resolve, reject) => {
@@ -215,8 +214,4 @@ export function listInbox(kb) {
     }
   }
   return files.sort((a, b) => b.mtime.localeCompare(a.mtime));
-}
-
-function tail(log, n = 4000) {
-  return log.length > n ? log.slice(-n) : log;
 }

@@ -20,6 +20,7 @@ import path from 'node:path';
 import { upsertRawDoc, sha256 } from '../lib/rawdoc.mjs';
 import { appendLog } from '../lib/log.mjs';
 import { shapeError } from '../lib/shape.mjs';
+import { normalizeConnectorDate, decodeEntities } from './shared.mjs';
 
 export const CONNECTOR_ID = 'confluence@1.0.0';
 
@@ -31,13 +32,9 @@ const EXPAND = 'body.storage,version,space,metadata.labels,ancestors';
 const SAFE_SOURCE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 
 /** Confluence emits ISO offsets (with or without colon); normalize to Z.
- *  Unparseable values pass through unchanged (kept visible, not invented). */
-export function normalizeConfluenceDate(s) {
-  if (!s) return '';
-  const fixed = String(s).replace(/([+-]\d{2})(\d{2})$/, '$1:$2');
-  const d = new Date(fixed);
-  return Number.isNaN(d.getTime()) ? String(s) : d.toISOString();
-}
+ *  Unparseable values pass through unchanged (kept visible, not invented).
+ *  Implementation lives in shared.mjs (same code as the Jira side). */
+export const normalizeConfluenceDate = normalizeConnectorDate;
 
 // ---------------------------------------------------------------------------
 // storage XHTML -> markdown (minimal, hand-rolled: zero new dependencies)
@@ -45,17 +42,8 @@ export function normalizeConfluenceDate(s) {
 
 const VOID_TAGS = new Set(['br', 'img', 'hr', 'col', 'input', 'link', 'meta']);
 
-function decodeEntities(s) {
-  return String(s)
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
-    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, '&'); // must run last
-}
+// decodeEntities: shared.mjs (was a verbatim copy of the Jira decoder —
+// review 2026-08-04); imported above
 
 function parseAttrs(s) {
   const attrs = {};
@@ -489,7 +477,7 @@ async function resolveGliffy(m, cfg, kbRoot, fetchImpl) {
     const buf = Buffer.from(await (await dl(`${base}.png`)).arrayBuffer());
     assetRel = writeAsset(kbRoot, m.pageId, `${safeFileName(base)}.png`, buf);
   } catch { /* no PNG available — image line omitted, labels still land */ }
-  const parts = [`**Gliffy 图: ${base}**`];
+  const parts = [`**Gliffy diagram: ${base}**`];
   if (assetRel) parts.push('', `![gliffy: ${base}](${assetRel})`);
   if (labels.length) parts.push('', ...labels.map((l) => `- ${l}`));
   return `\n\n${parts.join('\n')}\n\n`;
@@ -537,7 +525,7 @@ async function resolveJiraMacro(m, kbConfig, jira, jqlCache, fetchImpl) {
  *  err.safe/shapeSafe messages or bare HTTP codes are quoted. */
 function degradeFor(m, err) {
   const why = err?.safe || err?.shapeSafe ? err.message : err?.status ? `HTTP ${err.status}` : 'fetch/parse failed';
-  if (m.type === 'gliffy') return `[gliffy 图: ${gliffyBaseName(m.params) || '?'} — ${why}]`;
+  if (m.type === 'gliffy') return `[gliffy diagram: ${gliffyBaseName(m.params) || '?'} — ${why}]`;
   if (m.type === 'jira') return `[jira filter: ${m.params?.jql || m.params?.jqlQuery || m.params?.key || ''} — ${why}]`;
   return `[macro: ${m.type}]`;
 }
@@ -627,12 +615,12 @@ function resolveAuth(kbConfig) {
   if (!pat) {
     throw new Error(`confluence PAT not available: environment variable ${patEnv} is not set (kb.json connectors.confluence.pat_env)`);
   }
-  return { baseUrl: String(c.base_url).replace(/\/+$/, ''), pat, patEnv, confConf: c };
+  return { baseUrl: String(c.base_url).replace(/\/+$/, ''), pat, patEnv, connectorConfig: c };
 }
 
 function resolveConfig(kbConfig, { cql, maxResults } = {}) {
   const auth = resolveAuth(kbConfig);
-  const c = auth.confConf;
+  const c = auth.connectorConfig;
   const spaces = Array.isArray(c.spaces) ? c.spaces : c.spaces ? [c.spaces] : [];
   const cqlList = cql
     ? [cql]

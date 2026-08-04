@@ -13,7 +13,12 @@ function el(tag, text, cls) {
   return n;
 }
 
-async function api(path, opts) {
+async function api(path, opts = {}) {
+  // writes carry the per-startup token injected into index.html (S8)
+  if ((opts.method || 'GET') !== 'GET') {
+    opts.headers = { ...(opts.headers || {}),
+      'x-viewer-token': document.querySelector('meta[name="viewer-token"]')?.content || '' };
+  }
   const res = await fetch(path, opts);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -26,9 +31,18 @@ async function api(path, opts) {
 
 /* ---------- inline markdown: bold / italic / code / links / wikilinks ---------- */
 
+// Known page paths, refreshed on every route render — wikilink resolution below
+// (review 2026-08-04: a bare-slug link used to be guessed as wiki/topics/<slug>,
+// which 404'd for every source page).
+let knownPaths = [];
+
 function wikiHref(target) {
   const t = target.replace(/\.md$/, '');
-  const rel = t.includes('/') ? `wiki/${t}` : `wiki/topics/${t}`;
+  // same caliber as retrieval's resolveLinks: full relative form first, then
+  // first suffix match in sorted order; unknown targets keep the old guess
+  const hit = knownPaths.find((p) => p === `wiki/${t}.md`)
+    || knownPaths.find((p) => p.replace(/\.md$/, '').endsWith(`/${t}`));
+  const rel = hit ? hit.replace(/\.md$/, '') : (t.includes('/') ? `wiki/${t}` : `wiki/topics/${t}`);
   return `#/page/${rel}.md`;
 }
 
@@ -320,6 +334,9 @@ async function route() {
   app.replaceChildren();
   const hash = location.hash || '#/queue';
   try {
+    // keep the wikilink resolver's page list fresh (cheap: one metadata list)
+    api('/api/pages').then(({ pages }) => { knownPaths = pages.map((p) => p.path).sort(); })
+      .catch(() => { /* resolver falls back to the old guess */ });
     if (hash.startsWith('#/page/')) {
       await viewPage(app, decodeURIComponent(hash.slice('#/page/'.length)));
     } else if (hash === '#/browse') {
