@@ -8,6 +8,7 @@ import { html, esc, el } from '../lib/render.js';
 import { renderMarkdown, setKnownPages } from '../lib/md.js';
 import { lineDiff } from '../lib/diff.js';
 import { icon } from '../lib/icons.js';
+import { sourceLinksHtml } from '../lib/sources.mjs';
 
 let queue = [];
 // Module scope on purpose (review 2026-08-04): j/k navigation changes the hash,
@@ -66,8 +67,8 @@ async function renderReview(container, rel, onDone) {
 
   const links = [];
   if (f.source_ref) links.push(`<a href="#/browse?raw=${encodeURIComponent(f.source_ref)}">raw 证据:${esc(f.source_ref)}</a>`);
-  for (const s of f.sources || []) {
-    links.push(`<a href="#/page?path=${encodeURIComponent('wiki/sources/' + s.replace(/^wiki\/sources\//, ''))}">来源:${esc(s)}</a>`);
+  if (Array.isArray(f.sources) && f.sources.length) {
+    links.push(sourceLinksHtml(f.sources, page.sources_resolved, '来源:'));
   }
   if (links.length) {
     const ev = el('div', { class: 'archive-card' });

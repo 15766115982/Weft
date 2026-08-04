@@ -5,6 +5,7 @@ import { api, apiPost, waitJob } from '../lib/api.js';
 import { html, esc, el } from '../lib/render.js';
 import { setKnownPages, renderMarkdown, anchorToId } from '../lib/md.js';
 import { icon } from '../lib/icons.js';
+import { sourceLinksHtml } from '../lib/sources.mjs';
 
 const badge = (s) => s && s !== 'approved' ? `<span class="badge ${esc(s)}">${esc(s)}</span>` : '';
 
@@ -141,7 +142,7 @@ function ctxTabs(panel, tabs) {
   activate(Object.keys(tabs)[0]);
 }
 
-function infoTab(fields) {
+function infoTab(fields, sourcesResolved) {
   const box = el('dl');
   const add = (k, vHtml) => { if (vHtml) { box.append(el('dt', {}, k)); const dd = el('dd'); html(dd, vHtml); box.append(dd); } };
   add('status', badge(fields.status) || `<span class="badge approved">approved</span>`);
@@ -150,8 +151,7 @@ function infoTab(fields) {
   if (fields.source_ref) add('raw 证据', `<a href="#/browse?raw=${encodeURIComponent(fields.source_ref)}">${esc(fields.source_ref)}</a>`);
   if (fields.source_url) add('source_url', `<a href="${esc(fields.source_url)}" target="_blank" rel="noreferrer">${esc(fields.source_url)}</a>`);
   if (Array.isArray(fields.sources) && fields.sources.length) {
-    add('sources', fields.sources.map((s) =>
-      `<a href="#/page?path=${encodeURIComponent('wiki/sources/' + s.replace(/^wiki\/sources\//, ''))}">${esc(s)}</a>`).join('<br>'));
+    add('sources', sourceLinksHtml(fields.sources, sourcesResolved));
   }
   if (Array.isArray(fields.tags) && fields.tags.length) add('tags', esc(fields.tags.join(', ')));
   return box;
@@ -329,7 +329,7 @@ async function renderPage(content, rel, anchor) {
 
   const ctx = el('aside', { class: 'ctx' });
   ctxTabs(ctx, {
-    信息: infoTab(page.fields),
+    信息: infoTab(page.fields, page.sources_resolved),
     反链: backlinksTab(back.pages, rel),
     // J7 lazy (final-review P3): git log spawns only if the tab is opened
     历史: { lazy: async () => historyTab(await api('/api/history', { path: rel }).catch(() => ({ kind: 'none', entries: [] }))) },
@@ -466,7 +466,7 @@ async function renderSplit(content, rel, page, backlinksPages) {
   const note = el('p', { class: 'dim', style: 'font-size:12px;margin-top:10px' },
     '左:治理后的 wiki 摘要。右:acquire 落地的 raw 原文。对照检查摘要是否忠实。');
   ctx.append(exit, note);
-  ctxTabs(ctx, { 信息: infoTab(page.fields), 反链: backlinksTab(backlinksPages, rel), 大纲: tocTab(lmain) });
+  ctxTabs(ctx, { 信息: infoTab(page.fields, page.sources_resolved), 反链: backlinksTab(backlinksPages, rel), 大纲: tocTab(lmain) });
 
   content.append(split, ctx);
 }

@@ -30,7 +30,7 @@ import { saveWikiEditJob } from './lib/edit.mjs';
 import { saveKbFileJob } from './lib/kbfile.mjs';
 import { judge, judgeNames } from './lib/judge.mjs';
 import { feedbackJob, readFeedback } from './lib/feedback.mjs';
-import { plan } from '../governance/scripts/lib/govern.mjs';
+import { plan, sourcePageRelPath } from '../governance/scripts/lib/govern.mjs';
 import {
   UPLOAD_MAX, uploadJob, pullJob, inboxDeleteJob, rawDeleteJob, rawMoveJob,
   authCheck, probeCheck, sourceFreshness, listInbox,
@@ -43,6 +43,7 @@ const PUBLIC_DIR = path.join(UI_DIR, 'public');
 const execFileP = promisify(execFile);
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon',
   '.woff2': 'font/woff2',
@@ -175,7 +176,28 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
           const text = fs.readFileSync(abs, 'utf8');
           // hash: the M7d editor's optimistic-lock base (final-review P2)
           const hash = crypto.createHash('sha256').update(text, 'utf8').digest('hex');
-          return json(res, 200, { path: rel, hash, ...parseFrontmatter(text) });
+          const parsed = parseFrontmatter(text);
+          // topic sources are raw-path provenance; resolve each to its source
+          // summary page so the UI can link to a page that exists instead of
+          // gluing 'wiki/sources/' onto the raw path (intranet bug 1)
+          let sources_resolved = null;
+          if (Array.isArray(parsed.fields.sources) && parsed.fields.sources.length) {
+            sources_resolved = parsed.fields.sources.map((raw) => {
+              const rawRel = String(raw);
+              if (!rawRel.startsWith('raw/')) return { raw: rawRel, page: null };
+              try {
+                const rawAbs = resolveUnder(kb, rawRel, 'raw');
+                if (!fs.existsSync(rawAbs)) return { raw: rawRel, page: null };
+                const rf = parseFrontmatter(fs.readFileSync(rawAbs, 'utf8')).fields;
+                if (!rf.source || !rf.source_id) return { raw: rawRel, page: null };
+                const cand = sourcePageRelPath(rf).replace(/\\/g, '/');
+                return { raw: rawRel, page: fs.existsSync(path.join(kb, cand)) ? cand : null };
+              } catch {
+                return { raw: rawRel, page: null };
+              }
+            });
+          }
+          return json(res, 200, { path: rel, hash, ...parsed, sources_resolved });
         }
         // F3: KB-root whitelisted files (GOVERNANCE.md) — free-form Markdown,
         // no frontmatter parsing; hash is the editor's optimistic-lock base.
