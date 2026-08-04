@@ -102,3 +102,27 @@ test('CLI boolean flag trap: --candidate yes fails loudly instead of silently ap
   const ok = govern(['apply-topic', '--slug', 'x-topic', '--title', 'T', '--sources', 'raw/local/aaaa1111-pay.md', '--candidate', 'true'], 'body');
   assert.equal(ok.status, 'candidate');
 });
+
+// real-env finding 2026-08-04: headless agent runs can't pipe — the body must
+// be passable as a file (bare node command, no stdin)
+test('CLI --body-file: apply-source/apply-topic read the body from a file', () => {
+  fs.mkdirSync(path.join(kb, '.kb', 'bodies'), { recursive: true });
+  const sumFile = path.join(kb, '.kb', 'bodies', 'local-aaaa1111-pay.md');
+  fs.writeFileSync(sumFile, '## Key Points\n\n- Body delivered via --body-file.\n', 'utf8');
+  // no stdin payload: an empty stdin must NOT be what lands on the page
+  const applied = govern(['apply-source', '--raw', 'raw/local/aaaa1111-pay.md', '--body-file', sumFile], '');
+  assert.equal(applied.action, 'auto:update-source');
+  assert.match(fs.readFileSync(path.join(kb, applied.page), 'utf8'), /Body delivered via --body-file/);
+
+  const topFile = path.join(kb, '.kb', 'bodies', 'file-topic.md');
+  fs.writeFileSync(topFile, 'A synthesis delivered via --body-file.\n', 'utf8');
+  const topic = govern(['apply-topic', '--slug', 'file-topic', '--title', 'File Topic',
+    '--sources', 'raw/local/aaaa1111-pay.md', '--body-file', topFile], '');
+  assert.equal(topic.status, 'approved');
+  assert.match(fs.readFileSync(path.join(kb, topic.page), 'utf8'), /synthesis delivered via --body-file/);
+
+  assert.throws(() => govern(['apply-source', '--raw', 'raw/local/aaaa1111-pay.md', '--body-file'], ''),
+    /--body-file requires a path value/);
+  assert.throws(() => govern(['apply-source', '--raw', 'raw/local/aaaa1111-pay.md', '--body-file', path.join(kb, 'nope.md')], ''),
+    /--body-file does not exist/);
+});

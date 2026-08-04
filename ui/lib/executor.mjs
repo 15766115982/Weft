@@ -8,11 +8,11 @@
 //   'done'  { ok, text } — final; ok is parsed from the result event, NEVER
 //           from the exit code (S7 spike: a blocked write still exits 0 with
 //           is_error false — exit code is not an error signal).
-import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnClaude } from './claudecli.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const repoFwd = () => REPO_ROOT.split(path.sep).join('/');
@@ -37,7 +37,9 @@ export function startRun(name, spec) {
 // Spike facts honored here:
 //  ① event model = --output-format stream-json --verbose JSONL subset
 //    (init / assistant / result), genuinely progressive;
-//  ② spawn 'claude.cmd' directly, no shell ('claude' ENOENTs on Windows);
+//  ② spawn goes through cmd.exe on win32 (claudecli.mjs) — direct .cmd spawn
+//    EINVALs on security-patched Node (real-env finding 2026-08-04,
+//    superseding the spike's "spawn claude.cmd directly" conclusion);
 //  ③ cwd must be a Windows path (Git-Bash /tmp paths ENOENT) — callers pass
 //    path.resolve'd KB roots, which satisfies this naturally;
 //  ④ permission posture (P2-2, user-ruled A 为主 2026-08-02; six-round spike
@@ -94,7 +96,7 @@ export function buildClaudeArgs(kbRoot) {
 function startClaudeRun({ prompt, cwd }) {
   if (!prompt || !String(prompt).trim()) throw new Error('executor run requires a non-empty prompt');
   const events = new EventEmitter();
-  const child = spawn('claude.cmd', buildClaudeArgs(cwd), { cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  const child = spawnClaude(buildClaudeArgs(cwd), { cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
   child.stdin.on('error', () => {}); // EPIPE if the process dies before reading
   child.stdin.write(String(prompt));
   child.stdin.end();

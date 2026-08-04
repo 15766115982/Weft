@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 // Governance service CLI. Usage:
 //   node govern.mjs plan --kb <path>
-//   node govern.mjs apply-source --kb <path> --raw <raw-relative-path> [--tags a,b,c]   (summary body passed via stdin)
+//   node govern.mjs apply-source --kb <path> --raw <raw-relative-path> [--tags a,b,c]
+//       (summary body via --body-file <path>, or stdin when omitted)
 //   node govern.mjs apply-topic --kb <path> --slug <slug> --title "T" [--sources raw/a.md,raw/b.md]
-//       [--aliases a,b] [--tags t1,t2] [--candidate] [--note "..."]                    (synthesis body passed via stdin)
+//       [--aliases a,b] [--tags t1,t2] [--candidate] [--note "..."]
+//       (synthesis body via --body-file <path>, or stdin when omitted)
 //   node govern.mjs approve --kb <path> --page wiki/(sources|topics)/<name>.md
 //   node govern.mjs reject  --kb <path> --page wiki/(sources|topics)/<name>.md
 //   node govern.mjs archive --kb <path> --page wiki/(sources|topics)/<name>.md [--note "..."]
@@ -12,6 +14,7 @@
 //   node govern.mjs rebuild-index --kb <path>
 // stdout is always JSON (for Claude to parse).
 import fs from 'node:fs';
+import path from 'node:path';
 import { plan, applySourcePage, applyTopicPage, rebuildIndex, approvePage, rejectPage, archivePage, sweep, mergeTopics } from './lib/govern.mjs';
 
 // Boolean flags take no value: `--flag` / `--flag true` / `--flag false` are accepted;
@@ -44,6 +47,23 @@ function resolveKb(flag) {
 const args = parseArgs(process.argv.slice(2));
 const [cmd] = args._;
 
+/** Page body input (real-env finding 2026-08-04): --body-file is the
+ *  headless-safe channel — the UI portal's agent permission model auto-denies
+ *  pipes/heredocs, so the agent writes the body with its file tools and passes
+ *  a bare `node govern.mjs ... --body-file <path>` command instead. stdin
+ *  remains the default for interactive sessions. Read-only op; the path is
+ *  resolved against the caller's cwd and needs no confinement check. */
+function readBody(args) {
+  const f = args['body-file'];
+  if (f === true) throw new Error('--body-file requires a path value');
+  if (f !== undefined) {
+    const abs = path.resolve(String(f));
+    if (!fs.existsSync(abs)) throw new Error(`--body-file does not exist: ${f}`);
+    return fs.readFileSync(abs, 'utf8');
+  }
+  return fs.readFileSync(0, 'utf8'); // stdin
+}
+
 try {
   const kbRoot = resolveKb(args.kb);
   let out;
@@ -53,7 +73,7 @@ try {
       break;
     case 'apply-source': {
       if (!args.raw) throw new Error('apply-source requires --raw <raw-relative-path>');
-      const summary = fs.readFileSync(0, 'utf8'); // stdin
+      const summary = readBody(args);
       // --tags omitted = keep existing tags; explicit --tags "" = clear
       const tags = args.tags === undefined ? undefined
         : String(args.tags).split(',').map(s => s.trim()).filter(Boolean);
@@ -65,7 +85,7 @@ try {
       break;
     case 'apply-topic': {
       if (!args.slug) throw new Error('apply-topic requires --slug <slug>');
-      const synthesis = fs.readFileSync(0, 'utf8'); // stdin
+      const synthesis = readBody(args);
       // comma-list flags: omitted = keep existing; explicit "" = clear
       const list = (v) => v === undefined ? undefined
         : String(v).split(',').map(s => s.trim()).filter(Boolean);

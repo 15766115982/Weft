@@ -12,7 +12,7 @@ takes you from zero to a working knowledge base connected to intranet Jira/Confl
 
 | Requirement | Version | Why |
 |---|---|---|
-| Node.js | **≥ 20** (verified on 20 / 22 / 24) | global `fetch`, `AbortSignal.timeout`, `node --test`. The repo's only native dependency, `better-sqlite3`, is ranged `~12.4.x`: its prebuilt binaries cover Node 20–25 (12.5+ dropped the Node 20 prebuild, so the range is capped there). Switching Node majors needs no config change — `npm install` downloads the prebuilt binary matching your current Node. |
+| Node.js | **≥ 20** (verified on 20 / 22 / 24) | global `fetch`, `AbortSignal.timeout`, `node --test`. The repo's only native dependency, `better-sqlite3`, is ranged `~12.4.6 \|\| ^13.0.2` (2026-08-04): the 12.4.x leg keeps Node 20 prebuilds (12.5+ dropped them), the 13.x leg covers curated intranet mirrors that only serve 13.0.2 (13.x itself requires Node ≥ 22). npm resolves the highest match, so a fresh public install on **Node 20** may pick 13.x and fail (EBADENGINE / source build) — pin it once with `npm install better-sqlite3@~12.4.6`. Switching Node majors otherwise needs no config change — `npm install` downloads the prebuilt binary matching your current Node. |
 | npm | bundled with Node | installs the single native dependency (`better-sqlite3`, prebuilt binary — no compiler needed) |
 | Git | any recent | the KB is a Git repository |
 | Claude Code | any recent | the three services are invoked as skills |

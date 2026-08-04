@@ -1,5 +1,31 @@
 # Development Log (as of 2026-08-03, M0-M6 complete + cross-service test layer + M7a-d UI portal + A7 graph)
 
+> **内网实测修复轮(2026-08-04,real-env-test.md §3a 验收中回传的四个问题,
+> 逐条修复)**:
+> ① **better-sqlite3 版本范围**——`~12.4.6` 内网受管镜像只有 13.0.2 可下,
+> 放宽为 `~12.4.6 || ^13.0.2`(13.x engines 要求 Node ≥ 22;代价:公网
+> Node 20 全新安装会被 npm 解析到 13.x,installation.md 记了钉版指令);
+> ② **Gliffy 拉取 HTTP 404**——直连 `/download/attachments/<id>/<name>`
+> servlet 在内网 404;改为 REST `child/attachment` API 优先解析
+> (_links.download 是服务端规范 URL), stored 文件名 ≠ 宏 name 时按同扩展名
+> 列表兜底,最后才回退 legacy servlet 路径;`confluence --probe` 输出新增
+> 值无关的 `via` 字段(rest-exact/rest-list/legacy)供下轮验收对路;
+> ③ **win32 直生 claude.cmd 失败**——2024-04 Node 安全回填(CVE-2024-27980)
+> 后 spawn .cmd 不带 shell 直接 EINVAL(内网已临时手修);收口为
+> ui/lib/claudecli.mjs:win32 走 `cmd.exe /d /s /c` + 逐参双引号 +
+> windowsVerbatimArguments(经典 cross-spawn 式,本机含空格路径实测通过),
+> executor.mjs 与 judge.mjs 共用;spike-s7 ② 结论由此 supersede;
+> ④ **agent 治理被权限模型拦截**——SKILL.md 的 `cat <summary> | node …`
+> 管道形态在 acceptEdits allow-list(只匹配裸 `node <repo>/**`)下必被
+> auto-deny;govern.mjs 的 apply-source/apply-topic 新增 `--body-file`:
+> agent 用文件工具把正文写进 `.kb/bodies/`(KB 内写 auto-accept,且 .kb
+> 本就在运行提交 pathspec 之外),再跑裸 node 命令;SKILL.md 与 portal 默认
+> 提示词同步改为该形态,stdin 保留为交互式回退。
+> 测试:acquisition 61(+2:REST-list/legacy 两条解析路径)+ governance 55
+> (+1:--body-file e2e)+ ui 71(+2:claudecli spec)+ 检索/viewer/跨服务
+> 全绿;guide 故障表补 EINVAL 与 --body-file 两行。
+> 待内网下轮验收:②③④ 的内网实效(尤其 404 根因是否即 legacy servlet 路径)。
+
 > **四轴全项目审查修复轮(2026-08-04,外部审查报告 HEAD=47c9592,逐条核验后
 > 落地)**:审查四轴(Standards/Spec/架构性能/UI 交互)共命中 1 条三轴红线 +
 > 一批真实缺陷,全部核验属实并修复;2 条判定为有意设计不动(跨服务
@@ -92,6 +118,9 @@
 > 砍了 Node 20 预编译故范围收在 12.4.x);package-lock.json 从仓库移除并 gitignore,
 > 让 npm 按目标机 Node 现解析。内网 Node 24 安装失败(ERR_DLOPEN_FAILED)由此根治。
 > 五套测试(37+39+52+56+36)在本机 Node 20 全绿。
+> **增补 2026-08-04**:范围再放宽为 `~12.4.6 || ^13.0.2`——内网受管镜像只发 13.0.2
+> (13.x engines 要求 Node ≥ 22);代价是公网 Node 20 全新安装会被 npm 解析到 13.x,
+> 此时按 installation.md 钉 `better-sqlite3@~12.4.6` 一次即可。
 
 > **治理工程化四件套(2026-08-03,借鉴 langchain-ai/openwiki 调研)**:
 > ① F1 运行留痕——`.kb/govern_runs.jsonl` 两阶段(start/finish)记录,读侧推断

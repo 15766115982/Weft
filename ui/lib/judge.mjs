@@ -10,7 +10,7 @@
 // Promptfoo CI golden-set regression (K2): deliberately NOT vendored — heavy
 // npm dependency, intranet rule. The existing tests/eval gate (Hit@5=1.000)
 // stays the CI regression; judge calibration runs are manual (K4 note).
-import { spawn } from 'node:child_process';
+import { spawnClaude } from './claudecli.mjs';
 
 const registry = new Map();
 
@@ -28,7 +28,7 @@ export function judgeNames() {
 // touch the filesystem — its input is untrusted KB content.
 function claudeChat(prompt, { timeoutMs = 120000 } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn('claude.cmd', [
+    const child = spawnClaude([
       '-p',
       '--disallowedTools', 'Bash,Write,Edit,Read,Glob,Grep,WebFetch,WebSearch',
     ], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });

@@ -247,5 +247,5 @@ test('confluence --probe requires a page id and reports the gliffy shape', async
   assert.equal(ok.code, 0, ok.stderr);
   const out = JSON.parse(ok.stdout);
   assert.equal(out.probe, true);
-  assert.deepEqual(out.gliffy, { http: 200, jsonValid: true, hasStageObjects: true, objectCount: 1, labelCount: 1 });
+  assert.deepEqual(out.gliffy, { http: 200, via: 'legacy', jsonValid: true, hasStageObjects: true, objectCount: 1, labelCount: 1 });
 });

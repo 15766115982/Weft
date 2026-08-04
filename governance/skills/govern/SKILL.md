@@ -28,15 +28,24 @@ node <skill-dir>/../../scripts/govern.mjs plan --kb <kb-root>
 
 # 2. For each item in pending:
 #    a. Read the corresponding raw file
-#    b. Write a summary (spec below) and pass it via stdin to apply-source
-cat <summary> | node <skill-dir>/../../scripts/govern.mjs apply-source \
-  --kb <kb-root> --raw <raw path of the pending item> --tags tag1,tag2
+#    b. Write the summary (spec below) to a scratch file inside the KB with
+#       your file tools (e.g. .kb/bodies/<page>.md — .kb is the derived-
+#       artifact dir, excluded from the run's git commit), then apply it.
+#       --body-file is the HEADLESS-SAFE form: under the UI portal's agent
+#       permission model only bare `node <repo>/**` commands are allowed and
+#       pipes/heredocs/stdin redirection are auto-denied. Interactive sessions
+#       may instead pipe: cat <summary> | node ... apply-source --kb ... --raw ...
+node <skill-dir>/../../scripts/govern.mjs apply-source \
+  --kb <kb-root> --raw <raw path of the pending item> --tags tag1,tag2 \
+  --body-file <scratch file written in step b>
 
-# 3. Topic synthesis (see the section below): create/update topic pages
-cat <synthesis> | node <skill-dir>/../../scripts/govern.mjs apply-topic \
+# 3. Topic synthesis (see the section below): create/update topic pages.
+#    Same body-input rule as step 2: --body-file headless-safe, stdin interactive.
+node <skill-dir>/../../scripts/govern.mjs apply-topic \
   --kb <kb-root> --slug <slug> --title "Topic Title" \
   --sources raw/local/a.md,raw/jira/b.md [--aliases x,y] [--tags t1,t2] \
-  [--candidate --note "what conflicts with what"]
+  [--candidate --note "what conflicts with what"] \
+  --body-file <scratch file with the synthesis>
 
 # 4. Review queue: process each candidate with the human (see the review section)
 node <skill-dir>/../../scripts/govern.mjs approve --kb <kb-root> --page wiki/topics/<slug>.md

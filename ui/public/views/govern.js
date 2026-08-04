@@ -107,6 +107,12 @@ export async function render(view) {
       'Process the current plan for this knowledge base (cwd IS the KB root):',
       'write English source-summary pages for each pending raw via apply-source,',
       'then evaluate topic synthesis (apply-topic) where cross-source themes exist.',
+      // real-env finding 2026-08-04: the allow-list matches bare node commands
+      // ONLY — pipes/heredocs/stdin are auto-denied, so the body must go
+      // through a scratch file the agent writes with its file tools.
+      'Page bodies go via --body-file: WRITE each summary/synthesis to a scratch file inside the KB',
+      '(e.g. .kb/bodies/<page>.md) with your file tools, then run apply-source/apply-topic with',
+      '--body-file <that path>. Never use pipes, heredocs or stdin redirection — they are auto-denied.',
       'Leave every page as candidate — a human reviews and approves. Do not approve or merge anything.',
       // B layer (P2-2 ruling ⑧): the prompt states the confinement out loud;
       // the acceptEdits boundary + allow-list enforce it underneath.

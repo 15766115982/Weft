@@ -26,7 +26,7 @@
 
 三条硬约束,先知道不踩雷:
 
-1. **Node ≥ 20**(20 / 22 / 24 均可)——唯一原生依赖 better-sqlite3 的预编译二进制覆盖 Node 20–25;
+1. **Node ≥ 20**(20 / 22 / 24 均可)——唯一原生依赖 better-sqlite3 的版本范围是 `~12.4.6 || ^13.0.2`:12.4.x 保住 Node 20 预编译,13.x 适配只发 13.0.2 的内网镜像(13.x 自身要求 Node ≥ 22)。npm 总是解析最高匹配,**Node 20 全新安装若被解析到 13.x 而失败**,钉一次即可:`npm install better-sqlite3@~12.4.6`;
 2. **一切都是本机单人的**——portal 只听 127.0.0.1,没有账号系统;
 3. **内网离线可跑**——全系统无 Python,唯一的 npm 依赖可以离线拷贝。
 
@@ -374,8 +374,8 @@ Claude Code 会自己读这份指南逐步执行——本指南的写作精度�
 | `SELF_SIGNED_CERT_IN_CHAIN` | 内部 CA——设 `NODE_EXTRA_CA_CERTS`(5.2);绝不关 TLS 校验 |
 | `authentication failed HTTP 401` | PAT 错/过期——网页端重建;`setx` 后要开**新**终端 |
 | 启动 portal 报 `EADDRINUSE` | 旧 portal 还占着 8322:`netstat -ano | findstr :8322` 找到 PID,`taskkill /PID <pid> /F` |
-| agent 治理立刻失败,日志说 spawn 失败/找不到命令 | `claude.cmd` 不在 PATH——装好 Claude Code 或把它的 bin 加进 PATH,重启 portal |
-| agent 运行里某些命令"被权限拒绝" | 正常的——加固姿态只允许 `node <repo>/**` 脚本、只读 git、KB 内写。agent 会换允许的方式继续;这是设计,不是故障 |
+| agent 治理立刻失败,日志说 spawn 失败/找不到命令 | `claude.cmd` 不在 PATH——装好 Claude Code 或把它的 bin 加进 PATH,重启 portal。报 `EINVAL` 是旧版直生 .cmd 被 Node 安全补丁禁止——2026-08-04 起 portal 改走 `cmd.exe /d /s /c` 路由,升级到含该修复的版本即可 |
+| agent 运行里某些命令"被权限拒绝" | 正常的——加固姿态只允许 `node <repo>/**` 裸命令、只读 git、KB 内写。正因如此,页面正文一律走 `--body-file`(agent 先用文件工具把摘要写进 `.kb/bodies/`,再跑裸 node 命令);管道/heredoc/stdin 重定向在这个模型下必被拦,不是故障 |
 | judge 徽标一直转圈不出现 | 首次调用 LLM 约 10-30 秒,正常;一直不出看 portal 控制台报错(通常是 claude.cmd 不在 PATH) |
 | Claude Code 里看不到 skill | 重启 Claude Code;确认 `~/.claude/skills/kb-*/SKILL.md` 存在;确认是链接不是复制(3.2) |
 | `no knowledge base specified` | 命令忘了 `--kb <路径>`,或设 `KB_PATH` 环境变量 |

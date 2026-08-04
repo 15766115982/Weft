@@ -99,10 +99,13 @@ node acquisition/scripts/acquire.mjs confluence --kb <scratch-kb> --probe <pageI
       **Scale** (`scale.http: 200` in the same output → report back; Squad steps
       do not apply). `note: no-test-issue-found` → widen the JQL or check
       `test_issue_types`.
-- [ ] `confluence --probe <pageId>` prints `gliffy: {http: 200, jsonValid: true,
-      hasStageObjects: true, ...}`. `jsonValid: false` → old XML-format Gliffy
-      (labels will degrade, placeholders stay). Any other shape: relay the probe
-      output verbatim.
+- [ ] `confluence --probe <pageId>` prints `gliffy: {http: 200, via: <route>,
+      jsonValid: true, hasStageObjects: true, ...}`. `via` (2026-08-04) names the
+      download route that worked: `rest-exact` / `rest-list` (REST child/attachment
+      API — expected after the intranet legacy-servlet 404) or `legacy`
+      (`/download/attachments/...` fallback). `jsonValid: false` → old XML-format
+      Gliffy (labels will degrade, placeholders stay). Any other shape: relay the
+      probe output verbatim.
 
 **Zephyr steps:**
 

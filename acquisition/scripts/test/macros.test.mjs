@@ -53,8 +53,10 @@ const GLIFFY_MACRO = (name) => `<ac:structured-macro ac:name="gliffy" ac:schema-
   + `</ac:structured-macro>`;
 
 /** Mock Confluence: content/search keyed by CQL; attachments maps
- *  "pageId/filename" -> {status?, body(string|Buffer)}; contentById for probe. */
-async function mockConfluence(t, cqlSets, { attachments = {}, contentById = {} } = {}) {
+ *  "pageId/filename" -> {status?, body(string|Buffer)}; contentById for probe.
+ *  rest:false simulates a server whose REST child/attachment endpoint is
+ *  dead — exercises the legacy /download/attachments fallback. */
+async function mockConfluence(t, cqlSets, { attachments = {}, contentById = {}, rest = true } = {}) {
   const requests = [];
   const server = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://mock');
@@ -70,6 +72,18 @@ async function mockConfluence(t, cqlSets, { attachments = {}, contentById = {} }
       const start = Number(u.searchParams.get('start') || 0);
       const limit = Number(u.searchParams.get('limit') || 50);
       return json(200, { results: set.slice(start, start + limit), start, limit, size: Math.min(limit, set.length - start), totalSize: set.length });
+    }
+    const childAtt = rest && u.pathname.match(/^\/rest\/api\/content\/(\d+)\/child\/attachment$/);
+    if (childAtt) {
+      const id = childAtt[1];
+      const names = Object.keys(attachments)
+        .filter((k) => k.startsWith(`${id}/`)).map((k) => k.slice(id.length + 1));
+      const fn = u.searchParams.get('filename');
+      const titles = fn ? names.filter((n) => n === fn) : names;
+      return json(200, {
+        results: titles.map((n) => ({ title: n, _links: { download: `/download/attachments/${id}/${encodeURIComponent(n)}` } })),
+        size: titles.length,
+      });
     }
     const content = u.pathname.match(/^\/rest\/api\/content\/(\d+)$/);
     if (content && contentById[content[1]]) return json(200, contentById[content[1]]);
@@ -192,6 +206,33 @@ test('PNG sidecar updates independently of the doc content_hash skip', async (t)
     'asset still updates');
 });
 
+// real-env hardening 2026-08-04: the intranet 404'd the legacy servlet path
+test('gliffy resolution: REST-list fallback when stored filename ≠ macro name', async (t) => {
+  const { baseUrl, requests } = await mockConfluence(t, {
+    'space = "DEV" AND type = page': [makePage('561', GLIFFY_MACRO('arch-diagram'))],
+  }, { attachments: { '561/架构图.gliffy': { body: GLIFFY_JSON }, '561/架构图.png': { body: PNG_BYTES } } });
+  const s = await run(kb, { kbConfig: kbConf(baseUrl) });
+  assert.deepEqual(s.errors, []);
+  assert.deepEqual(s.macros, { gliffy: 1 });
+  const { body } = readDoc('561');
+  assert.match(body, /\*\*Gliffy diagram: arch-diagram\*\*/);
+  assert.match(body, /!\[gliffy: arch-diagram\]\(raw\/confluence\/561\.assets\/arch-diagram\.png\)/);
+  assert.match(body, /- 下游服务/);
+  assert.ok(requests.some((r) => r.path.endsWith('/child/attachment')), 'went through the REST listing');
+});
+
+test('gliffy resolution: legacy servlet fallback when REST child/attachment is dead', async (t) => {
+  const { baseUrl, requests } = await mockConfluence(t, {
+    'space = "DEV" AND type = page': [makePage('571', GLIFFY_MACRO('flow'))],
+  }, { attachments: { '571/flow.gliffy': { body: GLIFFY_JSON } }, rest: false });
+  const s = await run(kb, { kbConfig: kbConf(baseUrl) });
+  assert.deepEqual(s.errors, []);
+  assert.deepEqual(s.macros, { gliffy: 1 });
+  assert.match(readDoc('571').body, /\*\*Gliffy diagram: flow\*\*/);
+  const dls = requests.filter((r) => r.path.includes('/download/attachments/'));
+  assert.ok(dls.length >= 1, 'fell back to the legacy servlet path');
+});
+
 test('jira macro: key card + jql table with per-run dedupe and truncation note', async (t) => {
   const jql = 'project = PROJ AND status != Done';
   const storage = `<ac:structured-macro ac:name="jira"><ac:parameter ac:name="key">PROJ-1</ac:parameter></ac:structured-macro>`
@@ -285,7 +326,7 @@ test('probeGliffy: shape summary; missing macro / missing pageId handled', async
   const out = await probeGliffy(kbConf(baseUrl), '551');
   assert.deepEqual(out, {
     probe: true, page: '551',
-    gliffy: { http: 200, jsonValid: true, hasStageObjects: true, objectCount: 5, labelCount: 4 },
+    gliffy: { http: 200, via: 'rest-exact', jsonValid: true, hasStageObjects: true, objectCount: 5, labelCount: 4 },
   });
   const none = await probeGliffy(kbConf(baseUrl), '552');
   assert.equal(none.note, 'no-gliffy-macro');

@@ -387,12 +387,12 @@ export function pageToMarkdown(page, baseUrl, out) {
 // async macro resolution (phase 1): gliffy attachments / jira-filter JQL
 // ---------------------------------------------------------------------------
 
-/** Raw (non-JSON) Confluence GET for attachment downloads. Error carries
- *  .status only — response bodies may contain intranet content and must never
- *  leak into degrade text or summaries. */
-async function confFetchRaw(cfg, pathAndQuery, fetchImpl) {
+/** Raw (non-JSON) Confluence GET of an absolute URL on the configured host.
+ *  Error carries .status only — response bodies may contain intranet content
+ *  and must never leak into degrade text or summaries. */
+async function confFetchUrl(cfg, url, fetchImpl) {
   const doFetch = fetchImpl || globalThis.fetch;
-  const res = await doFetch(cfg.baseUrl + pathAndQuery, {
+  const res = await doFetch(url, {
     headers: { Authorization: `Bearer ${cfg.pat}` },
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     redirect: 'follow',
@@ -403,6 +403,43 @@ async function confFetchRaw(cfg, pathAndQuery, fetchImpl) {
     throw err;
   }
   return res;
+}
+
+function confFetchRaw(cfg, pathAndQuery, fetchImpl) {
+  return confFetchUrl(cfg, cfg.baseUrl + pathAndQuery, fetchImpl);
+}
+
+/** Server-provided links are context-path-relative; make them absolute. */
+function absolutizeLink(cfg, link) {
+  if (/^https?:\/\//i.test(link)) return link;
+  return `${cfg.baseUrl}${link.startsWith('/') ? '' : '/'}${link}`;
+}
+
+/** Attachment download URL (real-env hardening 2026-08-04): the legacy
+ *  /download/attachments/<id>/<name> servlet 404s on some Server/DC
+ *  deployments (proxy rules, stored-name ≠ macro name). Resolve through the
+ *  REST child/attachment API first — _links.download is the server's own
+ *  canonical URL — with fallbacks: a same-extension listing match (the
+ *  macro's name param doesn't always equal the stored filename), then the
+ *  legacy servlet path. Returns { url, via } — via is value-free and feeds
+ *  the --probe diagnostic. */
+async function attachmentUrl(cfg, pageId, fileName, fetchImpl) {
+  const legacy = { url: `${cfg.baseUrl}/download/attachments/${pageId}/${encodeURIComponent(fileName)}`, via: 'legacy' };
+  try {
+    const base = `/rest/api/content/${encodeURIComponent(String(pageId))}/child/attachment`;
+    const exact = await confGet(cfg, `${base}?${new URLSearchParams({ filename: fileName, limit: '1' })}`, fetchImpl);
+    const hit = (exact.results || [])[0];
+    if (hit?._links?.download) return { url: absolutizeLink(cfg, hit._links.download), via: 'rest-exact' };
+    const dot = fileName.lastIndexOf('.');
+    const ext = dot > 0 ? fileName.slice(dot).toLowerCase() : '';
+    const wantBase = (dot > 0 ? fileName.slice(0, dot) : fileName).toLowerCase();
+    const list = await confGet(cfg, `${base}?${new URLSearchParams({ limit: '200' })}`, fetchImpl);
+    const sameExt = (list.results || []).filter((a) => String(a.title || '').toLowerCase().endsWith(ext));
+    const pick = sameExt.find((a) => String(a.title || '').toLowerCase().replace(/\.[^.]*$/, '') === wantBase)
+      || (sameExt.length === 1 ? sameExt[0] : null);
+    if (pick?._links?.download) return { url: absolutizeLink(cfg, pick._links.download), via: 'rest-list' };
+  } catch { /* REST lookup itself failed → the legacy path gives the real error */ }
+  return legacy;
 }
 
 /** .gliffy attachment JSON -> label strings, ordered top-to-bottom, left-to-
@@ -468,7 +505,7 @@ async function resolveGliffy(m, cfg, kbRoot, fetchImpl) {
     err.safe = true;
     throw err;
   }
-  const dl = (file) => confFetchRaw(cfg, `/download/attachments/${m.pageId}/${encodeURIComponent(file)}`, fetchImpl);
+  const dl = async (file) => confFetchUrl(cfg, (await attachmentUrl(cfg, m.pageId, file, fetchImpl)).url, fetchImpl);
   const text = await (await dl(`${base}.gliffy`)).text();
   const labels = parseGliffyLabels(text);
   // the PNG render is best-effort: a missing render must not kill the labels
@@ -572,7 +609,8 @@ export async function probeGliffy(kbConfig, pageId, { fetchImpl } = {}) {
   const base = name.replace(/\.(gliffy|png|svg|jpe?g)$/i, '');
   if (!base) return { probe: true, page: String(pageId), note: 'no-gliffy-macro' };
   try {
-    const text = await (await confFetchRaw(auth, `/download/attachments/${pageId}/${encodeURIComponent(`${base}.gliffy`)}`, fetchImpl)).text();
+    const resolved = await attachmentUrl(auth, pageId, `${base}.gliffy`, fetchImpl);
+    const text = await (await confFetchUrl(auth, resolved.url, fetchImpl)).text();
     let g;
     let jsonValid = true;
     try { g = JSON.parse(text); } catch { jsonValid = false; }
@@ -586,6 +624,7 @@ export async function probeGliffy(kbConfig, pageId, { fetchImpl } = {}) {
       page: String(pageId),
       gliffy: {
         http: 200,
+        via: resolved.via,
         jsonValid,
         hasStageObjects: Array.isArray(objects),
         objectCount: Array.isArray(objects) ? objects.length : null,
