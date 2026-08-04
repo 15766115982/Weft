@@ -1,6 +1,6 @@
 # Bug 0001: Governance does not detect version/duplicate conflicts across sources
 
-**Status**: open — deferred, design discussion required
+**Status**: open — design resolved (ADR-0008); awaiting implementation (plan: `docs/plans/0001-governance-conflict-detection.md`)
 **Reported**: 2026-08-04 (intranet testing)
 **Area**: governance service
 
@@ -58,3 +58,40 @@ applyTopicPage: auto:create-topic status=approved   ← no --candidate needed
   compare across distinct documents.
 - Existing tests for `applyTopicPage` cover the candidate-protection guards, not
   duplicate/version detection.
+
+## Resolution (design, 2026-08-05)
+
+Design resolved in **ADR-0008** (`docs/adr/0008-governance-conflict-detection-and-loser-archive.md`);
+implementation plan in **`docs/plans/0001-governance-conflict-detection.md`**.
+
+Summary of the agreed design:
+
+1. **Three categories** — exact duplicate (`content_hash` identical), similar version (title-based
+   pre-filter — same normalized title / title-token overlap / same de-versioned filename — + CJK-aware
+   body similarity), factual conflict with existing topic content (semantic). Detection scope is the
+   **whole KB** (new/ungoverned docs vs all existing, including approved), not just the current batch.
+   Governance layer only (acquisition untouched).
+2. **Enforcement** — exact duplicates auto-dedup at `apply-source` **without writing** a redundant source
+   page (the raw is tombstoned instead); similar/conflict groups force `candidate` fail-closed at
+   `apply-topic` (the LLM can no longer silently approve a fused topic). The semantic conflict check is a
+   mandatory governance-LLM step that writes the specific conflict points into `review_note`, backed by a
+   `semantic_check_required` output contract.
+3. **Adjudication** — the reviewer's loser source page is archived **and tombstoned** (default action, out
+   of retrieval, and not re-pended by the next `plan()`; `apply-source` refuses to revive it without
+   `--force`). Genuinely parallel documents are persisted as dismissals (`conflict-dismissals.json`) and
+   not re-flagged every run. `reject` becomes reject-and-restore: an overwritten topic reverts to its last
+   approved version from git, logging synchronously (non-git KBs fall back to plain reject + warning).
+4. **Retrieval** — unchanged in v1. The loser-archive + tombstone is the structural defence: retrieval
+   indexes all approved source pages independently, and archiving removes stale/wrong content from the
+   answer surface — irrevocably by routine governance runs.
+
+The three design questions in the section above are answered by this resolution: signal set = hash +
+pre-filter + Jaccard; scope = whole KB; enforcement = both `plan()` reporting a `conflicts` list and
+`apply-topic` forcing candidate fail-closed.
+
+**Review round (2026-08-05)**: an external review of ADR-0008 / plan / this doc raised 10 findings; all were
+verified against the code and confirmed, then incorporated. Key additions — tombstone suppression so an
+archived loser is not re-pended every run (P0-1); title-based pre-filter replacing the ineffective
+"same source" one (P0-2); persisted conflict-dismissals (P1-3); side-channel freshness fingerprint
+(P1-4); synchronous restore logging (P1-5); CJK-aware body similarity (P1-6); contract/CONTEXT revisions
+(P2-8). See `docs/plans/0001-governance-conflict-detection.md` §0 (review response), §5, §6.

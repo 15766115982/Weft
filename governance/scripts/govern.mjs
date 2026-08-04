@@ -1,21 +1,25 @@
 #!/usr/bin/env node
 // Governance service CLI. Usage:
 //   node govern.mjs plan --kb <path>
-//   node govern.mjs apply-source --kb <path> --raw <raw-relative-path> [--tags a,b,c]
+//   node govern.mjs apply-source --kb <path> --raw <raw-relative-path> [--tags a,b,c] [--force]
 //       (summary body via --body-file <path>, or stdin when omitted)
+//       --force revives a tombstoned raw (writes the page and clears the tombstone)
 //   node govern.mjs apply-topic --kb <path> --slug <slug> --title "T" [--sources raw/a.md,raw/b.md]
 //       [--aliases a,b] [--tags t1,t2] [--candidate] [--note "..."]
 //       (synthesis body via --body-file <path>, or stdin when omitted)
 //   node govern.mjs approve --kb <path> --page wiki/(sources|topics)/<name>.md
 //   node govern.mjs reject  --kb <path> --page wiki/(sources|topics)/<name>.md
+//       (rejects-and-restores the previous approved version when git history has one)
 //   node govern.mjs archive --kb <path> --page wiki/(sources|topics)/<name>.md [--note "..."]
+//       (archiving a source page also tombstones its raw)
+//   node govern.mjs dismiss-conflict --kb <path> --pair raw/a.md,raw/b.md --reason "..."
 //   node govern.mjs sweep   --kb <path>
 //   node govern.mjs merge-topic --kb <path> --from <slug> --to <slug> [--note "..."]
 //   node govern.mjs rebuild-index --kb <path>
 // stdout is always JSON (for Claude to parse).
 import fs from 'node:fs';
 import path from 'node:path';
-import { plan, applySourcePage, applyTopicPage, rebuildIndex, approvePage, rejectPage, archivePage, sweep, mergeTopics } from './lib/govern.mjs';
+import { plan, applySourcePage, applyTopicPage, rebuildIndex, approvePage, rejectPage, archivePage, sweep, mergeTopics, addDismissal } from './lib/govern.mjs';
 
 // Boolean flags take no value: `--flag` / `--flag true` / `--flag false` are accepted;
 // anything else is a caller mistake and must fail loudly instead of silently reading
@@ -77,7 +81,10 @@ try {
       // --tags omitted = keep existing tags; explicit --tags "" = clear
       const tags = args.tags === undefined ? undefined
         : String(args.tags).split(',').map(s => s.trim()).filter(Boolean);
-      out = applySourcePage(kbRoot, args.raw, summary, { tags });
+      out = applySourcePage(kbRoot, args.raw, summary, {
+        tags,
+        force: args.force === undefined ? false : boolFlag(args.force, '--force'),
+      });
       break;
     }
     case 'rebuild-index':
@@ -113,6 +120,13 @@ try {
       out = archivePage(kbRoot, args.page, { note: typeof args.note === 'string' ? args.note : '' });
       break;
     }
+    case 'dismiss-conflict': {
+      if (!args.pair || !args.reason) throw new Error('dismiss-conflict requires --pair raw/a.md,raw/b.md --reason "..."');
+      const raws = String(args.pair).split(',').map(s => s.trim()).filter(Boolean);
+      if (raws.length < 2) throw new Error('dismiss-conflict --pair requires at least two raw paths');
+      out = { action: 'dismiss-conflict', ...addDismissal(kbRoot, raws, String(args.reason)) };
+      break;
+    }
     case 'sweep':
       out = sweep(kbRoot);
       break;
@@ -122,7 +136,7 @@ try {
       break;
     }
     default:
-      console.error('Usage: node govern.mjs <plan|apply-source|apply-topic|approve|reject|archive|sweep|merge-topic|rebuild-index> --kb <path> [options]');
+      console.error('Usage: node govern.mjs <plan|apply-source|apply-topic|approve|reject|archive|dismiss-conflict|sweep|merge-topic|rebuild-index> --kb <path> [options]');
       process.exitCode = 64;
       break;
   }

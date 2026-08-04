@@ -23,7 +23,9 @@ assume cwd is some code repository**.
 #    backfills missing review log lines, archives rejected pages. Idempotent.
 node <skill-dir>/../../scripts/govern.mjs sweep --kb <kb-root>
 
-# 1. Diff scan: pending source pages, anomalies, orphaned pages, errors, review queue
+# 1. Diff scan: pending source pages, anomalies, orphaned pages, errors, review queue,
+#    conflicts (duplicate / similar-version / semantic-conflict groups), suppressed
+#    (tombstoned loser raws). Eight lists — every one must be processed or reported.
 node <skill-dir>/../../scripts/govern.mjs plan --kb <kb-root>
 
 # 2. For each item in pending:
@@ -47,9 +49,13 @@ node <skill-dir>/../../scripts/govern.mjs apply-topic \
   [--candidate --note "what conflicts with what"] \
   --body-file <scratch file with the synthesis>
 
-# 4. Review queue: process each candidate with the human (see the review section)
+# 4. Review queue: process each candidate with the human (see the review section).
+#    reject restores the previous approved version (git); archive of a source page
+#    also tombstones its raw; keep-both adjudication persists via dismiss-conflict:
 node <skill-dir>/../../scripts/govern.mjs approve --kb <kb-root> --page wiki/topics/<slug>.md
 node <skill-dir>/../../scripts/govern.mjs reject  --kb <kb-root> --page wiki/topics/<slug>.md
+node <skill-dir>/../../scripts/govern.mjs archive --kb <kb-root> --page wiki/sources/<name>.md --note "loser of conflict group X"
+node <skill-dir>/../../scripts/govern.mjs dismiss-conflict --kb <kb-root> --pair raw/<a>.md,raw/<b>.md --reason "parallel documents"
 #    Archive adjudication (approved pages only, e.g. orphans) — human decision first:
 node <skill-dir>/../../scripts/govern.mjs archive --kb <kb-root> --page wiki/sources/<name>.md --note "why"
 #    Topic merge — human decides which slug survives, the script rewrites backlinks,
@@ -105,6 +111,17 @@ frontmatter, path, provenance validation, and logging.
   approved page with a candidate drops it from retrieval until reviewed; the previous version
   is recoverable via the KB's Git history (and the viewer's diff view shows exactly what
   changed);
+- **Conflict fail-closed is structural**: the script forces `candidate` (ignoring a missing
+  `--candidate`) whenever any `--sources` raw sits inside a flagged group from `plan`'s
+  `conflicts` list (duplicate / similar-version), and logs `auto:dedup-topic` when a topic's
+  sources contain two byte-identical raws (it keeps one reference). You cannot silently
+  approve a fused-version topic — that is the bug 0001 fix;
+- **Mandatory conflict self-check (semantic)**: before synthesizing, read the new documents
+  AND the existing topic pages that the `semantic_check_required` output of `apply-topic`
+  lists (also any title-overlapping topic). Compare the new content against **existing topic
+  content** line by line; on a factual contradiction write the specific conflict points into
+  `--note` and pass `--candidate`. This is mandatory even for documents that are NOT
+  mechanically similar — the mechanical signal only ever prompts, it never substitutes;
 - **Candidate protection is enforced by the script**: re-applying a page that is still
   candidate keeps it candidate even without `--candidate` — approval only ever comes from
   `approve` or the viewer. If apply-topic, merge-topic or archive refuses with "unlogged
@@ -131,14 +148,28 @@ human, either:
   `status` and writes no log — the next run's `sweep` backfills it. **Do not run governance
   mutations while the viewer is open** (single-operator discipline).
 
-`reject` sets the transient `rejected` status; the next `sweep` moves the page into
-`wiki/archive/` and flips it to `archived`. Archiving an **approved** page (e.g. an orphan
-from `orphaned_pages`) requires an explicit human decision in-session; only then run
-`archive`.
+`reject` is **reject-and-restore**: when the candidate overwrote an approved topic, the script
+reverts the page to its most recent git-committed `approved` version and logs the rejection
+synchronously (so the next `sweep` cannot mis-record it as an approval). A rejected topic that
+was never approved (or a non-git KB) falls back to the transient `rejected` status; the next
+`sweep` moves it into `wiki/archive/` and flips it to `archived`.
+
+Conflict adjudication of a `conflicts` group: the reviewer decides which document is the
+truth, then the **loser's source page is archived** — `archive wiki/sources/<loser>.md` — which
+moves it out of retrieval **and tombstones its raw** (the next `plan` will not re-pend it, and
+`apply-source` refuses to revive it without `--force`). **After archiving, check the next
+`plan`'s `dangling_links`**: archive does not rewrite backlinks pointing at the loser — fix
+them by hand or `merge-topic`. When the two documents are genuinely parallel (not versions of
+one document), do NOT archive: run
+`dismiss-conflict --pair raw/<a>.md,raw/<b>.md --reason "parallel documents"` — the pair is
+persisted and never re-flagged.
+
+Archiving an **approved** page for other reasons (e.g. an orphan from `orphaned_pages`) is an
+explicit human decision in-session; only then run `archive`.
 
 ## Interpreting output and reporting
 
-`plan` returns six lists; **every list must be either processed or reported — none may be
+`plan` returns eight lists; **every list must be either processed or reported — none may be
 silently skipped**:
 
 - `pending` (reason: new / stale) — normal governance targets; run each through apply-source;
@@ -159,12 +190,28 @@ silently skipped**:
 - `review_queue` — candidate pages awaiting human review; process per the section above;
 - `dangling_links` — wikilinks pointing at pages that no longer exist (after hand edits;
   `merge-topic` rewrites backlinks itself, so merges never produce these). Report and fix
-  by hand-editing the linking page or restoring the target.
+  by hand-editing the linking page or restoring the target;
+- **`conflicts` — cross-document conflict groups over the whole KB**: `duplicate` (identical
+  `content_hash` — auto-deduped at apply-source, listed for the record), `similar`
+  (same title/filename family + high body similarity — a version pair), plus provenance for
+  each raw (its source page and referencing topics). Every non-dismissed group must be
+  adjudicated with the human: archive the loser source page, or `dismiss-conflict` when the
+  pair is genuinely parallel. Groups already dismissed carry `dismissed: true` (audit trail);
+- **`suppressed` — tombstoned loser raws that `plan` will not re-pend** (reason:
+  auto-dedup / loser-archive). Report as already-adjudicated; if a suppressed raw must come
+  back, apply-source it with `--force` (which clears the tombstone on success). Dangling
+  tombstones whose raw has vanished are auto-cleaned and listed here.
 
 Also report `sweep`'s output at the start: N flips backfilled, M rejected pages archived.
 
 After governance completes, report to the user: N pages created, M pages updated, X anomalies,
-Y errors, Z orphaned, Q candidates reviewed.
+Y errors, Z orphaned, Q candidates reviewed, R conflict groups adjudicated (K archived, K' dismissed).
+
+Optional standing instructions: a user-written `GOVERNANCE.md` at the KB root (see
+`schema/governance.md`) is injected into every governance prompt by the portal — e.g. a
+preference for one authority per subject that the mandatory conflict self-check should honor.
+It is user-authored and agent-unmodifiable; treat it as binding domain guidance, not a
+suggestion.
 
 `apply-source`'s `--tags` semantics: **omitted = keep existing tags; explicit `--tags ""` =
 clear; `--tags a,b` = overwrite**. When re-governing a stale page, omitting is usually right.

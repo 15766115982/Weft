@@ -30,7 +30,10 @@ import { saveWikiEditJob } from './lib/edit.mjs';
 import { saveKbFileJob } from './lib/kbfile.mjs';
 import { judge, judgeNames } from './lib/judge.mjs';
 import { feedbackJob, readFeedback } from './lib/feedback.mjs';
-import { plan, sourcePageRelPath } from '../governance/scripts/lib/govern.mjs';
+import {
+  plan, sourcePageRelPath, rejectPage as governReject, archivePage as governArchive,
+  addDismissal, readConflicts,
+} from '../governance/scripts/lib/govern.mjs';
 import {
   UPLOAD_MAX, uploadJob, pullJob, inboxDeleteJob, rawDeleteJob, rawMoveJob,
   authCheck, probeCheck, sourceFreshness, listInbox,
@@ -268,9 +271,15 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
           res.writeHead(200, { 'content-type': assetMime(rel), 'cache-control': 'no-cache' });
           return fs.createReadStream(abs).pipe(res);
         }
-        // I5 plan-as-preview: the full six lists (paths + titles + reasons) —
+        // I5 plan-as-preview: the full lists (paths + titles + reasons) —
         // health() serves counts to the dashboard; this serves the confirm page.
         if (url.pathname === '/api/plan') return json(res, 200, plan(kb));
+        // P3-4: the conflicts side-channel the review queue's F4 banner and the
+        // keep-both/archive-source adjudication buttons read.
+        if (url.pathname === '/api/conflicts') {
+          const state = readConflicts(kb);
+          return json(res, 200, state || { generated_at: null, fingerprint: null, groups: [] });
+        }
         // J9: recent feedback votes (the 👎 panel in search)
         if (url.pathname === '/api/feedback') {
           return json(res, 200, { entries: readFeedback(kb, { vote: url.searchParams.get('vote') || undefined }) });
@@ -311,9 +320,9 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
         if (refusal) return json(res, refusal.code, { error: refusal.error });
 
         if (url.pathname === '/api/review') {
-          const { path: p, action, kb: kbName } = JSON.parse(await readBody(req) || '{}');
-          if (action !== 'approve' && action !== 'reject') {
-            return json(res, 400, { error: `action must be approve|reject: ${action}` });
+          const { path: p, action, kb: kbName, raws, reason } = JSON.parse(await readBody(req) || '{}');
+          if (!['approve', 'reject', 'archive-source', 'dismiss-conflict'].includes(action)) {
+            return json(res, 400, { error: `action must be approve|reject|archive-source|dismiss-conflict: ${action}` });
           }
           const kb = registry.resolve(kbName).path;
           const rel = normalizeWikiRel(p || '');
@@ -321,10 +330,28 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
           if (!fs.existsSync(abs)) return json(res, 404, { error: `page does not exist: ${rel}` });
           const job = await jobs.waitFor(jobs.enqueue(kb, {
             type: 'review', label: `${action} ${rel}`,
-            run: async () => flipStatus(abs, 'candidate', action === 'approve' ? 'approved' : 'rejected'),
+            run: () => {
+              if (action === 'approve') return flipStatus(abs, 'candidate', 'approved');
+              // reject is reject-and-restore (plan 0001 §3.1.5): revert the page to its
+              // most recent git-committed approved version and log synchronously, so the
+              // sweep backfill cannot mis-record the rejection as an approval (P1-5).
+              // This breaks the "viewer writes no log" convention deliberately — restore
+              // is a content mutation, it belongs on the ledger immediately.
+              if (action === 'reject') return governReject(kb, rel, { via: 'portal' });
+              // archive the LOSER source page (approved only) — the raw gets tombstoned.
+              if (action === 'archive-source') return governArchive(kb, rel, { note: 'portal adjudication (loser)' });
+              // keep-both: persist the pair as parallel documents; never re-flagged.
+              if (action === 'dismiss-conflict') {
+                if (!Array.isArray(raws) || raws.length < 2) {
+                  throw new Error('dismiss-conflict requires raws[] (at least two raw paths)');
+                }
+                return { action: 'dismiss-conflict', ...addDismissal(kb, raws, String(reason || 'parallel documents (kept both)')) };
+              }
+              throw new Error(`unsupported review action: ${action}`);
+            },
           }));
           if (job.status === 'failed') throw new Error(job.error);
-          return json(res, 200, { page: rel, status: job.result.to });
+          return json(res, 200, { page: rel, status: job.result.to ?? job.result.status, result: job.result });
         }
 
         // C5 batch review (ruling 2026-08-03): one queued job, per-page flips,

@@ -207,9 +207,12 @@ destructive ones, and those requiring business adjudication, go to the candidate
 What is stable is the **type system and entry contract**, not the topic tree (the topic tree's
 language, granularity, etc. are defined later by the governance conventions):
 
-- **`wiki/sources/`** — source summary pages. **1:1 mechanical mapping** with `raw/`
-  documents — exactly one per raw document — with source pointers in frontmatter. Both
-  creation and source-following updates are low-risk automatic operations.
+- **`wiki/sources/`** — source summary pages. **1:1 with `raw/` documents by default** —
+  exactly one per raw document, with source pointers in frontmatter. Both creation and
+  source-following updates are low-risk automatic operations. The 1:1 has two documented
+  exceptions: **auto-dedup** (an exact duplicate of a raw that already has an approved source
+  page is never written — the redundant raw is tombstoned) and **loser-archive** (an
+  adjudicated loser source page is archived and its raw tombstoned).
 - **`wiki/topics/`** — topic synthesis pages. 1:N cross-source fusion products; the core value
   of governance; frontmatter carries a `sources:` list tracing provenance. The topic tree
   emerges with content; duplicate topic pages are converged through a merge mechanism (merging
@@ -228,9 +231,21 @@ language, granularity, etc. are defined later by the governance conventions):
   version. **Same-source version confusion is resolved at the acquisition layer** (the source
   system is the authority on its own versions); historical versions are carried by the whole
   knowledge base as a **Git repository** — no in-directory snapshots.
-- **Cross-source version confusion is resolved at the governance layer**: identical content
-  hash → automatic dedup; high similarity without identity → high-risk signal, enters
-  candidate status for human adjudication.
+- **Cross-source version confusion is resolved at the governance layer** (ADR-0008) via three
+  canonical categories, detected over the whole KB: **exact duplicate** (identical
+  `content_hash`, only when both sides carry it) → auto-dedup without writing a redundant
+  source page; **similar version** (same title/filename family + CJK-aware body-similarity
+  confirmation) → forced `candidate` (fail-closed) at apply-topic so a fused topic can never
+  be silently approved; **factual conflict** with existing topic content → semantic
+  self-check (mandatory governance-LLM step, prompted by `semantic_check_required`).
+- **Adjudication memory** (`.kb/govern/`): an archived loser's raw is **tombstoned**
+  (`source-tombstones.json`) — plan does not re-pend it, apply-source refuses to revive it
+  without `--force`; a "parallel documents" pair is **dismissed**
+  (`conflict-dismissals.json`) and never re-flagged; `plan` writes the **conflicts**
+  side-channel (`conflicts.json`) with a raw-set freshness fingerprint that `apply-topic`
+  verifies, degrading to an in-topic check on a stale/missing one. `reject` is
+  **reject-and-restore**: a candidate that overwrote an approved topic reverts to its last
+  git-committed approved version, logged synchronously.
 - `raw/` is organized into directories by source system, not by project (project attribution
   is a curation judgment, a governance-layer responsibility).
 

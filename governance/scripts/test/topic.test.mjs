@@ -17,7 +17,7 @@ function makeKb() {
     const fm = buildFrontmatter({
       source: 'local', source_id: name, source_url: `file:///inbox/${name}.md`,
       source_version: '2026-07-01T00:00:00Z', pulled_at: '2026-07-01T00:00:00Z',
-      content_hash: 'sha256:x', title, connector: 'local@1.0.0',
+      content_hash: `sha256:${name}`, title, connector: 'local@1.0.0',
     });
     fs.writeFileSync(path.join(kbRoot, 'raw', 'local', `${name}.md`), fm + '\nBody text.\n', 'utf8');
     return `raw/local/${name}.md`;

@@ -1,10 +1,18 @@
-// Governance v1 core: plan (diff scan), applySourcePage (1:1 summary page write), rebuildIndex.
-// Contract: wiki/sources/ maps 1:1 to raw/; source pages are always approved (mechanical mapping, low-risk auto);
-// index.md is rebuilt after every governance run; log actor=govern.
+// Governance v1 core: plan (diff scan + conflict detection), applySourcePage,
+// applyTopicPage, review (approve / reject-with-restore / archive), sweep, merge,
+// rebuild-index. Log actor=govern.
+// Contract: wiki/sources/ maps 1:1 to raw/ BY DEFAULT — adjudicated loser-archive
+// and exact-dedup are the documented exceptions (ADR-0008 / plan 0001); source pages
+// are normally approved but may be archived (with the raw tombstoned). `.kb/govern/`
+// holds the governance service's adjudication memory: source-tombstones.json,
+// conflict-dismissals.json, conflicts.json (plan 0001 §1).
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { buildFrontmatter, parseFrontmatter } from './frontmatter.mjs';
 import { flipStatus, readStatus, normalizeWikiRel } from './statusflip.mjs';
+import { findGroups, tokenize, titleTokensOverlap } from './similarity.mjs';
 
 function appendLog(kbRoot, actor, action, target, note = '') {
   const line = `## [${new Date().toISOString()}] ${actor} | ${action} | ${target}${note ? ` | ${note}` : ''}\n`;
@@ -19,6 +27,116 @@ function appendLog(kbRoot, actor, action, target, note = '') {
  * same pending-review semantics, same reading caliber. */
 function isPendingCandidateAction(action) {
   return action.startsWith('govern | candidate:') || action.startsWith('portal | candidate:');
+}
+
+/* ---------------- adjudication-memory state files (.kb/govern/, plan 0001 §1) ----------------
+ * Three side-channel files turn "adjudicated" into system memory:
+ *   source-tombstones.json     archived/auto-deduped loser raws → not re-pended, not revived
+ *                               without --force (P0-1);
+ *   conflict-dismissals.json   "parallel documents" pairs → not re-flagged every run (P1-3);
+ *   conflicts.json             plan's per-run detection output + raw-set freshness fingerprint
+ *                               (P1-4), consumed by apply-topic.
+ * The directory is governance-owned; portal owns .kb/ui/, retrieval owns .kb/index.sqlite
+ * (contract §1 / plan 0001 §3.3). */
+
+function statePath(kbRoot, name) {
+  return path.join(kbRoot, '.kb', 'govern', name);
+}
+
+function readJsonFile(abs, fallback) {
+  try { return JSON.parse(fs.readFileSync(abs, 'utf8')); } catch { return fallback; }
+}
+
+function writeJsonFile(abs, data) {
+  fs.mkdirSync(path.dirname(abs), { recursive: true });
+  fs.writeFileSync(abs, JSON.stringify(data, null, 2) + '\n', 'utf8');
+}
+
+/** map: rawRel -> { tombstoned_at, reason, page } */
+export function readTombstones(kbRoot) {
+  return readJsonFile(statePath(kbRoot, 'source-tombstones.json'), {});
+}
+
+export function writeTombstones(kbRoot, map) {
+  writeJsonFile(statePath(kbRoot, 'source-tombstones.json'), map);
+}
+
+export function addTombstone(kbRoot, rawRel, { reason, page }) {
+  const map = readTombstones(kbRoot);
+  map[rawRel] = { tombstoned_at: new Date().toISOString(), reason, page };
+  writeTombstones(kbRoot, map);
+}
+
+export function removeTombstone(kbRoot, rawRel) {
+  const map = readTombstones(kbRoot);
+  if (rawRel in map) {
+    delete map[rawRel];
+    writeTombstones(kbRoot, map);
+  }
+}
+
+/** [{ raws: [rel...] (sorted), reason, dismissed_at }] */
+export function readDismissals(kbRoot) {
+  return readJsonFile(statePath(kbRoot, 'conflict-dismissals.json'), []);
+}
+
+export function writeDismissals(kbRoot, list) {
+  writeJsonFile(statePath(kbRoot, 'conflict-dismissals.json'), list);
+}
+
+export function addDismissal(kbRoot, rawRels, reason) {
+  const raws = [...new Set(rawRels)].sort();
+  if (raws.length < 2) throw new Error('dismiss-conflict requires at least two distinct raw paths');
+  for (const r of raws) normalizeRawRel(r);
+  const list = readDismissals(kbRoot);
+  const key = [...raws].join('\x00');
+  if (!list.some((d) => [...d.raws].sort().join('\x00') === key)) {
+    list.push({ raws, reason, dismissed_at: new Date().toISOString() });
+    writeDismissals(kbRoot, list);
+  }
+  return { raws, reason };
+}
+
+/** Is this group's raw set already adjudicated as parallel (dismissed)? */
+export function isDismissedGroup(kbRoot, groupRaws) {
+  const key = [...groupRaws].sort().join('\x00');
+  return readDismissals(kbRoot).some((d) => [...d.raws].sort().join('\x00') === key);
+}
+
+/* ---------- raw-set freshness fingerprint (P1-4) ---------- */
+
+function hashText(text) {
+  return `sha256:${createHash('sha256').update(text).digest('hex')}`;
+}
+
+/** Walk raw/ and map rel -> content_hash, falling back to a hash of the raw file
+ *  text for raws whose frontmatter omits content_hash (not a required field, §2.2).
+ *  The fallback keeps a changed raw detectable even without a stored hash. */
+function currentRawHashes(kbRoot) {
+  const map = {};
+  for (const abs of walk(path.join(kbRoot, 'raw'))) {
+    const rel = path.relative(kbRoot, abs).replace(/\\/g, '/');
+    const text = fs.readFileSync(abs, 'utf8');
+    const { fields } = parseFrontmatter(text);
+    map[rel] = fields.content_hash || hashText(text);
+  }
+  return map;
+}
+
+/** Fingerprint = sha256 over the sorted (rel, hash) pairs. Any new/removed/changed
+ *  raw flips it, so apply-topic can detect a stale side-channel. */
+function fingerprintOf(rawHashes) {
+  const entries = Object.entries(rawHashes).map(([rel, h]) => `${rel}\t${h}`).sort();
+  return createHash('sha256').update(entries.join('\n')).digest('hex');
+}
+
+/** { generated_at, fingerprint, raw_hashes, groups } or null when absent/unparseable. */
+export function readConflicts(kbRoot) {
+  return readJsonFile(statePath(kbRoot, 'conflicts.json'), null);
+}
+
+export function writeConflicts(kbRoot, data) {
+  writeJsonFile(statePath(kbRoot, 'conflicts.json'), data);
 }
 
 function* walk(dir) {
@@ -81,12 +199,18 @@ function normalizeRawRel(rawRel) {
  * review_queue: wiki pages with status candidate awaiting human review (contract §4)
  */
 export function plan(kbRoot) {
-  const pending = [], anomalies = [], errors = [], reviewQueue = [];
+  const pending = [], anomalies = [], errors = [], reviewQueue = [], suppressed = [];
   const raws = new Map();
+  const rawBodies = new Map();      // rel -> { body, filename } (for similarity)
+  const rawHashes = {};             // rel -> content_hash || text-hash fallback (fingerprint)
+  const tombstones = readTombstones(kbRoot);
   for (const abs of walk(path.join(kbRoot, 'raw'))) {
     const rel = path.relative(kbRoot, abs).replace(/\\/g, '/');
-    const { fields } = readDoc(abs);
+    const text = fs.readFileSync(abs, 'utf8');
+    const { fields, body } = parseFrontmatter(text);
     raws.set(rel, fields);
+    rawBodies.set(rel, { body, filename: path.basename(abs) });
+    rawHashes[rel] = fields.content_hash || hashText(text);
 
     const missing = missingRawFields(fields);
     if (missing.length) {
@@ -98,6 +222,16 @@ export function plan(kbRoot) {
       pageRel = sourcePageRelPath(fields).replace(/\\/g, '/');
     } catch (err) {
       errors.push({ raw: rel, error: err.message });
+      continue;
+    }
+    // Tombstone suppression (P0-1): an archived/auto-deduped loser raw is not
+    // re-pended by the next plan() — visible in `suppressed`, never silent.
+    const tomb = tombstones[rel];
+    if (tomb) {
+      suppressed.push({
+        raw: rel, page: pageRel, reason: 'tombstoned',
+        detail: tomb.reason, tombstoned_at: tomb.tombstoned_at, archived_page: tomb.page,
+      });
       continue;
     }
     const pageAbs = path.join(kbRoot, pageRel);
@@ -122,12 +256,17 @@ export function plan(kbRoot) {
     }
   }
   // Topic pages: every provenance entry is re-checked, not only newly added ones —
-  // a raw deleted later (e.g. acquire --prune) leaves dangling provenance otherwise
+  // a raw deleted later (e.g. acquire --prune) leaves dangling provenance otherwise.
+  // topicsBySource (raw rel -> topic page rels) feeds conflict-group provenance.
+  const topicsBySource = new Map();
   for (const abs of walk(path.join(kbRoot, 'wiki', 'topics'))) {
     const rel = path.relative(kbRoot, abs).replace(/\\/g, '/');
     const { fields } = readDoc(abs);
     for (const ref of Array.isArray(fields.sources) ? fields.sources : []) {
       if (!raws.has(ref)) orphanedPages.push({ page: rel, missing_raw: ref, title: fields.title });
+      const list = topicsBySource.get(ref) ?? [];
+      list.push(rel);
+      topicsBySource.set(ref, list);
     }
   }
   const known = new Set();   // wikilink targets: 'topics/x', 'sources/x', and bare slugs
@@ -165,18 +304,105 @@ export function plan(kbRoot) {
       }
     }
   }
+  // Dangling tombstones: a raw pruned out of raw/ (e.g. acquire --prune) leaves its
+  // tombstone as a dangling record — clean it up, but keep it visible (plan 0001 §5).
+  let tombstonesCleaned = 0;
+  for (const rel of Object.keys(tombstones)) {
+    if (!raws.has(rel)) {
+      delete tombstones[rel];
+      suppressed.push({ raw: rel, reason: 'dangling-tombstone (cleaned; raw no longer present)' });
+      tombstonesCleaned++;
+    }
+  }
+  if (tombstonesCleaned) writeTombstones(kbRoot, tombstones);
+
+  // Conflict detection over the whole KB (plan 0001 §2): every raw in raw/ is in the
+  // comparison space (pending + imported-but-ungoverned + governed). Orphan pages
+  // (raw vanished) are not — their raw is outside the space; source-page summaries
+  // are not — they are LLM distillations that would score near-zero anyway (§2.1).
+  // Tombstoned raws are also excluded: they are adjudicated away (auto-dedup /
+  // loser-archive), so a group that has converged to the surviving copy must not
+  // keep flagging it every plan (the survivor is visible via `suppressed` instead).
+  const rawDocs = [...raws.entries()]
+    .filter(([rel]) => !tombstones[rel])
+    .map(([rel, fields]) => ({
+      rel,
+      title: fields.title,
+      filename: rawBodies.get(rel)?.filename ?? '',
+      body: rawBodies.get(rel)?.body ?? '',
+      content_hash: fields.content_hash || undefined,
+    }));
+  const { groups: conflictGroups, warnings: conflictWarnings } = findGroups(rawDocs);
+
+  // Dismissed pairs are still reported (audit-visible) but marked so apply-topic
+  // skips them — "parallel documents" is a persisted adjudication (P1-3).
+  const dismissedKeys = new Set(readDismissals(kbRoot).map((d) => [...d.raws].sort().join('\x00')));
+  const conflicts = conflictGroups.map((g) => {
+    const provenance = {};
+    for (const rel of g.raws) {
+      const fields = raws.get(rel);
+      let page = null;
+      if (fields && fields.source && fields.source_id) {
+        try { page = sourcePageRelPath(fields).replace(/\\/g, '/'); } catch { /* report-only */ }
+      }
+      provenance[rel] = { page, topics: topicsBySource.get(rel) ?? [] };
+    }
+    return { ...g, dismissed: dismissedKeys.has([...g.raws].sort().join('\x00')), provenance };
+  });
+
+  // Idempotent side-channel: recomputed from scratch every run, so a re-run never
+  // duplicates groups. apply-topic reads it and verifies the fingerprint (P1-4).
+  writeConflicts(kbRoot, {
+    generated_at: new Date().toISOString(),
+    fingerprint: fingerprintOf(rawHashes),
+    raw_hashes: rawHashes,
+    groups: conflicts,
+  });
+
   reviewQueue.sort((a, b) => a.page.localeCompare(b.page));
-  return { pending, anomalies, orphaned_pages: orphanedPages, errors, review_queue: reviewQueue, dangling_links: dangling };
+  return {
+    pending, anomalies, orphaned_pages: orphanedPages, errors, review_queue: reviewQueue,
+    dangling_links: dangling, conflicts, suppressed,
+    conflicts_warnings: conflictWarnings, tombstones_cleaned: tombstonesCleaned,
+  };
+}
+
+/** Another raw with the same content_hash that already has an approved source page
+ *  (the surviving copy of an exact duplicate). Raw-layer comparison — the source
+ *  page's stored content_hash could have been hand-edited (P3-3). Returns
+ *  { raw, page } or null. Null when both sides lack content_hash (§2.2: only
+ *  present-hash pairs are ever compared; null == null is never a duplicate). */
+function findApprovedDuplicateRaw(kbRoot, rawRel, hash) {
+  for (const abs of walk(path.join(kbRoot, 'raw'))) {
+    const rel = path.relative(kbRoot, abs).replace(/\\/g, '/');
+    if (rel === rawRel) continue;
+    const { fields: f } = readDoc(abs);
+    if (!f.content_hash || f.content_hash !== hash) continue;
+    let pageRel;
+    try { pageRel = sourcePageRelPath(f).replace(/\\/g, '/'); } catch { continue; }
+    const pageAbs = path.join(kbRoot, pageRel);
+    if (fs.existsSync(pageAbs) && readStatus(pageAbs) === 'approved') {
+      return { raw: rel, page: pageRel };
+    }
+  }
+  return null;
 }
 
 /**
  * Write one source summary page. The summary body is supplied by the caller (Claude);
- * the script mechanically generates the frontmatter and validates it. Source pages are always
- * approved (contract §4: 1:1 mechanical mapping is a low-risk automatic operation).
- * When tags is omitted the existing value is kept (same treatment as created_at); an explicit
- * empty array clears it.
+ * the script mechanically generates the frontmatter and validates it. Source pages are
+ * normally approved (contract §4: 1:1 mechanical mapping is a low-risk automatic
+ * operation), with two exceptions (ADR-0008 / plan 0001 §3.1.3):
+ *  - an exact duplicate of a raw that already has an approved source page is NOT
+ *    written — the redundant raw is tombstoned and logged `auto:dedup-source`
+ *    (target = the surviving page, so every log line still names a page path);
+ *  - a tombstoned raw is refused outright — only `--force` revives it, and a
+ *    successful revive clears the tombstone (page + tombstone coexistence is an
+ *    inconsistent state).
+ * When tags is omitted the existing value is kept (same treatment as created_at); an
+ * explicit empty array clears it.
  */
-export function applySourcePage(kbRoot, rawRelInput, summaryBody, { tags } = {}) {
+export function applySourcePage(kbRoot, rawRelInput, summaryBody, { tags, force = false } = {}) {
   const rawRel = normalizeRawRel(rawRelInput);
   const rawAbs = path.join(kbRoot, rawRel);
   if (!fs.existsSync(rawAbs)) throw new Error(`raw doc does not exist: ${rawRel}`);
@@ -186,6 +412,25 @@ export function applySourcePage(kbRoot, rawRelInput, summaryBody, { tags } = {})
   const { fields } = readDoc(rawAbs);
   const missing = missingRawFields(fields);
   if (missing.length) throw new Error(`raw doc missing contract fields ${missing.join(', ')}: ${rawRel}`);
+
+  // Tombstone gate: an archived/auto-deduped loser raw is not revived silently.
+  const tombstones = readTombstones(kbRoot);
+  if (tombstones[rawRel] && !force) {
+    throw new Error(`raw is tombstoned (${tombstones[rawRel].reason}); use --force to revive: ${rawRel}`);
+  }
+
+  // Exact-duplicate auto-dedup: write NO page; tombstone this raw and log against
+  // the surviving page (P3-1/P3-3). Both-new same-batch duplicates (neither side
+  // approved yet) fall through — the first apply-source writes, the second dedups.
+  if (!force && fields.content_hash) {
+    const dup = findApprovedDuplicateRaw(kbRoot, rawRel, fields.content_hash);
+    if (dup) {
+      addTombstone(kbRoot, rawRel, { reason: 'auto-dedup', page: dup.page });
+      appendLog(kbRoot, 'govern', 'auto:dedup-source', dup.page,
+        `redundant ${rawRel} (identical content_hash to ${dup.raw})`);
+      return { action: 'auto:dedup-source', page: dup.page, raw: rawRel, note: `duplicate of ${dup.raw}` };
+    }
+  }
 
   const pageRel = sourcePageRelPath(fields);
   const pageAbs = path.join(kbRoot, pageRel);
@@ -207,6 +452,9 @@ export function applySourcePage(kbRoot, rawRelInput, summaryBody, { tags } = {})
   });
   fs.mkdirSync(path.dirname(pageAbs), { recursive: true });
   fs.writeFileSync(pageAbs, fm + '\n' + body + '\n', 'utf8');
+  // --force revive: a successful write clears the tombstone (avoid the
+  // "page exists + tombstone exists" inconsistent state).
+  if (tombstones[rawRel]) removeTombstone(kbRoot, rawRel);
   const action = existed ? 'auto:update-source' : 'auto:create-source';
   appendLog(kbRoot, 'govern', action, pageRel.replace(/\\/g, '/'), `from ${rawRel}`);
   return { action, page: pageRel.replace(/\\/g, '/') };
@@ -265,6 +513,22 @@ function assertNoUnloggedFlip(kbRoot, pageRel, currentStatus) {
   }
 }
 
+/** content_hash of a raw doc's frontmatter, or null when absent (not required, §2.2). */
+function readContentHash(kbRoot, rawRel) {
+  const abs = path.join(kbRoot, rawRel);
+  if (!fs.existsSync(abs)) return null;
+  return readDoc(abs).fields.content_hash || null;
+}
+
+/** Does this raw already have an approved source page (the survivor of an exact dup)? */
+function sourcePageApproved(kbRoot, rawRel) {
+  try {
+    const pageRel = sourcePageRelPath(readDoc(path.join(kbRoot, rawRel)).fields).replace(/\\/g, '/');
+    const abs = path.join(kbRoot, pageRel);
+    return fs.existsSync(abs) && readStatus(abs) === 'approved';
+  } catch { return false; }
+}
+
 /**
  * Write one topic synthesis page (contract §3.3). The synthesis body is supplied by the
  * caller (Claude); the script mechanically validates and generates the frontmatter.
@@ -309,11 +573,133 @@ export function applyTopicPage(kbRoot, { slug, title, sources, aliases, tags, ca
     if (!fs.existsSync(path.join(kbRoot, rel))) throw new Error(`topic source does not exist: ${rel}`);
   }
   const oldSources = Array.isArray(old.sources) ? old.sources : [];
-  const mergedSources = [...new Set([...oldSources, ...newSources.map((s) => normalizeRawRel(s))])].sort();
+  let mergedSources = [...new Set([...oldSources, ...newSources.map((s) => normalizeRawRel(s))])].sort();
   if (!mergedSources.length) throw new Error('apply-topic requires --sources (no existing sources to keep)');
 
+  // Exact-duplicate collapse within the topic's own sources (§3.1.4): two raw paths
+  // with identical content_hash reference the same document. Converge on one — an
+  // already-referenced raw with an approved source page when there is one, else the
+  // lexicographically first. Logs `auto:dedup-topic` so the collapse is auditable.
+  const collapseLog = [];
+  {
+    const byHash = new Map();
+    for (const rel of mergedSources) {
+      const h = readContentHash(kbRoot, rel);
+      if (!h) continue;
+      const list = byHash.get(h) ?? [];
+      list.push(rel);
+      byHash.set(h, list);
+    }
+    for (const raws of byHash.values()) {
+      if (raws.length < 2) continue;
+      const preferred = raws.filter((r) => oldSources.includes(r) && sourcePageApproved(kbRoot, r)).sort()[0]
+        ?? [...raws].sort()[0];
+      for (const r of raws) {
+        if (r !== preferred) {
+          collapseLog.push(`${r} into ${preferred}`);
+          mergedSources = mergedSources.filter((x) => x !== r);
+        }
+      }
+    }
+    if (collapseLog.length) {
+      appendLog(kbRoot, 'govern', 'auto:dedup-topic', pageRelPosix, `collapsed ${collapseLog.join('; ')}`);
+    }
+  }
+
+  // --- conflict fail-closed gate (plan §3.1.4) ---
+  // Read the plan-produced side-channel and verify its raw-set fingerprint. A missing
+  // OR stale side-channel degrades identically — stale data is NOT trusted — to an
+  // in-topic pairwise check, and both warn. Fingerprint recompute walks all raws
+  // (O(M×N) across M apply-topic runs); acceptable for typical KBs. (A stat-level
+  // mtime/size variant could lean on the attached raw_hashes list; a content-hash
+  // recompute stays exact.)
+  const conflictsState = readConflicts(kbRoot);
+  let warning = null;
+  const flaggedRaws = new Set(); // raws inside non-dismissed flagged groups
+  if (!conflictsState || !Array.isArray(conflictsState.groups)) {
+    warning = 'conflicts side-channel missing, degraded to in-topic check';
+  } else if (fingerprintOf(currentRawHashes(kbRoot)) !== conflictsState.fingerprint) {
+    warning = 'conflicts side-channel stale, degraded to in-topic check';
+  } else {
+    const tombstones = readTombstones(kbRoot);
+    for (const g of conflictsState.groups) {
+      // Skip dismissed groups. The side-channel's baked-in dismissed flag can be
+      // STALE — a dismissal written after the last plan() is not reflected until
+      // the next plan. Consulting conflict-dismissals.json directly closes that
+      // window (a dismissed pair must not force candidate in the interim).
+      if (g.dismissed || isDismissedGroup(kbRoot, g.raws)) continue;
+      // A group whose non-tombstoned members have converged to fewer than two is
+      // already resolved (auto-dedup / loser-archive wrote a tombstone). The
+      // survivor must not keep being forced to candidate — even while the stale
+      // side-channel still lists the whole group.
+      if (g.raws.filter((r) => !tombstones[r]).length < 2) continue;
+      for (const r of g.raws) flaggedRaws.add(r);
+    }
+  }
+  if (warning) {
+    // Degraded fallback: pairwise similarity among THIS topic's sources. Only similar
+    // groups matter here — exact-duplicate pairs among sources were collapsed above.
+    const srcDocs = mergedSources.map((rel) => {
+      const { fields, body } = readDoc(path.join(kbRoot, rel));
+      return { rel, title: fields.title, filename: path.basename(rel), body, content_hash: fields.content_hash || undefined };
+    });
+    const tombstones = readTombstones(kbRoot);
+    for (const g of findGroups(srcDocs).groups) {
+      if (g.category !== 'similar') continue;
+      // A dismissed pair must not force candidate even on the degraded path —
+      // "parallel documents" is a persisted adjudication, not a side-channel flag.
+      if (isDismissedGroup(kbRoot, g.raws)) continue;
+      // Same convergence rule as the fresh path: a group already reduced to a
+      // single surviving copy (tombstoned members) no longer flags.
+      if (g.raws.filter((r) => !tombstones[r]).length < 2) continue;
+      if (g.raws.some((r) => newSources.includes(r))) {
+        for (const r of g.raws) flaggedRaws.add(r);
+      }
+    }
+  }
+
+  // Fail-closed: a new source inside a flagged (non-dismissed) group forces candidate
+  // regardless of the caller's --candidate — the fused-topic approval from bug 0001
+  // must be structurally impossible. review_note records the triggering group.
+  const forcedConflict = [...flaggedRaws].some((r) => mergedSources.includes(r));
+  let groupDesc = '';
+  if (forcedConflict && conflictsState && Array.isArray(conflictsState.groups)) {
+    groupDesc = conflictsState.groups
+      .filter((g) => (g.dismissed || isDismissedGroup(kbRoot, g.raws)) === false && g.raws.some((r) => mergedSources.includes(r)))
+      .map((g) => `${g.category}[${g.raws.join('|')}${g.score !== undefined ? ` score:${g.score}` : ''}]`)
+      .join('; ');
+  }
+  const conflictNote = forcedConflict ? `forced candidate: ${groupDesc || 'in-topic similarity'}` : undefined;
+
+  // semantic_check_required (P2-10): a new source whose title/alias overlaps an
+  // existing topic's title/aliases is a factual-conflict surface the LLM MUST compare
+  // against. This changes nothing about status — it turns the mandatory self-check
+  // into a visible output contract rather than a memory burden.
+  const semantic = [];
+  if (newSources.length) {
+    const newTitleTokens = newSources.map((rel) => {
+      try { return tokenize(readDoc(path.join(kbRoot, rel)).fields.title ?? ''); } catch { return new Set(); }
+    });
+    const seen = new Set();
+    for (const abs of walk(path.join(kbRoot, 'wiki', 'topics'))) {
+      const { fields } = readDoc(abs);
+      if (fields.status === 'archived' || fields.status === 'rejected') continue;
+      const against = new Set();
+      for (const t of [fields.title, ...(Array.isArray(fields.aliases) ? fields.aliases : [])]) {
+        for (const x of tokenize(t ?? '')) against.add(x);
+      }
+      if (against.size && newTitleTokens.some((nt) => titleTokensOverlap(nt, against))) {
+        const slug = path.basename(abs).replace(/\.md$/, '');
+        if (!seen.has(slug)) { seen.add(slug); semantic.push(slug); }
+      }
+    }
+  }
+
   const now = new Date().toISOString();
-  const status = (candidate || keepCandidate) ? 'candidate' : 'approved';
+  const status = (candidate || keepCandidate || forcedConflict) ? 'candidate' : 'approved';
+  const effectiveNote = [note, conflictNote,
+    keepCandidate && !candidate && !note && !conflictNote ? 'kept candidate (pending review)' : undefined,
+  ].filter(Boolean).join(' | ') || undefined;
   const fm = buildFrontmatter({
     type: 'topic',
     status,
@@ -323,17 +709,18 @@ export function applyTopicPage(kbRoot, { slug, title, sources, aliases, tags, ca
     tags: tags === undefined ? old.tags : tags,
     // candidate reason, visible to reviewers (contract §3.3); meaningful while
     // candidate, dropped when the page is written as approved
-    review_note: status === 'candidate' ? (note ?? old.review_note) : undefined,
+    review_note: status === 'candidate' ? (note ?? conflictNote ?? old.review_note) : undefined,
     created_at: old.created_at || now,
     updated_at: now,
   });
   fs.mkdirSync(path.dirname(pageAbs), { recursive: true });
   fs.writeFileSync(pageAbs, fm + '\n' + text + '\n', 'utf8');
   const action = status === 'candidate' ? 'candidate:topic' : (existed ? 'auto:update-topic' : 'auto:create-topic');
-  const effectiveNote = note ?? (keepCandidate && !candidate ? 'kept candidate (pending review)' : undefined);
   appendLog(kbRoot, 'govern', action, pageRelPosix,
     `sources:${mergedSources.length}${effectiveNote ? ` ${flatten(effectiveNote)}` : ''}`);
-  return { action, page: pageRelPosix, status };
+  const result = { action, page: pageRelPosix, status, semantic_check_required: semantic };
+  if (warning) result.warning = warning;
+  return result;
 }
 
 /** Mechanically rebuild index.md from the frontmatter of each wiki/ page (contract §3.4). */
@@ -385,12 +772,67 @@ export function approvePage(kbRoot, pageRelInput, { via = 'session' } = {}) {
   return { action: 'approve', page: rel, status: 'approved' };
 }
 
-/** Human review outcome: candidate → rejected (transient; sweep archives it). */
+function gitIsInsideWorkTree(kbRoot) {
+  try {
+    execFileSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: kbRoot, stdio: 'ignore' });
+    return true;
+  } catch { return false; }
+}
+
+/** Most recent committed version of <rel> whose frontmatter status is approved, or
+ *  null when none exists (a topic never approved). rel is posix-ized for git
+ *  pathspecs regardless of platform (P3-2). */
+function findPreviousApproved(kbRoot, rel) {
+  const relPosix = rel.replace(/\\/g, '/');
+  let commits;
+  try {
+    commits = execFileSync('git', ['log', '--format=%H', '--', relPosix],
+      { cwd: kbRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+      .split('\n').map((s) => s.trim()).filter(Boolean);
+  } catch { return null; }
+  for (const commit of commits) {
+    let text;
+    try {
+      text = execFileSync('git', ['show', `${commit}:${relPosix}`],
+        { cwd: kbRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    } catch { continue; } // file absent at that commit (created later)
+    if (parseFrontmatter(text).fields.status === 'approved') {
+      return { commit, text: text.replace(/\n+$/, '') };
+    }
+  }
+  return null;
+}
+
+/**
+ * Human review outcome: candidate → rejected. When the candidate OVERWROTE an
+ * approved version (bug 0001's fused-topic flow), the default is reject-and-restore
+ * (plan 0001 §3.1.5 / ADR-0008): revert the page to its most recent git-committed
+ * approved version, logging synchronously — so the sweep backfill cannot mis-record
+ * the rejection as an approval (P1-5). Non-git KBs and topics with no approved
+ * history fall back to a plain reject (transient; sweep archives it), distinguished
+ * in the returned restore_reason.
+ */
 export function rejectPage(kbRoot, pageRelInput, { via = 'session' } = {}) {
   const { rel, abs } = resolvePage(kbRoot, pageRelInput);
+  if (gitIsInsideWorkTree(kbRoot)) {
+    const prev = findPreviousApproved(kbRoot, rel);
+    if (prev) {
+      // Restore first, then log — in that order, so the page's last log action is
+      // 'review | reject', never 'candidate:*' (P1-5).
+      fs.writeFileSync(abs, prev.text + '\n', 'utf8');
+      const st = readStatus(abs);
+      if (st !== 'approved') flipStatus(abs, st, 'approved');
+      appendLog(kbRoot, 'review', 'reject', rel,
+        `via ${via} | restored previous approved version (${prev.commit.slice(0, 8)})`);
+      return { action: 'reject', page: rel, status: 'approved', restored: true, from_commit: prev.commit };
+    }
+    flipStatus(abs, 'candidate', 'rejected');
+    appendLog(kbRoot, 'review', 'reject', rel, `via ${via}`);
+    return { action: 'reject', page: rel, status: 'rejected', restored: false, restore_reason: 'no-approved-version-in-git-history' };
+  }
   flipStatus(abs, 'candidate', 'rejected');
   appendLog(kbRoot, 'review', 'reject', rel, `via ${via}`);
-  return { action: 'reject', page: rel, status: 'rejected' };
+  return { action: 'reject', page: rel, status: 'rejected', restored: false, restore_reason: 'not-a-git-repo' };
 }
 
 /** Collision-free archive target: wiki/archive/foo.md taken → foo-2.md, foo-3.md, ... */
@@ -428,7 +870,15 @@ export function archivePage(kbRoot, pageRelInput, { note = '' } = {}) {
   if (status !== 'approved') {
     throw new Error(`only approved pages can be archived (candidates should be rejected): ${rel}`);
   }
+  const { fields } = readDoc(abs);
   const target = moveToArchive(kbRoot, rel, abs);
+  // Archiving a SOURCE page is the loser-archive action (plan §3.1.6): the
+  // underlying raw is tombstoned so plan() does not re-pend it and apply-source
+  // refuses to revive it without --force. Skipped when the raw is already gone
+  // (orphan archive) — a dangling tombstone would be meaningless churn.
+  if (fields.source_ref && fs.existsSync(path.join(kbRoot, fields.source_ref))) {
+    addTombstone(kbRoot, fields.source_ref, { reason: 'loser-archive', page: target });
+  }
   appendLog(kbRoot, 'govern', 'archive', target, `from ${rel}${note ? ` | ${flatten(note)}` : ''}`);
   return { action: 'archive', page: target, from: rel };
 }

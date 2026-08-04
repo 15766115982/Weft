@@ -14,7 +14,7 @@ function makeKbWithRaws() {
   const writeRaw = (name, title, version) => {
     const fm = buildFrontmatter({
       source: 'local', source_id: name, source_url: `file:///inbox/${name}.md`,
-      source_version: version, pulled_at: version, content_hash: 'sha256:x',
+      source_version: version, pulled_at: version, content_hash: `sha256:${name}`,
       title, connector: 'local@1.0.0',
     });
     fs.writeFileSync(path.join(rawDir, `${name}.md`), fm + '\nBody text.\n', 'utf8');

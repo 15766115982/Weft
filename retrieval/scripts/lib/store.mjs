@@ -1,7 +1,10 @@
-// Index layer: .kb/index.sqlite (derived artifact, exclusively written by the
-// retrieval service). Dual FTS5 tables: fts_latin (porter unicode61) /
-// fts_cjk (trigram); only status=approved pages are indexed; incremental
-// rebuild keyed on page content hash (lazy reconciliation driven by ensureFresh).
+// Index layer: .kb/index.sqlite (derived artifact). .kb/ ownership is
+// partitioned (contract §1 / plan 0001 §3.3): retrieval owns index.sqlite +
+// search_state.json + candidates/; governance owns .kb/govern/ (tombstones,
+// dismissals, conflicts); the portal owns .kb/ui/ + govern_runs.jsonl. Dual
+// FTS5 tables: fts_latin (porter unicode61) / fts_cjk (trigram); only
+// status=approved pages are indexed; incremental rebuild keyed on page content
+// hash (lazy reconciliation driven by ensureFresh).
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';

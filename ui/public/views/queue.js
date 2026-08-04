@@ -41,7 +41,7 @@ function diffHtml(ops) {
     : `<span class="${o.t === '+' ? 'add' : 'del'}">${esc((o.t === '+' ? '+ ' : '- ') + o.text)}</span>\n`).join('');
 }
 
-async function renderReview(container, rel, onDone) {
+async function renderReview(container, rel, onDone, conflicts, suppressed) {
   container.textContent = '';
   const [page, diff] = await Promise.all([
     api('/api/page', { path: rel }),
@@ -58,6 +58,27 @@ async function renderReview(container, rel, onDone) {
   html(meta, [`<b>${esc(rel)}</b>`, f.type ? `type <b>${esc(f.type)}</b>` : '',
     f.updated_at ? `updated <b>${esc(String(f.updated_at).slice(0, 10))}</b>` : ''].filter(Boolean).join(''));
   reader.append(meta);
+
+  // Conflict group this candidate's sources fall into (fail-closed candidate from
+  // plan 0001 §3.1.4): render it as an adjudication call-to-action, not a footnote.
+  const group = (conflicts?.groups || []).find((g) => !g.dismissed && Array.isArray(f.sources) && g.raws.some((r) => f.sources.includes(r))) || null;
+  if (group) {
+    const c = el('div', { class: 'stale-cta conflict' });
+    html(c, `${icon('alertTriangle', 14)} <b>冲突组 ${esc(group.category)}</b>:${esc(group.raws.join('、'))}${group.score !== undefined ? `(相似度 ${group.score})` : ''} — 必须裁决:归档败方来源页 或 保留两者(dismiss)`);
+    reader.append(c);
+  }
+
+  // A source this candidate references was loser-archived (P0-1 tombstone). The
+  // archive only removes the source page from retrieval — it does NOT rewrite the
+  // topic body, so the fused text may still carry the loser's content. Surface
+  // the edit-before-approve reminder instead of letting the stale text pass silently.
+  const archivedSrc = (f.sources || []).find((s) =>
+    suppressed?.some((sup) => sup.raw === s && sup.detail === 'loser-archive'));
+  if (archivedSrc) {
+    const cta = el('div', { class: 'stale-cta archive-hint' });
+    html(cta, `${icon('archiveRestore', 14)} <b>来源已归档:</b>${esc(archivedSrc)} 已被归档,主题正文可能仍含其内容。建议先 <b>✎ 编辑</b> 去除旧内容,再 <b>✓ 批准</b>。`);
+    reader.append(cta);
+  }
 
   if (f.review_note) {
     const note = el('div', { class: 'stale-cta' });
@@ -76,6 +97,39 @@ async function renderReview(container, rel, onDone) {
     reader.append(ev);
   }
 
+  // Per-source "archive the loser" buttons (plan 0001 §3.2) — the human decides
+  // which source page is the losing side and removes it from retrieval. These
+  // SELECT a loser (no default — 2026-08-05 ruling); the bar's 「归档来源」 button
+  // executes the archive of the selected one.
+  const resolvedSources = page.sources_resolved || [];
+  let selectedLoser = null; // wiki/sources/... path armed for archive-source, or null
+  const syncArchiveDisabled = () => {
+    archiveBtn.disabled = !selectedLoser;
+    archiveBtn.title = selectedLoser
+      ? `归档 ${selectedLoser} — 移出检索并墓碑`
+      : '先在下方的来源行点选一个来源(败方),再执行归档';
+  };
+  if (resolvedSources.some((s) => s.page)) {
+    const arch = el('div', { class: 'archive-card', style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center' });
+    html(arch, '<span class="dim" style="font-size:12px">归档来源(败方,点选后执行):</span>');
+    for (const s of resolvedSources) {
+      if (!s.page) continue;
+      const b = el('button', { class: 'sm', title: `点选 ${s.page} 为败方(再点「归档来源」执行)` }, `🗄 ${s.page.split('/').pop()}`);
+      b.addEventListener('click', () => {
+        selectedLoser = selectedLoser === s.page ? null : s.page; // toggle
+        for (const other of arch.querySelectorAll('button')) {
+          other.classList.toggle('sel', other === b && !!selectedLoser);
+        }
+        note.textContent = selectedLoser
+          ? `已选败方 ${selectedLoser.split('/').pop()} — 点「归档来源」执行`
+          : '';
+        syncArchiveDisabled();
+      });
+      arch.append(b);
+    }
+    reader.append(arch);
+  }
+
   if (diff.changed) {
     const box = el('details', { class: 'card' });
     const pre = el('div', { class: 'diff' });
@@ -90,22 +144,37 @@ async function renderReview(container, rel, onDone) {
   html(body, renderMarkdown(page.body));
   reader.append(body);
 
+  // Five-state adjudication bar (plan 0001 §4): approve / reject-and-restore /
+  // edit (deep-link to the existing M7d editor; save keeps the candidate, then
+  // approve) / archive-source (disabled until a loser source is selected in the
+  // sources row above — no default target, 2026-08-05) / keep-both (dismiss).
   const bar = el('div', { class: 'reviewbar' });
   const approve = el('button', { class: 'approve', title: '批准 (a)' }, '✓ 批准');
-  const reject = el('button', { class: 'reject', title: '拒绝 (r)' }, '✗ 拒绝');
+  const reject = el('button', { class: 'reject', title: '拒绝并恢复上一 approved 版 (r)' }, '✗ 拒绝并恢复');
+  const edit = el('button', { class: 'edit', title: '人工编辑(保存即降级为候选,再批准)' }, '✎ 编辑');
+  const archiveBtn = el('button', { class: 'archive', disabled: true, title: '先在下方的来源行点选一个来源(败方),再执行归档' }, '🗄 归档来源');
+  const dismiss = el('button', { class: 'dismiss', title: '保留两者(平行文档,不再标记)' }, '◫ 保留两者');
   const hint = el('span', { class: 'hint' });
   html(hint, '<kbd>a</kbd> 批准 · <kbd>r</kbd> 拒绝 · <kbd>j</kbd><kbd>k</kbd> 上/下一条');
-  const note = el('span', { class: 'dim', style: 'font-size:12.5px' });
-  bar.append(approve, reject, note, hint);
+  const note = el('span', { class: 'dim note', style: 'font-size:12.5px' });
+  bar.append(approve, reject, edit, archiveBtn, dismiss, note, hint);
   reader.append(bar);
+  syncArchiveDisabled(); // normalize initial title; stays disabled until a loser is selected
   container.append(reader);
 
-  async function act(action) {
-    approve.disabled = reject.disabled = true;
+  async function act(action, targetPath) {
+    approve.disabled = reject.disabled = edit.disabled = archiveBtn.disabled = dismiss.disabled = true;
     note.textContent = '';
     try {
-      await apiPost('/api/review', { path: rel, action });
-      note.textContent = `已${action === 'approve' ? '批准' : '拒绝'} — log 由下次治理 sweep 回补`;
+      const r = await apiPost('/api/review', {
+        path: targetPath || rel, action, raws: group?.raws, reason: 'parallel documents (kept both)',
+      });
+      note.textContent = ({
+        approve: '已批准',
+        reject: '已拒绝' + (r.result?.restored ? '(并恢复上一 approved 版)' : '(无历史 approved 版 → 普通拒绝,下次 sweep 归档)'),
+        'archive-source': `已归档来源 ${r.result?.page || targetPath || ''}`,
+        'dismiss-conflict': `已保留两者 — ${(group?.raws || []).join('、')} 不再标记`,
+      })[action];
       window.dispatchEvent(new CustomEvent('ui:refresh-header')); // P2-1: counts/stale
       setTimeout(onDone, 600);
     } catch (err) {
@@ -117,31 +186,48 @@ async function renderReview(container, rel, onDone) {
       refresh.addEventListener('click', () => { location.hash = '#/queue'; onDone(); });
       conflict.append(refresh);
       bar.before(conflict);
-      approve.disabled = reject.disabled = false;
+      approve.disabled = reject.disabled = edit.disabled = dismiss.disabled = false;
+      syncArchiveDisabled(); // archive stays gated on an explicit loser selection
     }
   }
   approve.addEventListener('click', () => act('approve'));
   reject.addEventListener('click', () => act('reject'));
+  edit.addEventListener('click', () => { location.hash = `#/page?path=${encodeURIComponent(rel)}`; });
+  archiveBtn.addEventListener('click', () => {
+    if (!selectedLoser) { note.textContent = '请先在来源行点选要归档的来源(败方)'; return; }
+    act('archive-source', selectedLoser);
+  });
+  dismiss.addEventListener('click', () => {
+    if (!group) { note.textContent = '当前候选不在冲突组内,无需保留两者'; return; }
+    act('dismiss-conflict');
+  });
 }
 
 export async function render(view, params) {
   // /api/queue is the queue's source of truth (P2-4 — no client-side filter
   // duplicating it); /api/tree only feeds the wikilink resolver
-  const [treeData, queueData, planData] = await Promise.all([
-    api('/api/tree'), api('/api/queue'), api('/api/plan').catch(() => null),
+  const [treeData, queueData, planData, conflictsData] = await Promise.all([
+    api('/api/tree'), api('/api/queue'), api('/api/plan').catch(() => null), api('/api/conflicts').catch(() => null),
   ]);
   setKnownPages(treeData.pages);
   queue = queueData.pages;
   for (const p of [...selected]) if (!queue.some((q) => q.path === p)) selected.delete(p);
 
   // F4 structure-findings banner: the queue is where users ACT on problems,
-  // so dangling links / anomalies / errors surface here (live plan data, not
-  // run history — this also covers partial changes from failed runs).
+  // so dangling links / anomalies / errors / conflict groups / suppressed
+  // tombstones surface here (live plan data, not run history — this also covers
+  // partial changes from failed runs).
   if (planData) {
     const findings = [
       ...planData.dangling_links.map((d) => ({ text: `悬空链接 [[${d.link}]]`, page: d.page })),
       ...[...planData.anomalies, ...planData.errors].map((a) => ({
         text: `${a.title || a.raw || a.page} — ${a.reason || a.error || ''}`, page: a.page && String(a.page).startsWith('wiki/') ? a.page : null,
+      })),
+      ...(planData.conflicts || []).filter((g) => !g.dismissed).map((g) => ({
+        text: `${g.category} 冲突组:${g.raws.join('、')}`, page: null,
+      })),
+      ...(planData.suppressed || []).map((s) => ({
+        text: `已抑制(墓碑) ${s.raw} — ${s.detail || s.reason || ''}`, page: null,
       })),
     ];
     if (findings.length) {
@@ -257,7 +343,7 @@ export async function render(view, params) {
 
   const target = params.get('path') || queue[0]?.path;
   if (target) {
-    await renderReview(content, target, () => { location.hash = '#/queue'; });
+    await renderReview(content, target, () => { location.hash = '#/queue'; }, conflictsData, planData?.suppressed);
   } else {
     html(content, `<div class="empty-state"><div class="big">队列已清空 🎉</div>
       所有候选都处理完了。下次治理产生新候选时,这里会出现它们。</div>`);

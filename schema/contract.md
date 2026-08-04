@@ -32,6 +32,7 @@ A knowledge base instance is a directory on disk, itself an independent Git repo
     ├── candidates/          # query candidate spaces persisted to disk by the retrieval script (temporary)
     ├── acquire_runs.jsonl   # per-source pull records appended by the acquisition service (one JSON line per run; the only record of all-skipped incremental pulls)
     ├── govern_runs.jsonl    # agent-governance run records appended by the UI portal (two lines per run: phase start/finish; a start with no finish reads as interrupted)
+    ├── govern/              # governance adjudication memory (source-tombstones.json, conflict-dismissals.json, conflicts.json — plan 0001 §1), exclusive write by the governance service
     └── ui/                  # UI portal derived artifacts (jobs.db, eval scores, snapshots/), exclusive write by the UI portal
 ```
 
@@ -41,8 +42,8 @@ A knowledge base instance is a directory on disk, itself an independent Git repo
 |---|---|---|---|---|---|
 | `raw/` | **write** | read | forbidden | read | read + **delete/move only** (see rules) |
 | `wiki/` | forbidden | **write** | read | only frontmatter `status` (candidate → approved / rejected) | same flip primitive + **human body edits** (demote rule, see ⑤) |
-| `log.md` | **append** | **append** | read | forbidden | **append** (manual-edit entries: `candidate:manual`, `file:edit`) |
-| `.kb/` | only `acquire_runs.jsonl` append | forbidden | **write** | read | `.kb/ui/` **write** + `govern_runs.jsonl` append, rest read |
+| `log.md` | **append** | **append** | read | forbidden | **append** (manual-edit entries: `candidate:manual`, `file:edit`, `review` reject-restore) |
+| `.kb/` | only `acquire_runs.jsonl` append | `.kb/govern/` **write**, rest read | **write** (`index.sqlite`, `search_state.json`, `candidates/`) | read | `.kb/ui/` **write** + `govern_runs.jsonl` append, rest read |
 | `kb.json` | read | read | read | read | read |
 
 Rules:
@@ -148,13 +149,19 @@ created_at / updated_at: ISO8601
 
 ### 3.2 source summary pages (`wiki/sources/`)
 
-**1:1 mechanical mapping** with `raw/` documents; filename = `<source>-<source_id>.md`.
-Creation and source-following updates are both low-risk automatic operations.
+**1:1 with `raw/` documents BY DEFAULT**; filename = `<source>-<source_id>.md`.
+Creation and source-following updates are both low-risk automatic operations. The 1:1 has
+**two documented exceptions** (ADR-0008 / plan 0001): **auto-dedup** — an exact duplicate of
+a raw that already has an approved source page is never written (the redundant raw is
+tombstoned, logged `auto:dedup-source`); **loser-archive** — an adjudicated loser source page
+is archived and its raw tombstoned, so the next `plan` does not re-pend it and `apply-source`
+refuses to revive it without `--force`. `wiki/sources/` is therefore "1:1 unless adjudicated
+away", never silently more than one page per document.
 
 ```yaml
 ---
 type: source
-status: approved                # source pages always take effect directly
+status: approved                # source pages normally take effect directly (archivable on human adjudication)
 title: "Original title"
 source_ref: "raw/jira/PROJ-123.md"     # source pointer (required, forward-slash relative path)
 source_url: "..."
@@ -234,6 +241,17 @@ the retrieval service and by Claude for navigation; also Tier 0 of index-first r
 - **Must be a candidate (candidate)**: contradiction with existing pages, suspected
   cross-source duplicates, merging already-approved topic pages, archiving/deleting
   already-approved pages, multi-version validity trade-offs;
+- **Conflict detection is structural** (ADR-0008 / plan 0001): `plan` detects three
+  cross-document categories over the whole KB — exact duplicate (identical `content_hash`,
+  only when both sides carry it), similar version (title/filename pre-filter + CJK-aware
+  body-similarity confirmation), and factual conflict (semantic; judged at topic-application
+  time against existing topic content). A topic whose `sources` touch a flagged group is
+  **forced to `candidate`** by `apply-topic` — the caller's `--candidate` cannot be silently
+  omitted (bug 0001). `apply-source` auto-dedups exact duplicates without writing; a rejected
+  candidate that overwrote an approved page is **reject-and-restored** to its last
+  git-committed approved version, logged synchronously; an adjudicated loser's source page is
+  archived and its raw tombstoned. Persisted adjudication lives in `.kb/govern/`
+  (`source-tombstones.json`, `conflict-dismissals.json`, `conflicts.json`);
 - **Archive discipline**: when a page is moved into `wiki/archive/`, its frontmatter `status`
   must be flipped to `archived` at the same time and recorded in log.md — double insurance:
   the retrieval service both skips the `wiki/archive/` directory and indexes only pages with
@@ -283,10 +301,15 @@ the UI portal, per §1 whitelist ⑤⑥: `candidate:manual`, `file:edit`).
 
 Action vocabulary (non-exhaustive): `auto:create-source`, `auto:update-source`,
 `auto:rebuild-index`, `auto:create-topic`, `auto:update-topic`, `candidate:*` (any
-candidate-producing governance outcome), `archive`, `auto:archive-rejected`, `merge`
+candidate-producing governance outcome), `auto:dedup-source` (exact-duplicate raw
+tombstoned, target = the surviving page), `auto:dedup-topic` (a topic's identical-hash
+sources converged to one reference), `archive`, `auto:archive-rejected`, `merge`
 (govern actor);
 `approve`, `reject` (review actor, note `via session | via viewer | via viewer (backfilled)` —
-the backfilled form is written by the sweep for flips the viewer made without logging).
+the backfilled form is written by the sweep for flips the viewer made without logging;
+`via portal | restored previous approved version` marks a reject-and-restore, whose log line
+keeps the page's last-log-action non-`candidate:*` so the sweep cannot mis-record it as an
+approval).
 
 ## 6. kb.json (KB instance configuration, checked in)
 
