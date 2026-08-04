@@ -70,7 +70,58 @@ export async function render(view) {
   drop.addEventListener('drop', (e) => uploadFiles([...e.dataTransfer.files]));
 
   // ============================== F: source pull ==============================
-  const pullCard = (connector, title, hint, scopeFields) => {
+  // 常用查询写法帮助(? 按钮,2026-08-04 用户要求):每条带「填入」直接落到
+  // 覆盖输入框。只列 Server/DC 实测可用的语法。
+  const CQL_HELP = {
+    title: '常用 CQL(Confluence 查询)',
+    blurb: '填在「CQL 覆盖」里。页面 ID 是页面 URL 里 viewpage.action?pageId= 后面的那串数字;只能拉到 PAT 账号有权限看的页面。',
+    examples: [
+      { desc: '整棵子树:指定页 + 它下面所有层级的子页面(把 123456 换成页面 ID)', q: 'type = page AND (id = "123456" OR ancestor = "123456")' },
+      { desc: '整个空间(等同 kb.json spaces 的默认行为)', q: 'space = "KB" AND type = page' },
+      { desc: '按标签过滤', q: 'space = "KB" AND label = "release-note"' },
+      { desc: '标题含关键词(~ 是模糊匹配)', q: 'space = "KB" AND title ~ "支付"' },
+      { desc: '全文包含某段文字', q: 'text ~ "超时重试"' },
+      { desc: '某日期之后更新过的页面(格式 yyyy/MM/dd)', q: 'space = "KB" AND lastmodified >= "2026/07/01"' },
+    ],
+  };
+  const JQL_HELP = {
+    title: '常用 JQL(Jira 查询)',
+    blurb: '填在「JQL 覆盖」里。只能拉到 PAT 账号有权限看的 issue。',
+    examples: [
+      { desc: '近 7 天更新过的 issue', q: 'project = PAY AND updated >= -7d' },
+      { desc: '单个 issue(按 key)', q: 'key = PAY-123' },
+      { desc: '只拉 Test 类型(Zephyr 用例)', q: 'project = PAY AND issuetype = Test' },
+      { desc: '按标签过滤', q: 'project = PAY AND labels = kb' },
+    ],
+  };
+
+  function showQueryHelp({ title, blurb, examples }, target) {
+    const mask = el('div', { class: 'cmdk-mask' });
+    const box = el('div', { class: 'cmdk', style: 'padding:18px 22px;max-width:640px' });
+    box.append(el('h3', { style: 'margin:0 0 10px' }, title));
+    box.append(el('p', { class: 'dim', style: 'font-size:12.5px;margin:0 0 6px' }, blurb));
+    for (const ex of examples) {
+      const row = el('div', { style: 'padding:8px 0;border-bottom:1px dashed var(--line)' });
+      row.append(el('div', { style: 'font-size:13px' }, ex.desc));
+      const codeRow = el('div', { style: 'display:flex;gap:10px;align-items:center;margin-top:4px' });
+      codeRow.append(el('code', { style: 'flex:1;font-size:12px;word-break:break-all' }, ex.q));
+      const use = el('button', { class: 'sm' }, '填入');
+      use.addEventListener('click', () => { if (target) { target.value = ex.q; target.focus(); } close(); });
+      codeRow.append(use);
+      row.append(codeRow);
+      box.append(row);
+    }
+    box.append(el('p', { class: 'dim', style: 'font-size:12px;margin:10px 0 0' },
+      '留空 = 用 kb.json 配置的 scope;结果超过 max 会被截断(作业结果里如实上报 truncated),拉大 max 即可。Esc 关闭。'));
+    mask.append(box);
+    mask.addEventListener('click', (e) => { if (e.target === mask) close(); });
+    function onKey(e) { if (e.key === 'Escape') { e.preventDefault(); close(); } }
+    function close() { mask.remove(); document.removeEventListener('keydown', onKey, true); }
+    document.addEventListener('keydown', onKey, true);
+    document.body.append(mask);
+  }
+
+  const pullCard = (connector, title, hint, scopeFields, help) => {
     const card = el('div', { class: 'pull-card' });
     const head = el('div', { class: 'pull-head' });
     html(head, `${icon(connector === 'local' ? 'inbox' : 'database', 15)} <b>${esc(title)}</b>
@@ -83,6 +134,12 @@ export async function render(view) {
       lab.append(inp);
       card.append(lab);
       inputs[f.key] = inp;
+    }
+    if (help) {
+      const helpBtn = el('button', { class: 'sm', title: '常用写法速查' });
+      html(helpBtn, icon('circleHelp', 13));
+      helpBtn.addEventListener('click', () => showQueryHelp(help, inputs.jql || inputs.cql));
+      head.append(helpBtn);
     }
     const row = el('div', { class: 'pull-actions' });
     const go = el('button', { class: 'primary sm' });
@@ -142,11 +199,11 @@ export async function render(view) {
     pullCard('jira', 'jira · JQL 拉取', '留空则用 kb.json 的 scope', [
       { key: 'jql', label: 'JQL 覆盖', ph: 'project = PAY AND updated >= -7d' },
       { key: 'max', label: 'max', ph: '50' },
-    ]),
+    ], JQL_HELP),
     pullCard('confluence', 'confluence · CQL 拉取', '留空则用 kb.json 的 scope', [
       { key: 'cql', label: 'CQL 覆盖', ph: 'space = "KB" AND type = page' },
       { key: 'max', label: 'max', ph: '50' },
-    ]),
+    ], CQL_HELP),
   );
 
   // ============================== J6: freshness ==============================
