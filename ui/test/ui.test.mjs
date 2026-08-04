@@ -42,8 +42,11 @@ before(async () => {
   server = createPortal({ kb, port: 0 });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   base = `http://127.0.0.1:${server.address().port}`;
-  // the token reaches clients only via the injected index.html meta (S8)
-  const html = await (await fetch(base + '/')).text();
+  // the token reaches clients only via the injected index.html meta (S8) —
+  // and the page must never be cached: a stale copy holds a dead token
+  const homeRes = await fetch(base + '/');
+  assert.match(homeRes.headers.get('cache-control') || '', /no-cache/);
+  const html = await homeRes.text();
   token = html.match(/name="ui-token" content="([^"]+)"/)[1];
 });
 after(() => {

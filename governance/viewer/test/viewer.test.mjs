@@ -144,6 +144,9 @@ test('review gates: double flip → 409; approved page → 409; index.md → 400
 test('static serving: index + app.js, no escape from public/', async () => {
   const home = await fetch(base + '/');
   assert.equal(home.status, 200);
+  // the page carries the per-startup token — it must never be cached (a stale
+  // copy holds a dead token and every write would 403 after a relaunch)
+  assert.match(home.headers.get('cache-control') || '', /no-cache/);
   assert.match(await home.text(), /KB Review Viewer/);
   const js = await fetch(base + '/app.js');
   assert.equal(js.status, 200);

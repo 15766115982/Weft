@@ -179,6 +179,73 @@ test('governRunJob: postPlan carries dangling links + counts; finish record has 
   }
 });
 
+// ---- one commit per governance run (CONTEXT.md:190; N3/N5 of the review-fix
+// review: auto-commit needs assertions, and pre-dirty user files must not be
+// swept into a governance commit) ----
+
+test('governRunJob: git KB auto-commits run changes; pre-dirty user file untouched; noop run commits nothing', async (t) => {
+  const { execFileSync } = await import('node:child_process');
+  try { execFileSync('git', ['--version'], { stdio: 'ignore' }); }
+  catch { t.skip('git not available in this environment'); return; }
+  const kb = makeKb();
+  const jobs = createJobCenter();
+  const git = (args) => execFileSync('git', ['-C', kb, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  try {
+    git(['init', '-q']);
+    git(['add', '-A']);
+    git(['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init']);
+    // the user's own uncommitted work, dirty BEFORE the run — never the
+    // governance commit's business
+    write(kb, 'wiki/topics/user-draft.md', '---\ntype: topic\nstatus: candidate\ntitle: Draft\n---\nuser work\n');
+
+    registerExecutor('fake-git-writer', () => {
+      const events = new EventEmitter();
+      setTimeout(() => {
+        write(kb, 'wiki/topics/b.md', '---\ntype: topic\nstatus: candidate\ntitle: B\n---\nBody B\n');
+        events.emit('done', { ok: true, text: 'created topics/b' });
+      }, 10);
+      return { events, kill: () => {} };
+    });
+
+    const j1 = jobs.enqueue(kb, governRunJob(kb, { prompt: 'run writer', executor: 'fake-git-writer' }));
+    await jobs.waitFor(j1);
+    assert.equal(j1.status, 'done');
+    assert.equal(j1.result.gitCommitted, true, 'run changes committed');
+    const log = git(['log', '--format=%s | %an']);
+    assert.match(log, /govern: agent run .* \| kb-portal/);
+    const dirty = git(['status', '--porcelain']);
+    assert.ok(!dirty.includes('wiki/topics/b.md'), 'run output is committed, not dirty');
+    assert.match(dirty, /user-draft\.md/, 'pre-dirty user file stays uncommitted');
+
+    const finish = fs.readFileSync(path.join(kb, '.kb', 'govern_runs.jsonl'), 'utf8')
+      .trim().split('\n').map((l) => JSON.parse(l)).find((r) => r.phase === 'finish');
+    assert.equal(finish.gitCommitted, true, 'F1 finish record carries the commit flag');
+    assert.notEqual(finish.gitHeadAfter, finish.gitHeadBefore, 'HEAD moved by the run commit');
+
+    // a no-change run on a git KB: committed=false, no new commit
+    const headBefore = git(['rev-parse', 'HEAD']).trim();
+    const j2 = jobs.enqueue(kb, governRunJob(kb, { prompt: 'run noop', executor: 'fake-noop' }));
+    await jobs.waitFor(j2);
+    assert.equal(j2.result.gitCommitted, false);
+    assert.equal(git(['rev-parse', 'HEAD']).trim(), headBefore, 'noop run creates no commit');
+  } finally {
+    fs.rmSync(kb, { recursive: true, force: true });
+  }
+});
+
+test('governRunJob: non-git KB omits gitCommitted (S4 silent skip)', async () => {
+  const kb = makeKb(); // not a git repo
+  const jobs = createJobCenter();
+  try {
+    const j = jobs.enqueue(kb, governRunJob(kb, { prompt: 'run noop', executor: 'fake-noop' }));
+    await jobs.waitFor(j);
+    assert.equal(j.status, 'done');
+    assert.ok(!('gitCommitted' in j.result), 'non-git KB: no commit field at all');
+  } finally {
+    fs.rmSync(kb, { recursive: true, force: true });
+  }
+});
+
 // ---- F1: /api/health carries lastGovernRun ----
 
 test('/api/health exposes lastGovernRun after a portal agent run', async () => {

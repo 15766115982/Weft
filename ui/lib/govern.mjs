@@ -5,7 +5,8 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { spawnJob } from './jobs.mjs';
 import { tail } from './sys.mjs';
@@ -14,6 +15,10 @@ import { appendGovernRun } from './governruns.mjs';
 // F4: read-only post-run validation (serve.mjs's in-process plan() precedent —
 // the file header's "never imported for writes" discipline stays intact).
 import { plan } from '../../governance/scripts/lib/govern.mjs';
+
+// the run-done path is async — sync git there would stall the portal's event
+// loop for every concurrent request (review-fix review 2026-08-04, N3)
+const execFileP = promisify(execFile);
 
 const GOVERN = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'governance', 'scripts', 'govern.mjs',
@@ -82,23 +87,28 @@ export function boundaryViolations(before, after) {
 }
 
 // One commit per governance run (CONTEXT.md:190 — the KB's git history is the
-// audit/rollback backbone; the review 2026-08-04 found this discipline had no
-// landing). Pathspec-scoped to the governance write set so unrelated worktree
-// changes are never swept in; fixed machine author keeps run commits greppable.
-// Returns true when a commit was created, false when nothing changed, null on
-// non-git KBs (S4 graceful). Call AFTER boundaryViolations — the commit cleans
-// the porcelain it reads.
-function commitGovernRun(kb, jobId) {
-  try {
-    const dirty = execFileSync('git', ['-C', kb, 'status', '--porcelain', '--', 'wiki', 'log.md'],
-      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-    if (!dirty.trim()) return false;
-    const GIT_ID = ['-c', 'user.name=kb-portal', '-c', 'user.email=kb-portal@localhost'];
-    execFileSync('git', ['-C', kb, 'add', '--', 'wiki', 'log.md'], { stdio: 'ignore' });
-    execFileSync('git', ['-C', kb, ...GIT_ID, 'commit', '-m', `govern: agent run ${jobId}`, '--', 'wiki', 'log.md'],
-      { stdio: ['ignore', 'ignore', 'ignore'] });
-    return true;
-  } catch { return null; } // not a git repo / no git
+// audit/rollback backbone). The pathspec is ONLY the paths this run made dirty
+// (after-porcelain minus before-porcelain, intersected with wiki/ + log.md):
+// the user's own pre-existing uncommitted edits are never swept into a
+// governance commit (review-fix review 2026-08-04, N3; shared blind spot with
+// the C layer: a path dirty before AND changed by the run is unattributable
+// and goes in). Fixed machine author keeps run commits greppable. Async — a
+// sync git here would stall the portal's event loop.
+// Returns true (committed) / false (the run changed nothing); THROWS on git
+// failure — a rejected commit (hook, lock, config) must surface loudly, never
+// read as "nothing happened". The caller skips this entirely on non-git KBs.
+async function commitGovernRun(kb, jobId, before) {
+  const { stdout: after } = await execFileP('git', ['-C', kb, 'status', '--porcelain'],
+    { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
+  const pre = porcelainPaths(before);
+  const runPaths = [...porcelainPaths(after)]
+    .filter((p) => !pre.has(p) && (p === 'log.md' || p.startsWith('wiki/')))
+    .sort();
+  if (!runPaths.length) return false;
+  const GIT_ID = ['-c', 'user.name=kb-portal', '-c', 'user.email=kb-portal@localhost'];
+  await execFileP('git', ['-C', kb, 'add', '--', ...runPaths]);
+  await execFileP('git', ['-C', kb, ...GIT_ID, 'commit', '-m', `govern: agent run ${jobId}`, '--', ...runPaths]);
+  return true;
 }
 
 // F2 content snapshot (openwiki-inspired): whole-tree hash of wiki/ so a run
@@ -183,72 +193,86 @@ export function governRunJob(kb, { prompt, executor = 'claude' }, onChunk) {
         job.log = (job.log + line).slice(-64 * 1024);
         onChunk?.(job, e.kind, line);
       });
-      run.events.on('done', ({ ok, text }) => {
-        job.log = (job.log + (job.log.endsWith('\n') || !job.log ? '' : '\n')).slice(-64 * 1024);
-        const violations = boundaryViolations(before, gitPorcelain(kb));
-        if (violations.length) {
-          const warn = `\n⚠ 边界检查:运行期间以下 KB 外/非治理写集路径发生变化 — ${violations.join(', ')}`;
-          job.log = (job.log + warn).slice(-64 * 1024);
-          onChunk?.(job, 'system', warn);
-        }
-        // one commit per governance run (CONTEXT.md) — after the boundary
-        // check (its porcelain must see the run's changes), before the
-        // wikiHash/gitHead capture so the record reflects the commit
-        const committed = ok ? commitGovernRun(kb, job.id) : null;
-        if (committed) {
-          const note = `\n— 本次治理变更已提交 git(govern: agent run ${job.id})—`;
-          job.log = (job.log + note).slice(-64 * 1024);
-          onChunk?.(job, 'system', note);
-        }
-        const hashAfter = wikiHash(kb);
-        const noop = ok && hashBefore !== null && hashBefore === hashAfter;
-        if (noop) {
-          const note = '\n— 本次治理无 wiki 变更 —';
-          job.log = (job.log + note).slice(-64 * 1024);
-          onChunk?.(job, 'system', note);
-        }
-        // F4 deterministic post-run validation (openwiki-inspired): the LLM
-        // writes content; plain code checks structure. plan() is read-only
-        // and cheap against a minutes-long run. Details are capped at 50 per
-        // list — the full set is always available via /api/plan.
-        let postPlan = null;
-        if (ok) {
-          try {
-            const post = plan(kb);
-            postPlan = {
-              dangling_links: post.dangling_links.slice(0, 50),
-              anomalies: post.anomalies.slice(0, 50),
-              errors: post.errors.slice(0, 50),
-              orphaned_pages: post.orphaned_pages.slice(0, 50),
-              counts: {
-                dangling_links: post.dangling_links.length,
-                anomalies: post.anomalies.length,
-                errors: post.errors.length,
-                orphaned_pages: post.orphaned_pages.length,
-              },
-            };
-          } catch { /* post-run validation is advisory, never fails the run */ }
-        }
-        // F1 history: finish line BEFORE resolve/reject so the record is on
-        // disk before the job's done/failed event goes out.
-        appendGovernRun(kb, {
-          ts: new Date().toISOString(), jobId: job.id, phase: 'finish',
-          status: job.cancelled ? 'cancelled' : ok ? 'complete' : 'failed',
-          durationMs: Date.now() - Date.parse(startTs),
-          gitHeadBefore: headBefore, gitHeadAfter: gitHead(kb),
-          wikiHashBefore: hashBefore, wikiHashAfter: hashAfter, noop,
-          boundaryViolations: violations.length,
-          gitCommitted: committed,
-          postPlanCounts: postPlan ? postPlan.counts : null,
-        });
-        if (ok) resolve({
-          result: tail(text),
-          wikiHashBefore: hashBefore, wikiHashAfter: hashAfter, noop,
-          ...(committed !== null ? { gitCommitted: committed } : {}),
-          ...(postPlan ? { postPlan } : {}),
-          ...(violations.length ? { boundaryViolations: violations } : {}),
-        });
-        else reject(new Error(tail(text, 2000)));
+      run.events.on('done', async ({ ok, text }) => {
+        try {
+          job.log = (job.log + (job.log.endsWith('\n') || !job.log ? '' : '\n')).slice(-64 * 1024);
+          const violations = boundaryViolations(before, gitPorcelain(kb));
+          if (violations.length) {
+            const warn = `\n⚠ 边界检查:运行期间以下 KB 外/非治理写集路径发生变化 — ${violations.join(', ')}`;
+            job.log = (job.log + warn).slice(-64 * 1024);
+            onChunk?.(job, 'system', warn);
+          }
+          // one commit per governance run (CONTEXT.md) — after the boundary
+          // check (its porcelain must see the run's changes), before the
+          // wikiHash/gitHead capture so the record reflects the commit.
+          // headBefore null = non-git KB → silent skip (S4); a git FAILURE is
+          // not silence — the run's changes sit uncommitted and the log says so.
+          let committed = null; // true | false | 'failed' | null (non-git)
+          if (ok && headBefore !== null) {
+            try {
+              committed = await commitGovernRun(kb, job.id, before);
+              if (committed) {
+                const note = `\n— 本次治理变更已提交 git(govern: agent run ${job.id})—`;
+                job.log = (job.log + note).slice(-64 * 1024);
+                onChunk?.(job, 'system', note);
+              }
+            } catch (err) {
+              committed = 'failed';
+              const warn = `\n⚠ 治理自动提交失败(改动仍在工作区,未丢失;请手工 git 提交):${String(err.message).split('\n')[0]}`;
+              job.log = (job.log + warn).slice(-64 * 1024);
+              onChunk?.(job, 'system', warn);
+            }
+          }
+          const hashAfter = wikiHash(kb);
+          const noop = ok && hashBefore !== null && hashBefore === hashAfter;
+          if (noop) {
+            const note = '\n— 本次治理无 wiki 变更 —';
+            job.log = (job.log + note).slice(-64 * 1024);
+            onChunk?.(job, 'system', note);
+          }
+          // F4 deterministic post-run validation (openwiki-inspired): the LLM
+          // writes content; plain code checks structure. plan() is read-only
+          // and cheap against a minutes-long run. Details are capped at 50 per
+          // list — the full set is always available via /api/plan.
+          let postPlan = null;
+          if (ok) {
+            try {
+              const post = plan(kb);
+              postPlan = {
+                dangling_links: post.dangling_links.slice(0, 50),
+                anomalies: post.anomalies.slice(0, 50),
+                errors: post.errors.slice(0, 50),
+                orphaned_pages: post.orphaned_pages.slice(0, 50),
+                counts: {
+                  dangling_links: post.dangling_links.length,
+                  anomalies: post.anomalies.length,
+                  errors: post.errors.length,
+                  orphaned_pages: post.orphaned_pages.length,
+                },
+              };
+            } catch { /* post-run validation is advisory, never fails the run */ }
+          }
+          // F1 history: finish line BEFORE resolve/reject so the record is on
+          // disk before the job's done/failed event goes out.
+          appendGovernRun(kb, {
+            ts: new Date().toISOString(), jobId: job.id, phase: 'finish',
+            status: job.cancelled ? 'cancelled' : ok ? 'complete' : 'failed',
+            durationMs: Date.now() - Date.parse(startTs),
+            gitHeadBefore: headBefore, gitHeadAfter: gitHead(kb),
+            wikiHashBefore: hashBefore, wikiHashAfter: hashAfter, noop,
+            boundaryViolations: violations.length,
+            gitCommitted: committed,
+            postPlanCounts: postPlan ? postPlan.counts : null,
+          });
+          if (ok) resolve({
+            result: tail(text),
+            wikiHashBefore: hashBefore, wikiHashAfter: hashAfter, noop,
+            ...(committed !== null ? { gitCommitted: committed } : {}),
+            ...(postPlan ? { postPlan } : {}),
+            ...(violations.length ? { boundaryViolations: violations } : {}),
+          });
+          else reject(new Error(tail(text, 2000)));
+        } catch (err) { reject(err); } // async handler: never leave the job pending
       });
     }),
   };

@@ -214,9 +214,10 @@ export function applySourcePage(kbRoot, rawRelInput, summaryBody, { tags } = {})
 
 /** Remove fenced code blocks and inline code spans so wikilink detection agrees with
  * retrieval's chunker. Fence rules match retrieval (chunk.mjs stripCode — keep in
- * sync): ``` or ~~~ (3+), up to 3 leading spaces (CommonMark), closing fence same
- * char with length >= opening; an opening line whose remainder contains the fence
- * char again is inline code (```code```), not a fence. */
+ * sync): ``` or ~~~ (3+), any amount of leading whitespace tolerated (deliberately
+ * more permissive than CommonMark's 3-space limit), closing fence same char with
+ * length >= opening; an opening line whose remainder contains the fence char again
+ * is inline code (```code```), not a fence. */
 function stripCode(body) {
   const out = [];
   let fence = null; // {char,len}

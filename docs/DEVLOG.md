@@ -42,10 +42,24 @@
 > store.mjs 导出 resolveLinks 供 ui/lib/graph.mjs 复用(消手工复制);
 > acquire.mjs 三处硬编码连接器名单收口为 REMOTE_CONNECTORS/ALL_CONNECTORS;
 > confConf → connectorConfig。
-> 未修(留痕):F1 拉取的 space/issue key 独立入口(CLI 本就只收
-> JQL/CQL/max,JQL 可表达;新增 CLI 旗标属功能变更走变更流程);graph.js 180
+> 未修(留痕):F1 拉取的 space/issue key 独立入口(**用户裁决 2026-08-04:不补,
+> JQL/CQL 已够用**——CLI 本就只收 JQL/CQL/max,JQL 可表达 key 过滤);graph.js 180
 > tick 同步预热、waitJob 轮询与 SSE 并存(有意后备)。测试:59+54+37+67+39
 > 全绿(256);viewer 单测 +1(S8),e2e 适配令牌。
+>
+> **修复轮再审(同日,N1-N6)**:① N1 viewer index.html 漏 no-cache(portal 本轮
+> 已修同款——缓存副本持死令牌,写操作莫名 403)→ 补上,两侧各有测试断言钉死;
+> ② N3 commitGovernRun 三宗罪全收:改异步 execFile(job 回调路径同步 git 会卡住
+> 门户事件循环)、catch→null 混淆「非 git 仓库」与「commit 被拒」→ 非 git 由
+> headBefore 判空静默跳过、git 失败则 job.log+SSE 显式警告且 gitCommitted:
+> 'failed'(改动留工作区不丢)、目录级 pathspec 会卷入用户未提交的手改 → 改为
+> 只提交「本轮新增脏路径 ∩ wiki/+log.md」(与 C 层共享同一归因盲区,已留痕);
+> ③ N5 自动提交补测试:git KB 上 run 变更被 kb-portal 提交、用户预置脏文件不被
+> 卷入、noop 运行零提交、非 git KB 无 gitCommitted 字段(governruns +2);
+> ④ N2 注释失准(^\s* 无上限含 tab,非 CommonMark 3 空格)与 N4 出处错引
+> (零跨服务导入出自 CONTEXT.md 薄工具红线+ADR-0004,非 ADR-0001)→ 注释修正;
+> ⑤ N6(browse/dashboard 监听器竞态窗口内多触发一次只读刷新,随下次挂载自愈)
+> 判定无害,留痕不修。测试 59+54+37+69+39 = 258 全绿。
 
 
 > **采集适配一期(2026-08-03,Zephyr + Confluence 宏,调研 docs/research/

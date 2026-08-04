@@ -1,8 +1,9 @@
-// Localhost write security for the thin viewer (CONTEXT.md red line 2 — shared
-// by portal and viewer). INTENTIONAL near-copy of ui/lib/auth.mjs: the zero
-// cross-service import rule (ADR-0001) forbids importing the portal's module,
-// so the discipline is duplicated by hand, like the three frontmatter.mjs
-// copies. If one side changes, change the other.
+// Localhost write security for the thin viewer (CONTEXT.md thin-tools red
+// line 2 — shared by portal and viewer). INTENTIONAL near-copy of
+// ui/lib/auth.mjs: the viewer must not import the portal's code (ADR-0004
+// dumb-consumer separation; CONTEXT.md's shared red lines), so the discipline
+// is duplicated by hand, like the three frontmatter.mjs copies. If one side
+// changes, change the other.
 //
 // Binding 127.0.0.1 does NOT stop a malicious web page from POSTing to this
 // server (simple requests are not CORS-preflighted; CORS only blocks reading

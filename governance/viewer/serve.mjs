@@ -162,9 +162,14 @@ export function createViewer(kbRoot) {
         const abs = path.resolve(PUBLIC_DIR, name);
         if (!abs.startsWith(path.resolve(PUBLIC_DIR) + path.sep)) return json(res, 400, { error: 'bad static path' });
         if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) return json(res, 404, { error: 'not found' });
+        // index.html carries the per-startup write token in a meta tag →
+        // no-cache, always (a cached copy holds a DEAD token from a previous
+        // launch and every write would 403 — same fix as the portal side)
+        if (abs.endsWith('.html')) {
+          res.writeHead(200, { 'content-type': MIME['.html'], 'cache-control': 'no-cache' });
+          return res.end(fs.readFileSync(abs, 'utf8').replace('%%VIEWER_TOKEN%%', auth.token));
+        }
         res.writeHead(200, { 'content-type': MIME[path.extname(abs)] || 'application/octet-stream' });
-        // index.html carries the per-startup write token in a meta tag
-        if (abs.endsWith('.html')) return res.end(fs.readFileSync(abs, 'utf8').replace('%%VIEWER_TOKEN%%', auth.token));
         return res.end(fs.readFileSync(abs));
       }
       return json(res, 404, { error: 'not found' });
