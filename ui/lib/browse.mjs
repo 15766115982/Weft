@@ -16,7 +16,7 @@ export function listWikiPages(kbRoot) {
   if (fs.existsSync(indexAbs)) {
     pages.push({ path: 'wiki/index.md', title: 'Index', isIndex: true });
   }
-  for (const sub of ['sources', 'topics']) {
+  for (const sub of ['sources', 'entities', 'concepts', 'syntheses']) {
     for (const abs of walkMd(path.join(kbRoot, 'wiki', sub))) {
       const rel = path.relative(kbRoot, abs).replace(/\\/g, '/');
       const { fields } = parseFrontmatter(fs.readFileSync(abs, 'utf8'));
@@ -36,7 +36,7 @@ export function listWikiPages(kbRoot) {
 // topic pages via their sources[] provenance list.
 export function rawRefs(kbRoot, rawRel) {
   const out = [];
-  for (const sub of ['sources', 'topics']) {
+  for (const sub of ['sources', 'entities', 'concepts', 'syntheses']) {
     for (const abs of walkMd(path.join(kbRoot, 'wiki', sub))) {
       const rel = path.relative(kbRoot, abs).replace(/\\/g, '/');
       const { fields } = parseFrontmatter(fs.readFileSync(abs, 'utf8'));

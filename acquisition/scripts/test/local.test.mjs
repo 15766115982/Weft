@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { run } from '../connectors/local.mjs';
+import { run, detect } from '../connectors/local.mjs';
 import { ensureKbSkeleton } from '../lib/kb.mjs';
 import { parseFrontmatter } from '../lib/frontmatter.mjs';
 
@@ -86,6 +86,35 @@ test('reconcile: rename → orphan report → --prune explicit cleanup', () => {
 
   s = run(kbRoot, { inbox });
   assert.equal(s.orphaned.length, 0);
+
+  fs.rmSync(kbRoot, { recursive: true, force: true });
+});
+
+test('detect: classifies inbox files as new/changed/unchanged and raw-only as removed_upstream', () => {
+  const { kbRoot, inbox } = makeKb();
+  fs.writeFileSync(path.join(inbox, 'pay.md'), '# Pay\n\nv1\n', 'utf8');
+  run(kbRoot, { inbox });
+
+  // unchanged
+  let d = detect(kbRoot, { inbox });
+  assert.equal(d.unchanged.length, 1);
+  assert.equal(d.new.length, 0);
+  assert.equal(d.changed.length, 0);
+  assert.equal(d.removed_upstream.length, 0);
+
+  // changed
+  fs.writeFileSync(path.join(inbox, 'pay.md'), '# Pay\n\nv2\n', 'utf8');
+  d = detect(kbRoot, { inbox });
+  assert.equal(d.changed.length, 1);
+  assert.ok(d.changed[0].path.startsWith('raw/local/'));
+
+  // new + removed
+  fs.renameSync(path.join(inbox, 'pay.md'), path.join(inbox, 'pay-renamed.md'));
+  d = detect(kbRoot, { inbox });
+  assert.equal(d.new.length, 1);
+  assert.equal(d.new[0].upstream_id, 'pay-renamed.md');
+  assert.equal(d.removed_upstream.length, 1);
+  assert.equal(d.removed_upstream[0].upstream_id, 'pay.md');
 
   fs.rmSync(kbRoot, { recursive: true, force: true });
 });

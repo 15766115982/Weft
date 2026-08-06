@@ -2,28 +2,38 @@
 
 ## System Positioning
 
-A **self-governing knowledge base system**: acquires documents from multiple scattered data
-sources (Confluence / SharePoint / Jira, etc.), governs them into a structurally stable
-knowledge base (wiki tree), and serves efficient, precise queries through a retrieval service.
+A **self-governing knowledge base system** for teams: acquires documents from multiple
+scattered data sources (Confluence / SharePoint / Jira / GitHub / Azure Repos / local files),
+governs them into a structurally stable knowledge base (wiki tree), and serves efficient,
+precise queries and page-level Q&A through retrieval and LLM services.
 
-**The primary user is Claude Code (an LLM agent)**, with human users browsing by eye as the
-secondary audience. This is not a multi-user collaboration platform — no always-on services,
-**no web platform** (human interfaces are on-demand localhost tools, see below), no user
-permission system.
+**Primary users**: the team as a whole. Two roles:
+- **Readers** — browse, search, and ask questions; no login required.
+- **Operators** — a single admin login that can run acquisition/governance jobs, review
+  candidates, edit wiki pages, and tune prompts.
+
+This is not a general multi-user collaboration platform: it is a **knowledge governance and
+Q&A portal** focused on ingestion, curation, and trustworthy answers. The original localhost
+red lines are relaxed for team deployment (ADR-0009): the UI portal may run as a resident
+intranet service, but it is still designed to be launched on demand and carries no complex
+permission model.
 
 ## Glossary
 
 ### Services
 
-The system consists of three **fully decoupled** services. A "service" here is not a resident
+The system consists of four **fully decoupled** services. A "service" here is not a resident
 process but an independent capability package in the form of **Skill + scripts**, invoked on
-demand by Claude Code:
+demand by Claude Code or by each other through a stable CLI contract:
 
 - **Acquisition service** — calls the APIs of each data source and pulls original documents
-  to local storage
+  to local storage. Also performs read-only upstream change detection (`acquire detect`).
 - **Governance service** — governs original documents and the existing wiki tree, producing a
-  governed wiki tree
-- **Retrieval service** — performs efficient, precise retrieval over the governed wiki tree
+  governed wiki tree. Every mutating action is recorded in a decision log.
+- **Retrieval service** — performs efficient, precise retrieval over the governed wiki tree.
+- **LLM service** — owns all model calls (Azure OpenAI via SPN) behind a single CLI contract.
+  Governance tasks use non-streaming JSON; chat and deep-research stream NDJSON. The LLM
+  service is the only service that talks to the model.
 
 ### KB structure: two data zones + rules layer + candidate state machine
 
@@ -38,55 +48,58 @@ Karpathy LLM Wiki paradigm: raw / wiki / schema):
   service only reads, never modifies.
 - **`wiki/` (curation zone)** — exclusive write by the governance service. The structurally
   stable governed product, and the retrieval service's only indexing target. Wiki pages trace
-  back to `raw/` documents via source pointers in their frontmatter.
+  back to `raw/` documents via source pointers in their frontmatter. Four page types:
+  **source** (1:1 summaries), **entity** (named things), **concept** (ideas/mechanisms),
+  **synthesis** (cross-source narrative / Q&A products).
 - **Rules layer (Schema)** — normative documents (directory structure + frontmatter spec +
-  workflow conventions); the single contract all three services obey; must be frozen early.
+  workflow conventions); the single contract all four services obey; must be frozen early.
 - **Candidate state machine** — the implementation of governance risk tiers: wiki pages have a
   status (candidate / approved / rejected / archived; `rejected` is transient, swept into
-  archive/). Low-risk, conflict-free governance is completed
-  and takes effect automatically by the LLM; high-risk cases (conflicts, doubtful version
-  adjudication, etc.) produce candidate pages that take effect only after human approval. A
-  candidate is a **status**, not a separate directory (cf. llm-wiki-compiler's review queue).
-  When an archived page is moved into `wiki/archive/`, its `status: archived` must be flipped
-  at the same time (contract §4); the retrieval service indexes only approved pages and skips
-  the archive/ directory wholesale (double insurance).
+  archive/). Low-risk, conflict-free governance is completed and takes effect automatically;
+  high-risk cases (conflicts, contradictions, archiving approved pages, etc.) produce
+  candidate pages that take effect only after operator review. A candidate is a **status**,
+  not a separate directory. Every transition writes a machine-readable **decision record**
+  to `.kb/govern/decisions/`, so LLM auto-decisions can learn from human precedent.
+- **Decision log** — every mutating governance action appends `.kb/govern/decisions/<id>.json`.
+  Human decisions require a reason; LLM decisions cite precedent IDs and the model version.
+  It is adjudication memory, not rebuildable; `log.md` remains the human-readable audit spine.
 
-### Human interaction surface: thin localhost tools
+### Human interaction surface: thin localhost tools + team portal
 
-The intranet forbids installing Obsidian, so **self-built thin tools are the only interface
-for humans**. Two exist: the M4 **thin viewer** (`governance/viewer/`, review-only) and the
-M7 **UI portal** (`ui/`, ADR-0006 — a console for browsing, search, review, acquisition
-operations, raw management, and agent-driven governance with live streaming). Shared red
-lines (to prevent a relapse of platform bloat disease):
+Two local tools remain: the M4 **thin viewer** (`governance/viewer/`, review-only) and the
+M7 **UI portal** (`ui/`, ADR-0006/0009 — a console for browsing, search, review, acquisition
+operations, raw management, agent-driven governance with live streaming, and page-level chat
++ deep-research Q&A).
 
-1. **Launch on demand, no resident service** — a Node script starts localhost; shut down
-   when done;
-2. **No user system, no permissions, no configuration UI** — a single-user local tool;
-   localhost write requests still carry a startup-generated token + Origin/Host checks
-   (binding 127.0.0.1 does not stop a malicious web page from POSTing to it);
+The original red lines are revised by ADR-0009:
+
+1. **Launch on demand by default** — a Node script can start localhost; the portal may also
+   be deployed as a resident intranet service for team use. No always-on background process
+   is required.
+2. **Minimal auth** — readers need no login; operators use a single admin login. No
+   per-user permission system.
 3. **Whitelisted writes only** — the viewer's only write is flipping frontmatter `status`
    (candidate → approved / rejected); the portal's KB writes are confined to the contract
-   §1 whitelist (inbox uploads / raw delete+move with snapshot-first / statusflip /
-   `.kb/ui/` artifacts), executed through a **per-KB serial write queue** that enforces
-   the single-operator assumption at the tool layer. Governance rules live forever only
-   in the skills/scripts.
+   §1 whitelist plus the new decision-reason flows, executed through a **per-KB serial write
+   queue** that enforces the single-operator assumption at the tool layer. Governance rules
+   live forever only in the skills/scripts; prompts are editable per KB under `.kb/config/`.
 
-Tech stack: a Node script serving localhost static files + a no-build HTML page (no framework
-build chain on the frontend — the old frontend's build chain was one of the maintenance
-burdens). Logging of review outcomes: the viewer/portal flips only `status` and never writes
+Tech stack: a Node script serving static files + a no-build HTML page (no framework build
+chain). Logging of review outcomes: the viewer/portal flips only `status` and never writes
 log.md; the governance service's **`sweep`** (run first in every governance session) backfills
 the missing `review |` log lines by diffing log.md against current page statuses, and moves
-`rejected` pages into `wiki/archive/` (flipping them to `archived`).
+`rejected` pages into `wiki/archive/` (flipping them to `archived`). Sweep also backfills
+human decision records for unlogged flips.
 
 ### Repository and deployment shape
 
-- **Single code repo**: the three services are top-level packages (acquisition/ governance/
-  retrieval/, each containing SKILL.md + scripts/) plus the M7 `ui/` portal package
-  (ADR-0006, a pure consumer — zero reverse dependency), not split into per-service repos —
+- **Single code repo**: the four services are top-level packages (acquisition/ governance/
+  retrieval/ llm/ each containing SKILL.md + scripts/) plus the M7 `ui/` portal package
+  (ADR-0006/0009, a pure consumer — zero reverse dependency), not split into per-service repos —
   decoupling is guaranteed by "communicate only through the KB directory"; splitting repos
   would instead require syncing three copies of the contract.
 - **The rules layer is materialized as `schema/`**: contract.md (directory structure +
-  frontmatter spec, the single three-party contract, frozen before code) + governance.md
+  frontmatter spec, the single four-party contract, frozen before code) + governance.md
   (governance conventions).
 - **KB data is independent**: the KB directory (raw/ wiki/ log.md .kb/) is completely separate
   from the code repo and is its own independent Git repository; multiple KB instances may
@@ -124,11 +137,15 @@ the missing `review |` log lines by diffing log.md against current page statuses
 - **Connector pluginization**: a common framework (frontmatter generation, normalization,
   persisting, hashing, incremental skip) + one connector script per source; adding a source =
   adding one script, without touching the framework.
+- **Upstream change detection**: `acquire detect` lists remote documents within the configured
+  scope, compares their version/hash with the corresponding `raw/` files, and writes
+  `.kb/acquire/upstream-detect.json` without modifying `raw/`. This allows a daily job to
+  detect stale sources and either alert operators or trigger an `acquire pull` automatically.
 - **Orphan reconcile**: when a connector runs it checks raw/ for documents whose source has
   disappeared (deleted/renamed/moved); **by default it only reports `orphaned` — deletion
-  requires an explicit `--prune`** (deletion is irreversible and needs human confirmation);
+  requires an explicit `--prune`** (deletion is irreversible and needs operator confirmation);
   cleanup is recorded in log.md. Downstream backstop: if the governance service finds a wiki
-  page whose `source_ref` points to a defunct raw document → archive candidate (human
+  page whose `source_ref` points to a defunct raw document → archive candidate (operator
   adjudication). Rename/move = new identity, new document, with the old document becoming an
   orphan; content-unchanged duplicates are converged by the governance layer's "identical hash
   auto-dedup". The local source's `source_id` = first 8 chars of the hash of the
@@ -137,8 +154,9 @@ the missing `review |` log lines by diffing log.md against current page statuses
 ### Retrieval service (v2, corrected through deep research)
 
 **Design philosophy: retrieval is an interface design problem, not a retriever design
-problem** — scripts own recall and bounding; the Claude session owns precision (iterative
-exploration, reranking, full-text reading).
+problem** — scripts own recall and bounding; the Claude session or LLM service owns precision
+(iterative exploration, reranking, full-text reading). Chat and deep-research are first-class
+consumers of retrieval, not replacements for it.
 
 - **Contract inputs**: only pages in `wiki/` with **approved status** + index.md +
   frontmatter; candidate/archived pages are structurally invisible to retrieval ("only the
@@ -157,23 +175,24 @@ exploration, reranking, full-text reading).
     source-system time source_version (when ISO) preferred, falling back to governance time
     updated_at; both are normalized to UTC at index time so lexicographic comparison is
     chronological; status is pinned to approved on the indexing side) + boolean combinations,
-    constructed by Claude (division: the logical query defines the candidate set, BM25 defines
-    the ranking);
+    constructed by Claude or the LLM service (division: the logical query defines the candidate
+    set, BM25 defines the ranking);
   - **Vector leg off by default**, configurable to an OpenAI-compatible endpoint or local GGUF
     (Qwen3-Embedding-0.6B for CJK corpora, not embeddinggemma); RRF (k=60) fusion; silently
     skipped when unconfigured;
   - wikilink graph expansion: outbound-link neighbors of top-10 hit pages are merged into the
-    candidates (annotated via:link), plus ADR-0007 provenance neighbors — a topic hit pulls in
-    its `sources:` (via:provenance) and a source hit pulls in its covering topics (read-time
-    reverse, never stored); per-page fan-out capped;
+    candidates (annotated via:link), plus ADR-0007 provenance neighbors — an entity/concept/
+    synthesis hit pulls in its `sources:` (via:provenance) and a source hit pulls in its
+    covering pages (read-time reverse, never stored); per-page fan-out capped;
   - Outputs a **candidate space** rather than one-shot snippets: top-10 preview + full top-K
     persisted to disk + `--within` scoped iterative digging + `read <path>#<anchor>` to fetch
     a whole section; ≤2 snippets per page.
-- **Retrieval skill (Claude precision loop)**: for broad questions first read index.md →
+- **Retrieval skill (precision loop)**: for broad questions first read index.md →
   construct a structured query → initial search → **CSQE** (extract key terms from hit
   snippets, rewrite, re-query; **HyDE-style speculative expansion forbidden**) → read the full
   text of hit sections → answer with wikilink citations; multi-hop questions follow graph
-  expansion.
+  expansion. This loop is run by Claude Code sessions or by the LLM service's deep-research
+  task.
 - **No offline graph-building pipeline** (GraphRAG-style): wiki backlinks + index.md already
   constitute explicit structure; agentic iterative retrieval suffices; re-evaluate only if
   complex multi-hop demands emerge in the future. (ADR-0007's in-process provenance derivation
@@ -186,25 +205,32 @@ exploration, reranking, full-text reading).
 destructive ones, and those requiring business adjudication, go to the candidate queue.**
 
 - **Automatic**: create/update source summary pages (1:1 mechanical mapping), update index.md,
-  create new topic pages, append **non-contradictory** information to existing topic pages.
-- **Candidate (human adjudication)**: new information contradicting existing pages, suspected
-  cross-source duplicates, merging already-approved topic pages, archiving/deleting
-  already-approved pages, multi-version validity trade-offs.
-- **Governance log**: all governance operations (automatic and candidate) must be written to a
-  traceable log (append-only, including operation type, target, and rationale), supporting
-  after-the-fact audit and rollback; the whole KB is a Git repository with one commit per
-  governance run for automatic changes.
-- **Triggering: human-triggered, batch execution**. The user explicitly initiates governance
-  in a Claude Code session; no automatic immediate governance after pulling (governance
-  requires a cross-document global view). Every governance run starts with `sweep`
-  (reconciling any viewer flips since the last run).
+  create new entity/concept/synthesis pages, append **non-contradictory** information to
+  existing pages;
+- **Candidate (operator adjudication)**: new information contradicting existing pages,
+  suspected cross-source duplicates, merging already-approved pages, archiving/deleting
+  already-approved pages, multi-version validity trade-offs;
+- **Decision log**: every governance operation that mutates `wiki/` or `archive/` appends a
+  machine-readable record to `.kb/govern/decisions/<id>.json` (human decisions require a
+  reason; LLM decisions cite precedent IDs and model version). The log is the few-shot memory
+  that allows automatic governance to mimic operator precedent. When precedent is
+  contradictory, the LLM fails closed to `candidate`.
+- **Governance log**: all governance operations (automatic and candidate) must also be written
+  to a traceable log (append-only `log.md`, including operation type, target, and rationale),
+  supporting after-the-fact audit and rollback; the whole KB is a Git repository with one
+  commit per governance run for automatic changes.
+- **Triggering: human-triggered or scheduled batch execution**. Operators explicitly initiate
+  governance in a Claude Code session or through the portal; scheduled daily jobs run the
+  independent steps in order. Every governance run starts with `sweep`
+  (reconciling any viewer/portal flips since the last run).
 - **Review shape**: the candidate queue is processed either item by item conversationally in
-  a Claude Code session (view diff, approve/reject/modify) or in the thin viewer (M4);
-  both channels drive the same state machine (contract §4).
+  a Claude Code session (view diff, approve/reject/modify), in the thin viewer (M4), or in the
+  portal's decision inbox; all channels drive the same state machine (contract §4) and write
+  decision records.
 
-### wiki/ internal structure: page type system + topic emergence
+### wiki/ internal structure: page type system
 
-What is stable is the **type system and entry contract**, not the topic tree (the topic tree's
+What is stable is the **type system and entry contract**, not the exact tree (the tree's
 language, granularity, etc. are defined later by the governance conventions):
 
 - **`wiki/sources/`** — source summary pages. **1:1 with `raw/` documents by default** —
@@ -213,12 +239,20 @@ language, granularity, etc. are defined later by the governance conventions):
   exceptions: **auto-dedup** (an exact duplicate of a raw that already has an approved source
   page is never written — the redundant raw is tombstoned) and **loser-archive** (an
   adjudicated loser source page is archived and its raw tombstoned).
-- **`wiki/topics/`** — topic synthesis pages. 1:N cross-source fusion products; the core value
-  of governance; frontmatter carries a `sources:` list tracing provenance. The topic tree
-  emerges with content; duplicate topic pages are converged through a merge mechanism (merging
-  rewrites backlinks and archives the old page).
-- **`wiki/index.md`** — whole-KB navigation index (one line per page), must be updated after
-  every governance run; the retrieval service's **entry contract**.
+- **`wiki/entities/`** — entity pages: named things (systems, teams, products, projects,
+  components, people). Frontmatter may carry `kind` (human-readable entity kind) and typed
+  `relations` to other entities; body links use `[[wikilink]]`.
+- **`wiki/concepts/`** — concept pages: ideas, mechanisms, patterns, definitions, protocols.
+  A concept is not a named object but a shared abstraction described by multiple sources.
+- **`wiki/syntheses/`** — synthesis pages: cross-source narrative products such as onboarding
+  guides, comparisons, how-tos, and answers to recurring questions. A synthesis may state
+  conclusions not present in any single source, as long as each claim cites sources.
+- **`wiki/index.md`** — whole-KB navigation index (one line per page, grouped by type), must
+  be updated after every governance run; the retrieval service's **entry contract**.
+
+All non-source page types share slug identity, `sources:` provenance, union-merge update
+semantics, and the candidate state machine. Merge/converge semantics apply across the same
+type (an entity does not merge with a concept).
 
 ### Document identity and versioning
 
@@ -235,36 +269,40 @@ language, granularity, etc. are defined later by the governance conventions):
   canonical categories, detected over the whole KB: **exact duplicate** (identical
   `content_hash`, only when both sides carry it) → auto-dedup without writing a redundant
   source page; **similar version** (same title/filename family + CJK-aware body-similarity
-  confirmation) → forced `candidate` (fail-closed) at apply-topic so a fused topic can never
-  be silently approved; **factual conflict** with existing topic content → semantic
+  confirmation) → forced `candidate` (fail-closed) at apply-* so a fused page can never
+  be silently approved; **factual conflict** with existing approved content → semantic
   self-check (mandatory governance-LLM step, prompted by `semantic_check_required`).
 - **Adjudication memory** (`.kb/govern/`): an archived loser's raw is **tombstoned**
   (`source-tombstones.json`) — plan does not re-pend it, apply-source refuses to revive it
   without `--force`; a "parallel documents" pair is **dismissed**
   (`conflict-dismissals.json`) and never re-flagged; `plan` writes the **conflicts**
-  side-channel (`conflicts.json`) with a raw-set freshness fingerprint that `apply-topic`
+  side-channel (`conflicts.json`) with a raw-set freshness fingerprint that `apply-*`
   verifies, degrading to an in-topic check on a stale/missing one. `reject` is
-  **reject-and-restore**: a candidate that overwrote an approved topic reverts to its last
-  git-committed approved version, logged synchronously.
+  **reject-and-restore**: a candidate that overwrote an approved page reverts to its last
+  git-committed approved version, logged synchronously. The **decision log**
+  (`.kb/govern/decisions/`) is added by ADR-0009: every mutating action records the actor,
+  reason, precedent IDs, and model version, so LLM auto-decisions can learn from operator
+  precedent.
 - `raw/` is organized into directories by source system, not by project (project attribution
   is a curation judgment, a governance-layer responsibility).
 
 **Single-responsibility principle**: every directory has exactly one writer; orchestration is
-the Claude session's responsibility.
+the Claude session's or the portal scheduler's responsibility.
 
 ### Inter-layer contract: pure filesystem
 
-The **only contract among the three services is the filesystem**: the agreed directory
+The **only contract among the four services is the filesystem**: the agreed directory
 structure + frontmatter spec. Zero code dependency between layers, zero inter-process calls.
 Any layer can be independently rewritten or replaced.
 
-- **Orchestration moved up to the LLM**: the Claude session calls acquisition → governance →
-  retrieval in order; orchestration logic exists in no layer's code; layers contain only
-  deterministic scripts.
+- **Orchestration moved up to the LLM or the portal scheduler**: the Claude session or a daily
+  job calls acquisition → governance → retrieval → llm in order; orchestration logic exists in
+  no layer's code; layers contain only deterministic scripts.
 - **Indexes are derived artifacts**: SQLite and other indexes are outside the contract and can
-  be fully rebuilt from Markdown at any time.
+  be fully rebuilt from Markdown at any time (except adjudication memory in `.kb/govern/` and
+  per-KB user config in `.kb/config/`).
 - The directory structure and frontmatter spec are the only conventions in the system that all
-  three parties must obey; they must be frozen into documents early.
+  four parties must obey; they must be frozen into documents early.
 
 ### Lessons from the old version (LLM-Wiki v1 platform edition)
 

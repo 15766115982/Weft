@@ -64,6 +64,24 @@ export async function render(view) {
     return;
   }
 
+  // D6 quick-action bar: one-click access to the three operator loops.
+  const actions = el('div', { class: 'cards', style: 'margin-bottom:6px' });
+  html(actions, [
+    `<a href="#/search" class="stat" style="text-decoration:none;color:inherit">
+      <div class="stat-top"><span class="ic">${icon('search', 14)}</span><span class="label">检索</span></div>
+      <div class="num" style="font-size:18px">搜索 wiki</div></a>`,
+    `<a href="#/chat" class="stat" style="text-decoration:none;color:inherit">
+      <div class="stat-top"><span class="ic">${icon('messageCircle', 14)}</span><span class="label">问答</span></div>
+      <div class="num" style="font-size:18px">问 agent</div></a>`,
+    `<a href="#/govern" class="stat" style="text-decoration:none;color:inherit">
+      <div class="stat-top"><span class="ic">${icon('sparkles', 14)}</span><span class="label">治理</span></div>
+      <div class="num" style="font-size:18px">跑 plan</div></a>`,
+    `<a href="#/queue" class="stat" style="text-decoration:none;color:inherit">
+      <div class="stat-top"><span class="ic">${icon('listChecks', 14)}</span><span class="label">评审</span></div>
+      <div class="num" style="font-size:18px">审候选</div></a>`,
+  ].join(''));
+  view.append(actions);
+
   // dossier: one natural-language paragraph instead of a wall of numbers
   const bits = [`共 <b>${h.pages.total}</b> 篇页面`];
   bits.push(`<b>${h.pages.byStatus.approved || 0}</b> 篇已批准(可检索)`);
@@ -104,7 +122,9 @@ export async function render(view) {
     STAT('check', h.pages.byStatus.approved || 0, '已批准(可检索)'),
     STAT('circleAlert', h.pages.byStatus.candidate || 0, '候选(待评审)'),
     STAT('fileText', h.pages.byType.source || 0, '来源摘要页'),
-    STAT('layers', h.pages.byType.topic || 0, '主题综合页'),
+    STAT('database', h.pages.byType.entity || 0, '实体页'),
+    STAT('tag', h.pages.byType.concept || 0, '概念页'),
+    STAT('layers', h.pages.byType.synthesis || 0, '主题综合页'),
     STAT('fileX', h.plan.orphaned_pages, '孤儿页'),
     STAT('link2', h.plan.dangling_links, '悬空链接'),
     STAT('activity', h.plan.errors, '治理错误'),

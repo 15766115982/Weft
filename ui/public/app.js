@@ -12,11 +12,15 @@ import { render as queueView } from './views/queue.js';
 import { render as acquireView } from './views/acquire.js';
 import { render as governView } from './views/govern.js';
 import { render as graphView } from './views/graph.js';
+import { render as upstreamView } from './views/upstream.js';
+import { render as rawView } from './views/raw.js';
+
+import { render as chatView } from './views/chat.js';
 
 const ROUTES = {
   dashboard: dashboardView, browse: browseView, page: browseView,
-  search: searchView, queue: queueView, acquire: acquireView, govern: governView,
-  graph: graphView,
+  search: searchView, queue: queueView, inbox: queueView, acquire: acquireView, govern: governView,
+  graph: graphView, upstream: upstreamView, raw: rawView, chat: chatView,
 };
 let pageCache = { kb: null, pages: [] };
 let currentRoute = 'dashboard';
@@ -25,7 +29,7 @@ let currentRoute = 'dashboard';
 
 const SHORTCUTS = [
   ['Ctrl K / ⌘ K', '命令面板(搜页面 / 动作)'],
-  ['g d / g b / g r / g s / g q / g a / g g', '前往 总览 / 浏览 / 图谱 / 检索 / 评审 / 采集 / 治理'],
+  ['g d / g b / g r / g s / g q / g a / g u / g w / g g / g c', '前往 总览 / 浏览 / 图谱 / 检索 / 评审 / 采集 / 上游 / 来源 / 治理 / 问答'],
   ['g t', '切换暗色 / 亮色'],
   ['/', '聚焦搜索框(检索页)/ 命令面板(其他页)'],
   ['j k 或 [ ]', '评审队列:上 / 下一条'],
@@ -169,7 +173,10 @@ async function paletteItems() {
     { icon: 'search', label: '前往:检索', hint: 'g s', go: '#/search' },
     { icon: 'listChecks', label: '前往:评审队列', hint: 'g q', go: '#/queue' },
     { icon: 'inbox', label: '前往:采集控制台', hint: 'g a', go: '#/acquire' },
+    { icon: 'search', label: '前往:上游检测', hint: 'g u', go: '#/upstream' },
+    { icon: 'folderGit-2', label: '前往:来源管理', hint: 'g w', go: '#/raw' },
     { icon: 'sparkles', label: '前往:治理控制台', hint: 'g g', go: '#/govern' },
+    { icon: 'messageCircle', label: '前往:问答', hint: 'g c', go: '#/chat' },
     { icon: 'keyboard', label: '键盘快捷键', hint: '?', action: showShortcuts },
     { icon: 'moon', label: '切换暗色 / 亮色', hint: 'g t', action: toggleTheme },
   ];
@@ -197,7 +204,10 @@ hotkeys('g r', () => { location.hash = '#/graph'; });
 hotkeys('g s', () => { location.hash = '#/search'; });
 hotkeys('g q', () => { location.hash = '#/queue'; });
 hotkeys('g a', () => { location.hash = '#/acquire'; });
+hotkeys('g u', () => { location.hash = '#/upstream'; });
+hotkeys('g w', () => { location.hash = '#/raw'; });
 hotkeys('g g', () => { location.hash = '#/govern'; });
+hotkeys('g c', () => { location.hash = '#/chat'; });
 hotkeys('g t', toggleTheme);
 hotkeys('g k', () => document.getElementById('kb-select')?.focus()); // P2-3
 hotkeys('shift+/', (e) => { e.preventDefault(); showShortcuts(); }); // "?" (P1-2)

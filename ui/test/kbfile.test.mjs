@@ -64,7 +64,7 @@ test('kbfile optimistic lock: stale base_hash → 409; re-based force save succe
 });
 
 test('kbfile gates: whitelist, traversal, empty body, security', async () => {
-  for (const bad of ['kb.json', 'wiki/topics/x.md', '../kb.json', 'governance.md', 'GOVERNANCE.MD ']) {
+  for (const bad of ['kb.json', 'wiki/syntheses/x.md', '../kb.json', 'governance.md', 'GOVERNANCE.MD ']) {
     const res = await post('/api/kbfile-edit', { path: bad, body: 'x' }, { 'x-ui-token': token });
     assert.equal(res.status, 400, `rejected: ${bad}`);
   }

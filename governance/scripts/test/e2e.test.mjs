@@ -67,15 +67,15 @@ test('CLI end-to-end: govern → candidate → viewer reject → sweep → index
   assert.ok(viewerToken, 'index.html carries the per-startup token');
   const r = await fetch(`http://127.0.0.1:${port}/api/review`, {
     method: 'POST', headers: { 'content-type': 'application/json', 'x-viewer-token': viewerToken },
-    body: JSON.stringify({ path: 'wiki/topics/retry-budget.md', action: 'reject' }),
+    body: JSON.stringify({ path: 'wiki/syntheses/retry-budget.md', action: 'reject' }),
   });
   assert.equal(r.status, 200);
   viewer.kill();
-  assert.equal((log().match(/retry-budget/g) || []).length, 1, 'only the candidate:topic line exists so far');
+  assert.equal((log().match(/retry-budget/g) || []).length, 1, 'only the candidate:synthesis line exists so far');
 
   const s = govern(['sweep']);
-  assert.deepEqual(s.backfilled, [{ page: 'wiki/topics/retry-budget.md', status: 'rejected' }]);
-  assert.deepEqual(s.archived, [{ from: 'wiki/topics/retry-budget.md', page: 'wiki/archive/retry-budget.md' }]);
+  assert.deepEqual(s.backfilled, [{ page: 'wiki/syntheses/retry-budget.md', status: 'rejected' }]);
+  assert.deepEqual(s.archived, [{ from: 'wiki/syntheses/retry-budget.md', page: 'wiki/archive/retry-budget.md' }]);
 
   govern(['rebuild-index']);
   const index = fs.readFileSync(path.join(kb, 'wiki', 'index.md'), 'utf8');
@@ -84,9 +84,9 @@ test('CLI end-to-end: govern → candidate → viewer reject → sweep → index
 
   for (const re of [
     /govern \| auto:create-source \| wiki\/sources\/local-aaaa1111-pay\.md/,
-    /govern \| candidate:topic \| wiki\/topics\/retry-budget\.md \| sources:1 conflicts on budget/,
-    /review \| reject \| wiki\/topics\/retry-budget\.md \| via viewer \(backfilled\)/,
-    /govern \| auto:archive-rejected \| wiki\/archive\/retry-budget\.md \| from wiki\/topics\/retry-budget\.md/,
+    /govern \| candidate:synthesis \| wiki\/syntheses\/retry-budget\.md \| sources:1 conflicts on budget/,
+    /review \| reject \| wiki\/syntheses\/retry-budget\.md \| via viewer \(backfilled\)/,
+    /govern \| auto:archive-rejected \| wiki\/archive\/retry-budget\.md \| from wiki\/syntheses\/retry-budget\.md/,
     /govern \| auto:rebuild-index \| wiki\/index\.md/,
   ]) {
     assert.match(log(), re);

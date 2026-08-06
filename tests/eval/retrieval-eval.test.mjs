@@ -16,7 +16,7 @@ const HIT5_THRESHOLD = 0.85;
 
 let kb;
 const rows = [];
-const pageOf = (ref) => ref.startsWith('topic:') ? `wiki/topics/${ref.slice(6)}.md` : sourcePageFor(ref);
+const pageOf = (ref) => ref.startsWith('topic:') ? `wiki/syntheses/${ref.slice(6)}.md` : sourcePageFor(ref);
 
 before(() => {
   kb = makeScratchKb('kb-eval-');
@@ -99,7 +99,8 @@ test('retrieval effectiveness: golden query set', async (t) => {
           assert.ok(!preview.includes(abs), `${abs} must be absent from preview`);
         }
         if (q.onlyType) {
-          for (const p of preview) assert.ok(p.includes(`/${q.onlyType}s/`), `${p} is not a ${q.onlyType} page`);
+          const typeDir = { source: 'sources', entity: 'entities', concept: 'concepts', synthesis: 'syntheses' }[q.onlyType];
+          for (const p of preview) assert.ok(p.includes(`/${typeDir}/`), `${p} is not a ${q.onlyType} page`);
         }
         if (q.routed) {
           assert.ok(res.routed[q.routed.leg].includes(q.routed.term),

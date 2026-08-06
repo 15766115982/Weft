@@ -1,12 +1,17 @@
-# Knowledge Base Contract (Contract v1)
+# Knowledge Base Contract (Contract v2)
 
-> This file is the **single contract** jointly obeyed by the three services: **acquisition /
-> governance / retrieval**. The three services have zero code dependency and zero
+> This file is the **single contract** jointly obeyed by the four services: **acquisition /
+> governance / retrieval / llm**. The four services have zero code dependency and zero
 > inter-process calls; they communicate only through the directory structure and frontmatter
-> spec defined here. Modifying this file = modifying the three-party contract; it requires
+> spec defined here. Modifying this file = modifying the four-party contract; it requires
 > review and a synchronized update of `CONTEXT.md` and the relevant ADRs.
 >
-> Status: **Frozen (v1, 2026-07-30)** · Companion: `./governance.md` (governance conventions)
+> Status: **Frozen (v2, 2026-08-05)** · Companion: `./governance.md` (governance conventions)
+>
+> Changes from v1 (ADR-0009): added the `llm` service; expanded wiki page-type enum from
+> `source | topic` to `source | entity | concept | synthesis`; added `.kb/acquire/`,
+> `.kb/config/`, and `.kb/govern/decisions/`; relaxed the blanket "everything in `.kb/` is
+> rebuildable" statement to carve out adjudication memory and per-KB user config.
 
 ## 1. Knowledge Base (KB) Directory Structure
 
@@ -22,7 +27,9 @@ A knowledge base instance is a directory on disk, itself an independent Git repo
 │   └── local/<hash8>-<slug>.md      # output of the local-file connector
 ├── wiki/                    # Curation zone — exclusive write by the governance service
 │   ├── sources/<source>-<source_id>.md   # source summary pages, 1:1 with raw documents
-│   ├── topics/<slug>.md                  # topic synthesis pages, 1:N cross-source fusion
+│   ├── entities/<slug>.md                # entity pages: named things (systems, teams, products)
+│   ├── concepts/<slug>.md                # concept pages: ideas, mechanisms, definitions
+│   ├── syntheses/<slug>.md               # synthesis pages: cross-source narrative / Q&A products
 │   ├── archive/                          # archive of merged/superseded pages (kept for traceability)
 │   └── index.md                          # whole-KB navigation index, the retrieval entry contract
 ├── log.md                   # governance log (append-only, checked in)
@@ -31,20 +38,30 @@ A knowledge base instance is a directory on disk, itself an independent Git repo
     ├── search_state.json    # incremental hash state of the index
     ├── candidates/          # query candidate spaces persisted to disk by the retrieval script (temporary)
     ├── acquire_runs.jsonl   # per-source pull records appended by the acquisition service (one JSON line per run; the only record of all-skipped incremental pulls)
+    ├── acquire/             # upstream-detect artifacts (exclusive write by the acquisition service)
+    │   └── upstream-detect.json
     ├── govern_runs.jsonl    # agent-governance run records appended by the UI portal (two lines per run: phase start/finish; a start with no finish reads as interrupted)
-    ├── govern/              # governance adjudication memory (source-tombstones.json, conflict-dismissals.json, conflicts.json — plan 0001 §1), exclusive write by the governance service
+    ├── govern/              # governance adjudication memory (source-tombstones.json, conflict-dismissals.json, conflicts.json, decisions/ — plan 0001 §1, ADR-0009), exclusive write by the governance service
+    ├── config/              # per-KB user config (prompts and LLM models, ADR-0009)
+    │   ├── prompts/
+    │   └── models.json
     └── ui/                  # UI portal derived artifacts (jobs.db, eval scores, snapshots/), exclusive write by the UI portal
 ```
 
 ### Write Permission Matrix (single-responsibility principle)
 
-| Path | Acquisition | Governance | Retrieval | Thin viewer | UI portal |
-|---|---|---|---|---|---|
-| `raw/` | **write** | read | forbidden | read | read + **delete/move only** (see rules) |
-| `wiki/` | forbidden | **write** | read | only frontmatter `status` (candidate → approved / rejected) | same flip primitive + **human body edits** (demote rule, see ⑤) |
-| `log.md` | **append** | **append** | read | forbidden | **append** (manual-edit entries: `candidate:manual`, `file:edit`, `review` reject-restore) |
-| `.kb/` | only `acquire_runs.jsonl` append | `.kb/govern/` **write**, rest read | **write** (`index.sqlite`, `search_state.json`, `candidates/`) | read | `.kb/ui/` **write** + `govern_runs.jsonl` append, rest read |
-| `kb.json` | read | read | read | read | read |
+| Path | Acquisition | Governance | Retrieval | LLM | Thin viewer | UI portal |
+|---|---|---|---|---|---|---|
+| `raw/` | **write** | read | forbidden | read | read | read + **delete/move only** (see rules) |
+| `wiki/` | forbidden | **write** | read | read | only frontmatter `status` (candidate → approved / rejected) | same flip primitive + **human body edits** (demote rule, see ⑤) |
+| `log.md` | **append** | **append** | read | read | forbidden | **append** (manual-edit entries: `candidate:manual`, `file:edit`, `review` reject-restore) |
+| `.kb/acquire/` | **write** | read | read | read | read | read |
+| `.kb/govern/` | read | **write** | read | read | read | read |
+| `.kb/config/` | read | read | read | **write** (`prompts/` via `init-prompts` only) | read | read |
+| `.kb/ui/` | read | read | read | read | read | **write** |
+| `.kb/index.sqlite` / `.kb/search_state.json` / `.kb/candidates/` | read | read | **write** | read | read | read |
+| `.kb/acquire_runs.jsonl` / `.kb/govern_runs.jsonl` | **append** | read | read | read | read | **append** |
+| `kb.json` | read | read | read | read | read | read |
 
 Rules:
 - No layer may write to paths exclusively owned by another layer;
@@ -52,13 +69,13 @@ Rules:
   field of a wiki page's frontmatter (candidate → approved / rejected); `rejected` is a
   transient outcome — the governance service's sweep moves rejected pages into
   `wiki/archive/` and flips them to `archived` (see §4);
-- The **UI portal** (ADR-0006, `ui/`) is an on-demand localhost human console under the
-  same red lines as the thin viewer (launch on demand; no user system), with its KB
-  writes confined to an explicit whitelist: ① inbox/ uploads (staging area of the local
-  connector — never raw/ directly), ② raw/ delete & move (snapshot first, impact preview
-  first, executed via its per-KB serial write queue; move = new identity — the old
-  document becomes an orphan, as with any rename), ③ frontmatter `status` flips via the
-  governance statusflip primitive,
+- The **UI portal** (ADR-0006, `ui/`) is a team-server human console (ADR-0009 relaxes the
+  original on-demand-only red line; it still runs on demand by default but may be deployed as
+  a resident intranet service). Its KB writes are confined to an explicit whitelist: ① inbox/
+  uploads (staging area of the local connector — never raw/ directly), ② raw/ delete & move
+  (snapshot first, impact preview first, executed via its per-KB serial write queue; move =
+  new identity — the old document becomes an orphan, as with any rename), ③ frontmatter
+  `status` flips via the governance statusflip primitive,
   ④ `.kb/ui/` derived artifacts,
   ⑤ **human wiki edits** (M7d, user-ruled 2026-08-02): the portal may rewrite a wiki
   page's body; every save demotes the page to `candidate` with a `review_note`
@@ -74,9 +91,10 @@ Rules:
   the whitelist is a fixed set in code, never user-extensible. Everything else is read-only. Its write operations go
   through a per-KB serial queue; its destructive operations preserve a restorable
   snapshot (git commit when the KB is a repository, file-copy snapshot otherwise);
-- Everything inside `.kb/` can be fully rebuilt from `wiki/` (plus, for
-  `acquire_runs.jsonl` and `.kb/ui/`, re-derived from operational use); deleting it does
-  not affect correctness.
+- Everything inside `.kb/` can be fully rebuilt **except** governance adjudication memory
+  (`.kb/govern/`, including `decisions/`) and per-KB user configuration (`.kb/config/`).
+  Deleting those loses historical precedent and tuned prompts; deleting other `.kb/`
+  artifacts does not affect correctness.
 
 ## 2. raw/ Original Document Spec
 
@@ -136,7 +154,7 @@ extra: {}                             # source-specific metadata (optional, e.g.
 
 ```yaml
 ---
-type: source | topic           # page type (required)
+type: source | entity | concept | synthesis  # page type (required)
 status: candidate | approved | rejected | archived  # candidate state machine (required,
                                 # see §4; `rejected` is transient — the governance sweep
                                 # moves rejected pages into archive/ and flips them to
@@ -146,6 +164,16 @@ title: "Page title"            # required
 created_at / updated_at: ISO8601
 ---
 ```
+
+A page's **slug** is its filename without `.md`; it is the page's identity for entity,
+concept, and synthesis pages. Slugs are lowercase kebab-case, `/^[a-z0-9][a-z0-9-]*$/`
+(a path component, whitelisted like `source_id` in §2). Re-applying an existing slug = an
+update of the same page, never a fork. Update semantics: `sources` is **union-merged**
+(provenance is never silently dropped), `created_at` is preserved, `updated_at` is bumped;
+`aliases`/`tags` omitted = keep. Source pages use the deterministic filename
+`<source>-<source_id>.md` instead of a free slug. Body interlinks use `[[wikilink]]` (the
+piped alias form `[[slug|display name]]` guarantees Obsidian compatibility and rename
+stability).
 
 ### 3.2 source summary pages (`wiki/sources/`)
 
@@ -175,47 +203,83 @@ tags: [...]
 Body = structured summary (key points, key conclusions, topics involved); does not contain
 the full original text.
 
-### 3.3 topic pages (`wiki/topics/`)
+### 3.3 entity pages (`wiki/entities/`)
 
-Cross-source synthesis pages (1:N fusion); the core product of governance. Filename = topic
-slug. The slug is the topic's **identity**: lowercase kebab-case,
-`/^[a-z0-9][a-z0-9-]*$/` (a path component, whitelisted like `source_id` in §2); re-applying
-an existing slug = an update of the same topic, never a fork. Update semantics: `sources` is
-**union-merged** (provenance is never silently dropped), `created_at` is preserved,
-`updated_at` is bumped; `aliases`/`tags` omitted = keep.
+Named things: systems, teams, products, projects, people, components. An entity page
+abstracts a single real-world object and is referenced by concept and synthesis pages.
 
 ```yaml
 ---
-type: topic
+type: entity
 status: candidate | approved
-title: "Topic name"
-sources:                         # provenance trace-back (required)
-  - "raw/jira/PROJ-123.md"
+title: "FAA"
+aliases: ["FAA module", "FAA feature"]
+tags: []
+sources:                       # provenance trace-back (required)
+  - "raw/jira/FA-123.md"
   - "raw/confluence/123456.md"
-aliases: [...]                   # aliases, for wikilink resolution
-tags: [...]
-review_note: "..."               # optional; the reason a page is a candidate (what
-                                 # conflicts with what), visible to reviewers; meaningful
-                                 # while candidate. Dropped when the page is next WRITTEN
-                                 # by apply-topic as approved; approve/viewer flips touch
-                                 # only the status line, so the note remains on flipped
-                                 # pages as inert residue
+kind: "system"                 # optional entity kind (free short string, human-readable)
+relations:                     # typed relations to other entities (optional)
+  - { rel: "developed_by", target: "entities/team-platform.md", evidence: ["raw/jira/FA-123.md"] }
+review_note: "..."
 ---
 ```
 
-The body interlinks using `[[wikilink]]` (the piped alias form `[[slug|display name]]`
-guarantees Obsidian compatibility and rename stability).
+### 3.4 concept pages (`wiki/concepts/`)
 
-### 3.4 `wiki/index.md` (retrieval entry contract)
+Ideas, mechanisms, patterns, definitions, protocols. A concept is not a named thing but a
+shared abstraction that multiple sources describe.
+
+```yaml
+---
+type: concept
+status: candidate | approved
+title: "Payment timeout retry"
+aliases: ["payment retry"]
+tags: []
+sources:
+  - "raw/jira/PROJ-123.md"
+  - "raw/confluence/123456.md"
+review_note: "..."
+---
+```
+
+### 3.5 synthesis pages (`wiki/syntheses/`)
+
+Cross-source narrative products: answers to recurring questions, onboarding guides,
+comparisons, how-tos. A synthesis is allowed to state conclusions that are not present in
+any single source, as long as each claim is backed by cited sources.
+
+```yaml
+---
+type: synthesis
+status: candidate | approved
+title: "How payment retries work"
+aliases: []
+tags: []
+sources:
+  - "raw/jira/PROJ-123.md"
+  - "raw/confluence/123456.md"
+review_note: "..."
+---
+```
+
+### 3.6 `wiki/index.md` (retrieval entry contract)
 
 Must be rebuilt after every governance run. Grouped by type, one line per page:
 
 ```markdown
-## Topics
-- [[topics/payment-timeout]] — Payment timeout retry mechanism and compensation strategy(status:approved, sources:3)
+## Entities
+- [[entities/faa]] — FAA feature overview (status:approved, sources:2)
+
+## Concepts
+- [[concepts/payment-timeout-retry]] — Payment timeout retry mechanism (status:approved, sources:3)
+
+## Syntheses
+- [[syntheses/payment-retries]] — How payment retries work (status:candidate, sources:2)
 
 ## Sources
-- [[sources/jira-PROJ-123]] — PROJ-123 payment gateway requirements(jira, 2026-07-28)
+- [[sources/jira-PROJ-123]] — PROJ-123 payment gateway requirements (jira, 2026-07-28)
 ```
 
 Constraints: single line = wikilink + one-sentence summary + key metadata; read directly by
@@ -236,22 +300,29 @@ the retrieval service and by Claude for navigation; also Tier 0 of index-first r
 ```
 
 - **Takes effect automatically (directly approved)**: source page creation/update, index.md
-  update, creation of new topic pages, appending non-contradictory information to existing
-  topic pages;
+  update, creation of new entity/concept/synthesis pages, appending non-contradictory
+  information to existing pages;
 - **Must be a candidate (candidate)**: contradiction with existing pages, suspected
-  cross-source duplicates, merging already-approved topic pages, archiving/deleting
+  cross-source duplicates, merging already-approved pages, archiving/deleting
   already-approved pages, multi-version validity trade-offs;
 - **Conflict detection is structural** (ADR-0008 / plan 0001): `plan` detects three
   cross-document categories over the whole KB — exact duplicate (identical `content_hash`,
   only when both sides carry it), similar version (title/filename pre-filter + CJK-aware
-  body-similarity confirmation), and factual conflict (semantic; judged at topic-application
-  time against existing topic content). A topic whose `sources` touch a flagged group is
-  **forced to `candidate`** by `apply-topic` — the caller's `--candidate` cannot be silently
+  body-similarity confirmation), and factual conflict (semantic; judged at application
+  time against existing approved content). A page whose `sources` touch a flagged group is
+  **forced to `candidate`** by `apply-*` — the caller's `--candidate` cannot be silently
   omitted (bug 0001). `apply-source` auto-dedups exact duplicates without writing; a rejected
   candidate that overwrote an approved page is **reject-and-restored** to its last
   git-committed approved version, logged synchronously; an adjudicated loser's source page is
   archived and its raw tombstoned. Persisted adjudication lives in `.kb/govern/`
   (`source-tombstones.json`, `conflict-dismissals.json`, `conflicts.json`);
+- **Decision log** (ADR-0009): every transition that changes `wiki/` or `archive/` writes a
+  machine-readable decision record to `.kb/govern/decisions/<id>.json`. Human decisions
+  carry a required `reason` and `actor: human`; LLM auto-decisions carry `actor: llm`, the
+  `model_version` used, and the IDs of referenced historical decisions. When referenced
+  human decisions are contradictory, the LLM decision is forced to `candidate`. The decision
+  log is adjudication memory, not rebuildable; `log.md` remains the human-readable audit
+  spine;
 - **Archive discipline**: when a page is moved into `wiki/archive/`, its frontmatter `status`
   must be flipped to `archived` at the same time and recorded in log.md — double insurance:
   the retrieval service both skips the `wiki/archive/` directory and indexes only pages with
@@ -270,11 +341,11 @@ the retrieval service and by Claude for navigation; also Tier 0 of index-first r
 - **Candidate protection**: re-applying a topic page that is still `candidate` never
   approves it as a side effect — approval is a review outcome (approve command / viewer
   flip) only;
-- **Merge discipline**: merging topic pages is human-adjudicated and scoped to
+- **Merge discipline**: merging pages is human-adjudicated and scoped to
   already-`approved` pages — a candidate in the pair is reviewed first (approve or
   reject); merging one would bypass the review queue. The governance merge
   command mechanically rewrites backlinks (`[[old-slug]]` → `[[new-slug]]`, display and
-  anchor preserved) across `wiki/sources` + `wiki/topics`, unions provenance into the
+  anchor preserved) across `wiki/*`, unions provenance into the
   surviving page, archives the old page, and logs — no dangling wikilinks are left
   behind (archive/ is a frozen record and is not rewritten);
 - The retrieval service **indexes only pages with `status: approved`** — "only the currently
@@ -286,24 +357,26 @@ append-only; every entry starts with a uniform prefix (parseable with Unix tools
 
 ```markdown
 ## [2026-07-30T14:00:00+08:00] govern | auto:create-source | wiki/sources/jira-PROJ-123.md | from raw/jira/PROJ-123.md
-## [2026-07-30T14:00:01+08:00] govern | candidate:contradiction | wiki/topics/payment-timeout.md | conflicts with sources/jira-PROJ-099.md
-## [2026-07-30T14:00:02+08:00] govern | auto:create-topic | wiki/topics/payment-timeout.md | sources:3
-## [2026-07-30T15:20:00+08:00] review | approve | wiki/topics/payment-timeout.md | via session
-## [2026-07-30T15:21:00+08:00] review | reject | wiki/topics/old-topic.md | via viewer (backfilled)
-## [2026-07-30T15:22:00+08:00] govern | auto:archive-rejected | wiki/archive/old-topic.md | from wiki/topics/old-topic.md
+## [2026-07-30T14:00:01+08:00] govern | candidate:contradiction | wiki/syntheses/payment-retries.md | conflicts with sources/jira-PROJ-099.md
+## [2026-07-30T14:00:02+08:00] govern | auto:create-synthesis | wiki/syntheses/payment-retries.md | sources:3
+## [2026-07-30T15:20:00+08:00] review | approve | wiki/syntheses/payment-retries.md | via session
+## [2026-07-30T15:21:00+08:00] review | reject | wiki/archive/old-synthesis.md | via viewer (backfilled)
+## [2026-07-30T15:22:00+08:00] govern | auto:archive-rejected | wiki/archive/old-synthesis.md | from wiki/syntheses/old-synthesis.md
 ## [2026-07-30T15:23:00+08:00] govern | archive | wiki/archive/superseded.md | from wiki/sources/jira-PROJ-099.md
-## [2026-07-30T15:24:00+08:00] govern | merge | wiki/topics/payment-timeout.md | from wiki/topics/payment-retry.md (archived, 2 backlink files)
+## [2026-07-30T15:24:00+08:00] govern | merge | wiki/entities/faa.md | from wiki/entities/faa-module.md (archived, 2 backlink files)
 ```
 
 Format: `## [<ISO8601>] <actor> | <action> | <object path> | <note>`,
-actor ∈ `govern | review | acquire | portal` (`portal` = human actions through
-the UI portal, per §1 whitelist ⑤⑥: `candidate:manual`, `file:edit`).
+actor ∈ `govern | review | acquire | portal | llm` (`portal` = human actions through
+the UI portal, per §1 whitelist ⑤⑥: `candidate:manual`, `file:edit`; `llm` = automatic
+governance action where the model made the final approve/candidate call).
 
 Action vocabulary (non-exhaustive): `auto:create-source`, `auto:update-source`,
-`auto:rebuild-index`, `auto:create-topic`, `auto:update-topic`, `candidate:*` (any
+`auto:rebuild-index`, `auto:create-entity`, `auto:update-entity`, `auto:create-concept`,
+`auto:update-concept`, `auto:create-synthesis`, `auto:update-synthesis`, `candidate:*` (any
 candidate-producing governance outcome), `auto:dedup-source` (exact-duplicate raw
-tombstoned, target = the surviving page), `auto:dedup-topic` (a topic's identical-hash
-sources converged to one reference), `archive`, `auto:archive-rejected`, `merge`
+tombstoned, target = the surviving page), `auto:dedup-topic` (legacy term for a page's
+identical-hash sources converged to one reference), `archive`, `auto:archive-rejected`, `merge`
 (govern actor);
 `approve`, `reject` (review actor, note `via session | via viewer | via viewer (backfilled)` —
 the backfilled form is written by the sweep for flips the viewer made without logging;
@@ -351,9 +424,13 @@ default `["Test"]`).
 
 ## 7. Change Discipline
 
-1. Any modification to this file must be synced to CONTEXT.md, with ADRs added as the impact
+1. Any modification to this file must be synced to `CONTEXT.md`, with ADRs added as the impact
    warrants;
-2. The three services' implementations are free in everything internal outside the contract
-   (chunking strategy, fusion parameters, prompts, etc. are not part of the contract);
+2. The four services' implementations are free in everything internal outside the contract
+   (chunking strategy, fusion parameters, prompts, model endpoints, etc. are not part of the
+   contract);
 3. Contract evolution is **increment-compatible only**: adding optional fields is allowed;
-   changing semantics or deleting fields requires a version bump.
+   changing semantics or deleting fields requires a version bump. v1 → v2 (2026-08-05, ADR-0009)
+   changed the wiki page-type enum and the write-permission matrix and therefore required a
+   version bump; the optional `kind` and `relations` fields on entity pages are increment-compatible
+   additions within v2.

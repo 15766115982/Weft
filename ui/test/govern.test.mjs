@@ -211,12 +211,12 @@ test('agent settings regenerate under <kb>/.kb/ui (derived artifact, whitelist â
 });
 
 test('boundary check: only newly-dirty paths outside the governance write set flag', () => {
-  const before = ' M wiki/topics/old.md\n?? scratch.txt\n';
-  const after = ' M wiki/topics/old.md\n M wiki/topics/new.md\n?? scratch.txt\n?? evil.bat\n M raw/local/x.md\n';
+  const before = ' M wiki/syntheses/old.md\n?? scratch.txt\n';
+  const after = ' M wiki/syntheses/old.md\n M wiki/syntheses/new.md\n?? scratch.txt\n?? evil.bat\n M raw/local/x.md\n';
   assert.deepEqual(boundaryViolations(before, after), ['evil.bat', 'raw/local/x.md'],
     'wiki/ and .kb/ and log.md are the write set; pre-dirty scratch.txt is unattributable, not flagged');
   assert.deepEqual(boundaryViolations(null, after), [], 'non-git KB: layer C inactive');
   assert.deepEqual(boundaryViolations(before, before), [], 'no new dirt, no report');
-  const renamed = 'R  wiki/topics/a.md -> wiki/topics/b.md\n';
+  const renamed = 'R  wiki/syntheses/a.md -> wiki/syntheses/b.md\n';
   assert.deepEqual(boundaryViolations('', renamed), [], 'rename within wiki/ parsed by its new name');
 });

@@ -83,15 +83,15 @@ test('/api/conflicts exposes the plan side-channel (conflict group + fingerprint
 test('reject is reject-and-restore with a synchronous log (P1-5): sweep backfills nothing', async () => {
   // overwrite the approved topic with a wrong candidate (bug 0001 flow), uncommitted
   applyTopicPage(kb, { slug: 'payment-timeout', title: 'Payment Timeout (fused)', sources: ['raw/local/pay-v1.md'], candidate: true }, 'wrong fusion body');
-  assert.equal(readPage('wiki/topics/payment-timeout.md').fields.status, 'candidate');
-  const r = await post('/api/review', { path: 'wiki/topics/payment-timeout.md', action: 'reject' });
+  assert.equal(readPage('wiki/syntheses/payment-timeout.md').fields.status, 'candidate');
+  const r = await post('/api/review', { path: 'wiki/syntheses/payment-timeout.md', action: 'reject', reason: 'wrong fusion' });
   assert.equal(r.status, 200);
   const body = await r.json();
   assert.equal(body.result.restored, true);
-  assert.equal(readPage('wiki/topics/payment-timeout.md').fields.title, 'Payment Timeout', 'restored approved baseline');
+  assert.equal(readPage('wiki/syntheses/payment-timeout.md').fields.title, 'Payment Timeout', 'restored approved baseline');
   // the synchronous log line is written (portal actor) — lastLogAction is not candidate:*
   const log = fs.readFileSync(path.join(kb, 'log.md'), 'utf8');
-  assert.match(log, /review \| reject \| wiki\/topics\/payment-timeout\.md \| via portal \| restored previous approved version/);
+  assert.match(log, /review \| reject \| wiki\/syntheses\/payment-timeout\.md \| via portal.*restored previous approved version/);
   // P1-5: the sweep must NOT backfill an approval for this restore
   const out = JSON.parse(execFileSync('node', [path.join(UI_DIR, '..', 'governance', 'scripts', 'govern.mjs'), 'sweep', '--kb', kb], { encoding: 'utf8' }));
   assert.deepEqual(out.backfilled, [], 'restore log prevents a mis-recorded backfilled approve');
@@ -100,7 +100,7 @@ test('reject is reject-and-restore with a synchronous log (P1-5): sweep backfill
 test('archive-source archives the loser source page + tombstones its raw', async () => {
   const loserPage = 'wiki/sources/local-pay-v2.md';
   assert.ok(fs.existsSync(path.join(kb, loserPage)));
-  const r = await post('/api/review', { path: loserPage, action: 'archive-source' });
+  const r = await post('/api/review', { path: loserPage, action: 'archive-source', reason: 'loser archive' });
   assert.equal(r.status, 200);
   const body = await r.json();
   assert.ok(body.result.page.endsWith('.md'), `archived into wiki/archive: ${body.result.page}`);
@@ -116,7 +116,7 @@ test('archive-source archives the loser source page + tombstones its raw', async
 
 test('dismiss-conflict persists a pair as parallel documents', async () => {
   const r = await post('/api/review', {
-    path: 'wiki/topics/payment-timeout.md', action: 'dismiss-conflict',
+    path: 'wiki/syntheses/payment-timeout.md', action: 'dismiss-conflict',
     raws: ['raw/local/pay-v1.md', 'raw/local/pay-v2.md'], reason: 'parallel docs',
   });
   assert.equal(r.status, 200);
@@ -124,6 +124,6 @@ test('dismiss-conflict persists a pair as parallel documents', async () => {
   assert.equal(state.length, 1);
   assert.deepEqual(state[0].raws, ['raw/local/pay-v1.md', 'raw/local/pay-v2.md']);
   // a non-git/ghost action that never existed must 404 (write gate)
-  const bad = await post('/api/review', { path: 'wiki/topics/ghost.md', action: 'approve' });
+  const bad = await post('/api/review', { path: 'wiki/syntheses/ghost.md', action: 'approve', reason: 'x' });
   assert.equal(bad.status, 404);
 });

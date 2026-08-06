@@ -1,0 +1,15 @@
+{
+  "endpoint": "https://your-resource.openai.azure.com",
+  "deployment": "gpt-5-4",
+  "api_version": "2025-01-01-preview",
+  "auth": {
+    "type": "spn",
+    "tenant_id": "your-tenant-id",
+    "client_id": "your-client-id",
+    "client_secret": "WEFT_AZURE_CLIENT_SECRET"
+  },
+  "defaults": {
+    "temperature": 0.2,
+    "max_tokens": 4096
+  }
+}

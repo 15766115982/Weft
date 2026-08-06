@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveKbRoot, loadKbConfig, ensureKbSkeleton } from './lib/kb.mjs';
+import { writeDetectReport } from './lib/detect.mjs';
 
 function parseArgs(argv) {
   const args = { _: [] };
@@ -22,7 +23,7 @@ function parseArgs(argv) {
 }
 
 const args = parseArgs(process.argv.slice(2));
-const [connector] = args._;
+const [cmd, connector] = args._;
 
 // Boolean flags take no value: `--flag` / `--flag true` / `--flag false` are accepted;
 // anything else fails loudly instead of silently reading as false (e.g. `--prune yes`
@@ -38,8 +39,38 @@ async function main() {
   ensureKbSkeleton(kbRoot);
   const config = loadKbConfig(kbRoot);
 
+  if (cmd === 'detect') {
+    let result;
+    switch (connector) {
+      case 'local': {
+        const { detect } = await import('./connectors/local.mjs');
+        const inboxConf = config.connectors?.local?.inbox || 'inbox/';
+        const inbox = path.resolve(kbRoot, args.inbox || inboxConf);
+        result = detect(kbRoot, { inbox });
+        break;
+      }
+      case 'jira': {
+        const { detect } = await import('./connectors/jira.mjs');
+        result = await detect(kbRoot, { kbConfig: config, jql: args.jql, maxResults: args.max });
+        break;
+      }
+      case 'confluence': {
+        const { detect } = await import('./connectors/confluence.mjs');
+        result = await detect(kbRoot, { kbConfig: config, cql: args.cql, maxResults: args.max });
+        break;
+      }
+      default:
+        console.error('usage: node acquire.mjs detect <local|jira|confluence> [--kb <path>] [--jql "<JQL>"] [--cql "<CQL>"] [--max <n>]');
+        process.exitCode = 64;
+        return;
+    }
+    const report = writeDetectReport(kbRoot, connector, result);
+    console.log(JSON.stringify({ connector, kb: kbRoot, detect: report }, null, 2));
+    return;
+  }
+
   let summary;
-  switch (connector) {
+  switch (cmd) {
     case 'local': {
       const { run } = await import('./connectors/local.mjs');
       const inboxConf = config.connectors?.local?.inbox || 'inbox/';
@@ -74,14 +105,15 @@ async function main() {
     }
     default:
       console.error('usage: node acquire.mjs <local|jira|confluence> [--kb <path>] [options]');
+      console.error('       node acquire.mjs detect <local|jira|confluence> [--kb <path>] [options]');
       console.error('  local: [--inbox <path>] [--prune]  --prune removes orphaned docs (default report-only)');
       console.error('  jira:  [--jql "<JQL>"] [--max <n>] [--check] [--probe]  scope from kb.json connectors.jira.jql; PAT via env var');
       console.error('  confluence: [--cql "<CQL>"] [--max <n>] [--check] [--probe <pageId>]  scope from kb.json connectors.confluence.spaces/.cql; PAT via env var');
       process.exitCode = 64;
       return;
   }
-  console.log(JSON.stringify({ connector, kb: kbRoot, ...summary }, null, 2));
-  recordRun(kbRoot, connector, summary);
+  console.log(JSON.stringify({ connector: cmd, kb: kbRoot, ...summary }, null, 2));
+  recordRun(kbRoot, cmd, summary);
 }
 
 // Append one compact JSON line per pull to <kb>/.kb/acquire_runs.jsonl

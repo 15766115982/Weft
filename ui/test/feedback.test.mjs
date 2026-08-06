@@ -15,7 +15,7 @@ before(async () => {
   kb = fs.mkdtempSync(path.join(os.tmpdir(), 'kb-portal-j9-'));
   fs.mkdirSync(path.join(kb, 'wiki', 'topics'), { recursive: true });
   fs.writeFileSync(path.join(kb, 'wiki', 'topics', 'p.md'),
-    buildFrontmatter({ type: 'topic', status: 'approved', title: 'P' }) + '\nbody\n', 'utf8');
+    buildFrontmatter({ type: 'synthesis', status: 'approved', title: 'P' }) + '\nbody\n', 'utf8');
   fs.writeFileSync(path.join(kb, 'wiki', 'index.md'), '# Index\n', 'utf8');
   server = createPortal({ kb, port: 0 });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -30,8 +30,8 @@ const post = (p, obj, headers = {}) => fetch(base + p, {
 });
 
 test('votes append one JSON line each, newest-first read side', async () => {
-  assert.equal((await post('/api/feedback', { q: 'retry policy', page: 'wiki/topics/p.md', vote: 'up' }, { 'x-ui-token': token })).status, 200);
-  assert.equal((await post('/api/feedback', { q: 'saga compensation', page: 'wiki/topics/p.md', vote: 'down' }, { 'x-ui-token': token })).status, 200);
+  assert.equal((await post('/api/feedback', { q: 'retry policy', page: 'wiki/syntheses/p.md', vote: 'up' }, { 'x-ui-token': token })).status, 200);
+  assert.equal((await post('/api/feedback', { q: 'saga compensation', page: 'wiki/syntheses/p.md', vote: 'down' }, { 'x-ui-token': token })).status, 200);
 
   const lines = fs.readFileSync(path.join(kb, '.kb', 'ui', 'feedback.jsonl'), 'utf8').trim().split('\n');
   assert.equal(lines.length, 2);
@@ -51,8 +51,8 @@ test('votes append one JSON line each, newest-first read side', async () => {
 });
 
 test('feedback validation + security', async () => {
-  assert.equal((await post('/api/feedback', { q: 'x', page: 'wiki/topics/p.md', vote: 'meh' }, { 'x-ui-token': token })).status, 400);
-  assert.equal((await post('/api/feedback', { q: '', page: 'wiki/topics/p.md', vote: 'up' }, { 'x-ui-token': token })).status, 400);
+  assert.equal((await post('/api/feedback', { q: 'x', page: 'wiki/syntheses/p.md', vote: 'meh' }, { 'x-ui-token': token })).status, 400);
+  assert.equal((await post('/api/feedback', { q: '', page: 'wiki/syntheses/p.md', vote: 'up' }, { 'x-ui-token': token })).status, 400);
   assert.equal((await post('/api/feedback', { q: 'x', page: '../log.md', vote: 'up' }, { 'x-ui-token': token })).status, 400, 'page must be a wiki page');
-  assert.equal((await post('/api/feedback', { q: 'x', page: 'wiki/topics/p.md', vote: 'up' })).status, 403, 'no token');
+  assert.equal((await post('/api/feedback', { q: 'x', page: 'wiki/syntheses/p.md', vote: 'up' })).status, 403, 'no token');
 });

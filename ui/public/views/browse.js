@@ -26,7 +26,7 @@ function groupDetails(name, label, count, itemsHtml, folds, filter) {
     store.set('folds', JSON.stringify(folds));
   });
   const sum = el('summary');
-  html(sum, `${icon('chevronRight', 11)} ${icon(label === 'raw' ? 'database' : label === 'topics' ? 'layers' : 'fileText', 12)}
+  html(sum, `${icon('chevronRight', 11)} ${icon(label === 'raw' ? 'database' : label === 'syntheses' ? 'layers' : label === 'entities' ? 'tag' : label === 'concepts' ? 'fileText' : 'fileText', 12)}
     <span>${label.toUpperCase()}</span><span class="count">${count}</span>`);
   det.append(sum);
   const body = el('div', { class: 'grp-body' });
@@ -37,10 +37,13 @@ function groupDetails(name, label, count, itemsHtml, folds, filter) {
 
 function wikiGroups(pages, current, filter) {
   const q = (filter || '').toLowerCase();
-  const groups = { sources: [], topics: [] };
+  const groups = { sources: [], entities: [], concepts: [], syntheses: [] };
   for (const p of pages) {
     if (q && !p.title.toLowerCase().includes(q) && !p.path.toLowerCase().includes(q)) continue;
-    (p.path.startsWith('wiki/topics/') ? groups.topics : groups.sources).push(p);
+    if (p.path.startsWith('wiki/sources/')) groups.sources.push(p);
+    else if (p.path.startsWith('wiki/entities/')) groups.entities.push(p);
+    else if (p.path.startsWith('wiki/concepts/')) groups.concepts.push(p);
+    else if (p.path.startsWith('wiki/syntheses/')) groups.syntheses.push(p);
   }
   const folds = JSON.parse(store.get('folds', '{}'));
   const frag = el('div');

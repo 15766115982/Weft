@@ -502,7 +502,31 @@ button.danger-solid { background: var(--wine); border-color: var(--wine); color:
 .hist-star:hover { color: var(--celadon); }
 .hist-item.saved .hist-star { color: var(--celadon); }
 
-/* ---- J8 first-use guide ---- */
+/* ---- P4 chat ---- */
+.chat { max-width: 860px; margin: 0 auto; height: calc(100vh - 100px); display: flex; flex-direction: column; }
+.chat-header { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; flex-wrap: wrap; }
+.chat-header h2 { margin: 0; font-size: 20px; }
+.level-group { display: flex; gap: 4px; background: var(--paper-raise); border: 1px solid var(--line); border-radius: var(--r-btn); padding: 3px; }
+.level-btn { border: none; background: none; padding: 5px 12px; font-size: 12.5px; color: var(--ink-dim); border-radius: 6px; cursor: pointer; transition: all var(--t-fast); }
+.level-btn.on { background: var(--celadon); color: #fff; font-weight: 600; }
+.chat-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 10px 4px; }
+.chat-msg { display: flex; }
+.chat-msg.user { justify-content: flex-end; }
+.chat-msg .bubble { max-width: 82%; padding: 10px 14px; border-radius: var(--r-panel); background: var(--paper-raise); border: 1px solid var(--line); font-size: 14px; line-height: 1.65; }
+.chat-msg.user .bubble { background: var(--celadon-soft); border-color: var(--celadon); color: var(--ink); }
+.chat-msg.assistant .bubble { background: var(--paper-raise); }
+.chat-msg.streaming .bubble { border-color: var(--celadon); box-shadow: 0 0 0 1px var(--celadon-soft); }
+.chat-level-tag { display: inline-block; font-size: 10.5px; color: var(--celadon); border: 1px solid var(--celadon); border-radius: 999px; padding: 0 7px; margin-bottom: 6px; }
+.chat-steps { margin: 0 0 10px; font-size: 12.5px; border: 1px solid var(--line); border-radius: var(--r-btn); padding: 8px 10px; background: var(--paper); }
+.chat-steps summary { cursor: pointer; color: var(--ink-dim); }
+.chat-steps .step { padding: 2px 0; }
+.chat-citations { margin-top: 10px; font-size: 12px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chat-citations a { color: var(--celadon); }
+.chat-thinking { color: var(--ink-dim); font-size: 13px; padding: 4px; }
+.chat-input-row { display: flex; gap: 10px; align-items: flex-end; padding-top: 10px; border-top: 1px solid var(--line); }
+.chat-input-row textarea { flex: 1; margin: 0; min-height: 44px; max-height: 140px; padding: 10px 12px; font-size: 14px; border-radius: var(--r-panel); resize: none; }
+.chat-input-row button { height: 44px; }
+
 .welcome-card { max-width: 560px; margin: 48px auto; padding: 28px 32px;
   border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--paper-raise); }
 .welcome-card .big { font-family: var(--font-display); font-size: 24px; font-weight: 600; margin-bottom: 8px; }

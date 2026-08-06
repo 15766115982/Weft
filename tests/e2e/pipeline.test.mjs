@@ -13,7 +13,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import {
   SCRIPTS, MTIMES, GOVERNABLE, hash8, rawRelFor, sourcePageFor,
-  runCli, runCliText, copyInbox, makeScratchKb, acquire, govern, applyAllSources, snapshot,
+  runCli, runCliText, copyInbox, makeScratchKb, acquire, govern, applyAllSources, snapshot, runLlm,
 } from '../helpers/kb.mjs';
 
 let kb;
@@ -159,24 +159,24 @@ test('govern: topics — approved creation, candidate creation, candidate protec
   const re = govern(kb, ['apply-topic', '--slug', 'retry-budget-draft', '--title', 'Retry Budget (draft)',
     '--sources', rawOf('payment-timeout-retry.md')], 'Updated draft body.\n');
   assert.equal(re.status, 'candidate');
-  assert.match(readKb('wiki/topics/retry-budget-draft.md'), /status: candidate/);
+  assert.match(readKb('wiki/syntheses/retry-budget-draft.md'), /status: candidate/);
   const p = govern(kb, ['plan']);
-  assert.deepEqual(p.review_queue.map((i) => i.page), ['wiki/topics/retry-budget-draft.md']);
+  assert.deepEqual(p.review_queue.map((i) => i.page), ['wiki/syntheses/retry-budget-draft.md']);
 });
 
 test('govern: CLI approve and reject write review log lines immediately; sweep archives rejected', () => {
   govern(kb, ['apply-topic', '--slug', 'order-lifecycle', '--title', 'Order Lifecycle',
     '--sources', rawOf('订单超时关闭.md'), '--candidate', '--note', 'needs a second pair of eyes'],
     'Orders close automatically after 30 unpaid minutes; in-flight retries stop and edge-case charges auto-refund.\n');
-  const ap = govern(kb, ['approve', '--page', 'wiki/topics/order-lifecycle.md']);
+  const ap = govern(kb, ['approve', '--page', 'wiki/syntheses/order-lifecycle.md']);
   assert.equal(ap.status, 'approved');
-  const rj = govern(kb, ['reject', '--page', 'wiki/topics/retry-budget-draft.md']);
+  const rj = govern(kb, ['reject', '--page', 'wiki/syntheses/retry-budget-draft.md']);
   assert.equal(rj.status, 'rejected');
-  assert.match(log(), /review \| approve \| wiki\/topics\/order-lifecycle\.md \| via session/);
-  assert.match(log(), /review \| reject \| wiki\/topics\/retry-budget-draft\.md \| via session/);
+  assert.match(log(), /review \| approve \| wiki\/syntheses\/order-lifecycle\.md \| via session/);
+  assert.match(log(), /review \| reject \| wiki\/syntheses\/retry-budget-draft\.md \| via session/);
   const s = govern(kb, ['sweep']);
   assert.deepEqual(s.backfilled, []); // CLI reviews are logged at flip time — nothing to backfill
-  assert.deepEqual(s.archived, [{ from: 'wiki/topics/retry-budget-draft.md', page: 'wiki/archive/retry-budget-draft.md' }]);
+  assert.deepEqual(s.archived, [{ from: 'wiki/syntheses/retry-budget-draft.md', page: 'wiki/archive/retry-budget-draft.md' }]);
   assert.match(readKb('wiki/archive/retry-budget-draft.md'), /status: archived/);
   assert.match(log(), /govern \| auto:archive-rejected \| wiki\/archive\/retry-budget-draft\.md/);
 });
@@ -205,20 +205,20 @@ test('viewer: queue, flip over HTTP, 409 on double flip, unlogged-flip guard, sw
   assert.ok(viewerToken, 'index.html carries the per-startup token');
   try {
     const q = await api('/api/queue');
-    assert.deepEqual(q.body.pages.map((i) => i.path), ['wiki/topics/recon-ops.md']);
-    const pg = await api('/api/page?path=wiki/topics/recon-ops.md');
+    assert.deepEqual(q.body.pages.map((i) => i.path), ['wiki/syntheses/recon-ops.md']);
+    const pg = await api('/api/page?path=wiki/syntheses/recon-ops.md');
     assert.equal(pg.body.fields.status, 'candidate');
     assert.equal(pg.body.fields.review_note, 'cross-source merge of EN/CJK reconciliation docs');
     const ev = await api(`/api/raw?path=${rawOf('reconciliation.md')}`);
     assert.match(ev.body.body, /settlement cutoff/);
-    const diff = await api('/api/diff?path=wiki/topics/recon-ops.md');
+    const diff = await api('/api/diff?path=wiki/syntheses/recon-ops.md');
     assert.equal(diff.body.baseline, null); // scratch KB has no git history — graceful null
     // flip candidate → approved over HTTP (no log line — that is the design)
-    const flip = await api('/api/review', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: 'wiki/topics/recon-ops.md', action: 'approve' }) });
+    const flip = await api('/api/review', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: 'wiki/syntheses/recon-ops.md', action: 'approve' }) });
     assert.equal(flip.status, 200);
     assert.equal(flip.body.status, 'approved');
     // optimistic concurrency: the same flip again conflicts loudly
-    const again = await api('/api/review', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: 'wiki/topics/recon-ops.md', action: 'approve' }) });
+    const again = await api('/api/review', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: 'wiki/syntheses/recon-ops.md', action: 'approve' }) });
     assert.equal(again.status, 409);
   } finally {
     viewer.kill();
@@ -229,8 +229,8 @@ test('viewer: queue, flip over HTTP, 409 on double flip, unlogged-flip guard, sw
     () => govern(kb, ['apply-topic', '--slug', 'recon-ops', '--title', 'Reconciliation Operations'], 'x\n'),
     /unlogged review flip pending.*run sweep first/s);
   const s1 = govern(kb, ['sweep']);
-  assert.deepEqual(s1.backfilled, [{ page: 'wiki/topics/recon-ops.md', status: 'approved' }]);
-  assert.match(log(), /review \| approve \| wiki\/topics\/recon-ops\.md \| via viewer \(backfilled\)/);
+  assert.deepEqual(s1.backfilled, [{ page: 'wiki/syntheses/recon-ops.md', status: 'approved' }]);
+  assert.match(log(), /review \| approve \| wiki\/syntheses\/recon-ops\.md \| via viewer \(backfilled\)/);
   assert.deepEqual(govern(kb, ['sweep']), { backfilled: [], archived: [] }, 'sweep is idempotent');
 });
 
@@ -241,11 +241,11 @@ test('govern: merge-topic rewrites backlinks, unions provenance, archives loser,
     '--sources', rawOf('rate-limiting.md')], 'Bucket sizing, 429 semantics and Retry-After handling.\n');
   const m = govern(kb, ['merge-topic', '--from', 'throttling-b', '--to', 'throttling-a', '--note', 'duplicate topics']);
   assert.equal(m.action, 'merge');
-  const survivor = readKb('wiki/topics/throttling-a.md');
+  const survivor = readKb('wiki/syntheses/throttling-a.md');
   assert.match(survivor, /status: approved/);
-  assert.match(readKb('wiki/topics/retry-resilience.md'), /\[\[throttling-a\]\]/, 'backlink rewritten');
-  assert.ok(!readKb('wiki/topics/retry-resilience.md').includes('[[throttling-b]]'));
-  assert.match(log(), /govern \| merge \| wiki\/topics\/throttling-a\.md \| from wiki\/topics\/throttling-b\.md/);
+  assert.match(readKb('wiki/syntheses/retry-resilience.md'), /\[\[throttling-a\]\]/, 'backlink rewritten');
+  assert.ok(!readKb('wiki/syntheses/retry-resilience.md').includes('[[throttling-b]]'));
+  assert.match(log(), /govern \| merge \| wiki\/syntheses\/throttling-a\.md \| from wiki\/syntheses\/throttling-b\.md/);
   assert.ok(existsKb('wiki/archive/throttling-b.md'));
   assert.deepEqual(govern(kb, ['plan']).dangling_links, []);
 });
@@ -264,11 +264,11 @@ test('govern: orphaned_pages after prune → human-adjudicated archive', () => {
 });
 
 test('govern: hand-made dangling wikilink is reported, then fixable', () => {
-  const page = path.join(kb, 'wiki', 'topics', 'payment-safety.md');
+  const page = path.join(kb, 'wiki', 'syntheses', 'payment-safety.md');
   fs.appendFileSync(page, '\nSee also [[ghost-page]].\n');
   const p = govern(kb, ['plan']);
-  assert.deepEqual(p.dangling_links, [{ page: 'wiki/topics/payment-safety.md', link: 'ghost-page' }]);
-  const fixed = readKb('wiki/topics/payment-safety.md').replace('\nSee also [[ghost-page]].\n', '');
+  assert.deepEqual(p.dangling_links, [{ page: 'wiki/syntheses/payment-safety.md', link: 'ghost-page' }]);
+  const fixed = readKb('wiki/syntheses/payment-safety.md').replace('\nSee also [[ghost-page]].\n', '');
   fs.writeFileSync(page, fixed);
   assert.deepEqual(govern(kb, ['plan']).dangling_links, []);
 });
@@ -279,9 +279,9 @@ test('govern: rebuild-index matches contract §3.4 format; govern never writes r
   const index = readKb('wiki/index.md');
   const lines = index.split('\n').filter((l) => l.startsWith('- '));
   assert.ok(lines.length >= 14, `expected ≥14 index lines, got ${lines.length}`);
-  for (const l of lines) assert.match(l, /^- \[\[(topics|sources)\/[^\]]+\]\] — .+\(.+\)$/, l);
+  for (const l of lines) assert.match(l, /^- \[\[(sources|entities|concepts|syntheses)\/[^\]]+\]\] — .+\(.+\)$/, l);
   assert.ok(!index.includes('retry-budget-draft') && !index.includes('throttling-b'), 'archived pages excluded');
-  assert.match(index, /\[\[topics\/recon-ops\]\]/);
+  assert.match(index, /\[\[syntheses\/recon-ops\]\]/);
   assert.deepEqual(snapshot(path.join(kb, 'raw')), rawBefore, 'governance must not write raw/');
 });
 
@@ -293,12 +293,12 @@ test('log.md audit: every line matches contract §5 format; key narrative presen
   const sequence = [
     /acquire \| local:created/,
     /govern \| auto:create-source/,
-    /govern \| auto:create-topic \| wiki\/topics\/retry-resilience\.md/,
-    /govern \| candidate:topic \| wiki\/topics\/retry-budget-draft\.md/,
-    /review \| reject \| wiki\/topics\/retry-budget-draft\.md \| via session/,
+    /govern \| auto:create-synthesis \| wiki\/syntheses\/retry-resilience\.md/,
+    /govern \| candidate:synthesis \| wiki\/syntheses\/retry-budget-draft\.md/,
+    /review \| reject \| wiki\/syntheses\/retry-budget-draft\.md \| via session/,
     /govern \| auto:archive-rejected/,
-    /review \| approve \| wiki\/topics\/recon-ops\.md \| via viewer \(backfilled\)/,
-    /govern \| merge \| wiki\/topics\/throttling-a\.md/,
+    /review \| approve \| wiki\/syntheses\/recon-ops\.md \| via viewer \(backfilled\)/,
+    /govern \| merge \| wiki\/syntheses\/throttling-a\.md/,
     /govern \| archive \|/,
     /govern \| auto:rebuild-index \| wiki\/index\.md/,
   ];
@@ -318,7 +318,7 @@ test('retrieval: candidate page is invisible to search and read; approved peers 
     'The zephyranthes protocol draft.\n');
   const s = search('zephyranthes');
   assert.equal(s.total, 0, 'candidate must not be indexed');
-  const r = runCli(SCRIPTS.search, ['read', 'wiki/topics/draft-noise.md', '--kb', kb], { expectFail: true });
+  const r = runCli(SCRIPTS.search, ['read', 'wiki/syntheses/draft-noise.md', '--kb', kb], { expectFail: true });
   assert.ok(r.failed, 'read of a candidate page must be refused');
   const ok = search('retry budget');
   assert.ok(ok.preview.some((c) => c.page === sourcePageFor('payment-timeout-retry.md')));
@@ -346,4 +346,52 @@ test('retrieval: anchored read returns the section; fences preserved through acq
   const raw = readKb(rawOf('deep/structured-doc.md'));
   assert.match(raw, /````bash\npaycore-admin retry-queue drain/);
   assert.ok(raw.includes('[[not-a-real-link]]'), 'code-fence wikilink text preserved verbatim');
+});
+
+// ---------------------------------------------------------------- phase 4: llm service (stub mode)
+const STUB_ENV = { WEFT_LLM_STUB: '1' };
+
+function readNdjson(outputPath) {
+  return fs.readFileSync(outputPath, 'utf8')
+    .split('\n')
+    .filter((l) => l.trim())
+    .map((l) => JSON.parse(l));
+}
+
+test('llm: summarize-source (stub) returns structured JSON without network', () => {
+  const rawPath = rawOf('payment-timeout-retry.md');
+  const rawBody = readKb(rawPath).split('---').slice(2).join('---').trim();
+  const outputPath = path.join(kb, '.kb', 'llm-summarize.json');
+  const summary = runLlm(kb, 'summarize-source', { title: 'Payment Timeout Retry', source: 'local', body: rawBody }, outputPath, STUB_ENV);
+  assert.equal(summary.task, 'summarize-source');
+  assert.ok(summary.title, 'stub produced a title');
+  assert.ok(typeof summary.summary === 'string' && summary.summary.length > 0, 'stub produced a summary');
+  const file = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
+  assert.deepEqual(file.key_points, ['Stub point one.', 'Stub point two.']);
+});
+
+test('llm: chat (stub) streams NDJSON with meta, chunk, and done', () => {
+  const outputPath = path.join(kb, '.kb', 'chat-out.ndjson');
+  const summary = runLlm(kb, 'chat', { question: 'What is retry resilience?', level: 'quick' }, outputPath, STUB_ENV);
+  assert.equal(summary.task, 'chat');
+  assert.equal(summary.level, 'quick');
+  const lines = readNdjson(outputPath);
+  assert.ok(lines.some((l) => l.type === 'meta'), 'meta line present');
+  assert.ok(lines.some((l) => l.type === 'chunk' && typeof l.text === 'string'), 'chunk line present');
+  assert.ok(lines.some((l) => l.type === 'done' && Array.isArray(l.citations)), 'done line present');
+});
+
+test('llm: deep-research (stub) drives retrieval and streams search/read/chunk/done', () => {
+  const outputPath = path.join(kb, '.kb', 'research-out.ndjson');
+  const summary = runLlm(kb, 'deep-research', {
+    question: 'retry budget',
+    opts: { maxRounds: 1, hitsPerRound: 5, readTop: 3 },
+  }, outputPath, STUB_ENV);
+  assert.equal(summary.task, 'deep-research');
+  const lines = readNdjson(outputPath);
+  assert.ok(lines.some((l) => l.type === 'search' && l.round === 1), 'search step present');
+  assert.ok(lines.some((l) => l.type === 'read' && l.round === 1), 'read step present');
+  assert.ok(lines.some((l) => l.type === 'chunk'), 'synthesis chunk present');
+  assert.ok(lines.some((l) => l.type === 'done' && Array.isArray(l.citations)), 'done line present');
+  assert.ok(lines.some((l) => l.type === 'read' && l.page.startsWith('wiki/')), 'read referenced a wiki page');
 });

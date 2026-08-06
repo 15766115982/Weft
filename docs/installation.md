@@ -1,7 +1,7 @@
 # Installation & Configuration Guide
 
-Self-governing knowledge base system: three fully decoupled services (acquisition /
-governance / retrieval) distributed as Claude Code skills + Node.js scripts. This guide
+Self-governing knowledge base system: four fully decoupled services (acquisition /
+governance / retrieval / llm) distributed as Claude Code skills + Node.js scripts. This guide
 takes you from zero to a working knowledge base connected to intranet Jira/Confluence.
 
 - 中文版: `installation.zh-CN.md`
@@ -19,6 +19,10 @@ takes you from zero to a working knowledge base connected to intranet Jira/Confl
 
 No Python anywhere. No always-on services, no databases to administer (SQLite lives inside
 `.kb/` and rebuilds itself).
+
+The fourth service, `llm/`, is **not** a skill; it is invoked internally by governance,
+retrieval (judge), and the UI portal via its CLI (`llm.mjs`). It owns all model calls and
+keeps prompt templates under `.kb/config/prompts/`.
 
 ## 2. Get the code
 
@@ -190,6 +194,58 @@ Full example (contract §6):
 
 Start with ONE small project and ONE small space; widen after the smoke test passes.
 
+### 6.4 LLM service configuration
+
+The LLM service (`<repo>/llm/llm.mjs`) is not a skill; it is invoked internally by
+governance, the retrieval judge, and the UI portal. It needs two things in the KB:
+
+1. **Model config** at `.kb/config/models.json` (create it once per KB):
+
+   ```json
+   {
+     "endpoint": "https://your-resource.openai.azure.com",
+     "deployment": "gpt-5-4",
+     "api_version": "2025-01-01-preview",
+     "auth": {
+       "type": "spn",
+       "tenant_id": "your-tenant-id",
+       "client_id": "your-client-id",
+       "client_secret": "WEFT_AZURE_CLIENT_SECRET"
+     },
+     "defaults": {
+       "temperature": 0.2,
+       "max_tokens": 4096
+     }
+   }
+   ```
+
+   Set the secret env var:
+
+   ```cmd
+   setx WEFT_AZURE_CLIENT_SECRET "<your-spn-secret>"
+   ```
+
+   Alternative auth: replace `"type": "spn"` with `"type": "api_key"` and
+   `"api_key": "AZURE_OPENAI_API_KEY"`; set that env var instead.
+
+2. **Prompt templates** under `.kb/config/prompts/`:
+
+   ```bash
+   node <repo>/llm/llm.mjs init-prompts --kb D:\kb\work
+   ```
+
+   This copies the default templates from `<repo>/templates/prompts/` so you can edit
+   them per KB. Re-run with `--force` to overwrite with defaults.
+
+Verify the LLM service can reach Azure:
+
+```bash
+node <repo>/llm/llm.mjs check --kb D:\kb\work
+```
+
+For fully offline / stubbed integration tests, set `WEFT_LLM_STUB=1` in the environment;
+the service returns deterministic canned output and does not call Azure.
+
 ## 7. Smoke test
 
 Run these from any directory (substitute `<repo>` and your KB path):
@@ -213,14 +269,18 @@ node <repo>/governance/scripts/govern.mjs plan  --kb D:\kb\work
 # 5. Retrieval (after at least one page exists in wiki/)
 node <repo>/retrieval/scripts/kb_search.mjs search "a term from your corpus" --kb D:\kb\work
 
-# 6. Thin viewer (candidate review UI; Ctrl+C to stop)
+# 6. LLM service: seed prompts and verify Azure connectivity
+node <repo>/llm/llm.mjs init-prompts --kb D:\kb\work
+node <repo>/llm/llm.mjs check       --kb D:\kb\work
+
+# 7. Thin viewer (candidate review UI; Ctrl+C to stop)
 node <repo>/governance/viewer/serve.mjs --kb D:\kb\work
 # → http://127.0.0.1:8321  (localhost only, no login — single-user tool.
 #   Writes carry a per-startup token injected into the page + Origin/Host
 #   checks; transparent in normal use — just reload the tab after a relaunch)
 
-# 7. UI portal (optional here; the full console — browse/search/review/acquire/
-#    govern — see guide.zh-CN.md §7-8)
+# 8. UI portal (optional here; the full console — browse/search/review/acquire/
+#    govern/chat — see guide.zh-CN.md §7-8)
 node <repo>/ui/serve.mjs --kb D:\kb\work
 # → http://127.0.0.1:8322  (same localhost + token + Origin/Host posture)
 ```
@@ -233,19 +293,20 @@ hood; running them by hand is the best installation check.
 For a full acceptance pass on real servers (failure drills, incremental-skip verification,
 XHTML fidelity audit), follow `real-env-test.md`.
 
-## 8. Optional: run the test suite
+## 9. Optional: run the test suite
 
-258 tests across five suites, all against mocks — no network, no PATs needed:
+380 tests across six suites, all against mocks — no network, no PATs, no Azure needed:
 
 ```bash
-cd <repo>/acquisition/scripts && npm test            # 59 tests
-cd <repo>/governance/scripts && npm test             # 54 tests (includes the thin viewer)
-cd <repo>/retrieval/scripts  && npm test             # 37 tests (needs npm install first)
-cd <repo>/ui                 && node --test test/    # 69 tests (no dependencies)
-cd <repo> && node --test tests/e2e/ tests/eval/      # 39 tests (e2e pipeline + retrieval eval)
+cd <repo>/acquisition/scripts && npm test            # 69 tests
+cd <repo>/governance/scripts && npm test             # 72 tests (includes the thin viewer)
+cd <repo>/retrieval/scripts  && npm test             # 46 tests (needs npm install first)
+cd <repo>/llm                && node --test test/    # 31 tests
+cd <repo>/ui                 && node --test test/    # 92 tests / 1 skip (no dependencies)
+cd <repo> && node --test tests/e2e/ tests/eval/      # 42 tests (e2e pipeline + retrieval eval)
 ```
 
-## 9. Daily usage
+## 10. Daily usage
 
 In any Claude Code session (the skills are global):
 
@@ -257,14 +318,14 @@ In any Claude Code session (the skills are global):
 
 Or drive all of it from the browser: `node <repo>/ui/serve.mjs --kb <path>` starts the
 on-demand UI portal at http://127.0.0.1:8322 (browse/search/review/acquisition console/
-agent-governance console/graph; multi-KB switcher via `<repo>/ui/kbs.json`). The portal
+agent-governance console/graph/chat; multi-KB switcher via `<repo>/ui/kbs.json`). The portal
 and the skills mix freely — they only share the KB directory. Full walkthrough:
 `guide.zh-CN.md` §7-8 (Chinese).
 
 Each service's behavioral rules live in its SKILL.md; the three-party contract is
 `schema/contract.md`.
 
-## 10. Upgrading
+## 11. Upgrading
 
 ```bash
 cd <repo> && git pull
@@ -275,7 +336,7 @@ cd retrieval/scripts && npm install   # refreshes the prebuilt better-sqlite3 bi
 The skill links keep pointing at the repo — nothing else to redo. Restart Claude Code if a
 SKILL.md itself changed.
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|

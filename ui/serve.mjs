@@ -10,11 +10,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import readline from 'node:readline';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { EventEmitter } from 'node:events';
 import { createAuth } from './lib/auth.mjs';
+import { createAdminAuth } from './lib/adminauth.mjs';
+import { settingsRoutes } from './routes/api-settings.mjs';
 import { createKbRegistry } from './lib/kb.mjs';
 import { resolveUnder, normalizeWikiRelRead, normalizeRawRel, normalizeKbFileName, walkMd, normalizeRawAssetRel, assetMime } from './lib/paths.mjs';
 import { listWikiPages, rawRefs, health } from './lib/browse.mjs';
@@ -31,19 +34,40 @@ import { saveKbFileJob } from './lib/kbfile.mjs';
 import { judge, judgeNames } from './lib/judge.mjs';
 import { feedbackJob, readFeedback } from './lib/feedback.mjs';
 import {
-  plan, sourcePageRelPath, rejectPage as governReject, archivePage as governArchive,
-  addDismissal, readConflicts,
+  plan, sourcePageRelPath, approvePage, rejectPage as governReject, archivePage as governArchive,
+  addDismissal, readConflicts, readDecisions,
 } from '../governance/scripts/lib/govern.mjs';
 import {
   UPLOAD_MAX, uploadJob, pullJob, inboxDeleteJob, rawDeleteJob, rawMoveJob,
-  authCheck, probeCheck, sourceFreshness, listInbox,
+  authCheck, probeCheck, sourceFreshness, listInbox, detectJob,
 } from './lib/acquire.mjs';
 
 const UI_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(UI_DIR, 'public');
+// LLM CLI path is resolved at portal creation time so tests can override it via
+// the WEFT_LLM_CLI env var before calling createPortal().
+function resolveLlmCli() { return process.env.WEFT_LLM_CLI || path.resolve(UI_DIR, '..', 'llm', 'llm.mjs'); }
 // async git: a 5s blocking execFileSync inside the request handler would stall
 // every other request on the event loop (review 2026-08-04)
 const execFileP = promisify(execFile);
+
+// Phase 4: stream an NDJSON file as it is written by the LLM service, forwarding
+// each line as an SSE data event. Stops when the file reaches EOF or the child exits.
+async function streamNdjson(filePath, res, child) {
+  // Wait briefly for the writer to create the file.
+  while (!fs.existsSync(filePath)) {
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  const stream = fs.createReadStream(filePath, { encoding: 'utf8' });
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  for await (const line of rl) {
+    if (!line.trim()) continue;
+    if (res.writableEnded) break;
+    res.write(`data: ${line}\n\n`);
+  }
+}
+
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8',
@@ -54,6 +78,7 @@ const MIME = {
 
 export function createPortal({ kb: cliKb, port = 8322 } = {}) {
   const auth = createAuth();
+  const adminAuth = createAdminAuth();
   const registry = createKbRegistry({ cliKb });
   const jobs = createJobCenter();
   const watcher = createWatcher();
@@ -143,6 +168,13 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
       }
       if (req.method === 'GET' && url.pathname.startsWith('/api/')) {
         const kb = registry.resolve(url.searchParams.get('kb')).path;
+
+        // Phase 1: team portal admin/settings reads.
+        if (url.pathname === '/api/settings') {
+          const settingsHandler = settingsRoutes({ adminAuth, jobs, registry });
+          const handled = await settingsHandler(req, res, url, readBody, json);
+          if (handled !== null) return handled;
+        }
 
         if (url.pathname === '/api/tree') return json(res, 200, { pages: listWikiPages(kb) });
         if (url.pathname === '/api/queue') {
@@ -280,6 +312,30 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
           const state = readConflicts(kb);
           return json(res, 200, state || { generated_at: null, fingerprint: null, groups: [] });
         }
+        // Decision log (ADR-0009): append-only records for every mutating governance action.
+        if (url.pathname === '/api/decisions') {
+          const filters = {
+            action: url.searchParams.get('action') || undefined,
+            page: url.searchParams.get('page') || undefined,
+            actor: url.searchParams.get('actor') || undefined,
+          };
+          return json(res, 200, { decisions: readDecisions(kb, filters) });
+        }
+        // Phase 3: upstream detect report (read-only — .kb/acquire artifact).
+        if (url.pathname === '/api/detect') {
+          const reportPath = path.join(kb, '.kb', 'acquire', 'upstream-detect.json');
+          if (!fs.existsSync(reportPath)) return json(res, 200, { connector: null, generated_at: null, detect: null });
+          const stored = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+          // The stored file is flat (new/changed/...); expose the same shape the
+          // acquisition CLI prints: { connector, generated_at, detect: {...} }.
+          const { ts, new: n, changed, unchanged, removed_upstream, errors } = stored;
+          return json(res, 200, {
+            connector: stored.connector,
+            generated_at: ts,
+            detect: { new: n, changed, unchanged, removed_upstream, error: errors },
+          });
+        }
+
         // J9: recent feedback votes (the 👎 panel in search)
         if (url.pathname === '/api/feedback') {
           return json(res, 200, { entries: readFeedback(kb, { vote: url.searchParams.get('vote') || undefined }) });
@@ -316,6 +372,13 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
 
       // ---- writes (token + Origin/Host, S8; all KB mutations via the serial queue, S10) ----
       if (req.method === 'POST' && url.pathname.startsWith('/api/')) {
+        // Phase 1: team portal admin routes (login does not require a session).
+        if (url.pathname.startsWith('/api/admin/') || url.pathname.startsWith('/api/settings/')) {
+          const settingsHandler = settingsRoutes({ adminAuth, jobs, registry });
+          const handled = await settingsHandler(req, res, url, readBody, json);
+          if (handled !== null) return handled;
+        }
+
         const refusal = auth.checkWrite(req);
         if (refusal) return json(res, refusal.code, { error: refusal.error });
 
@@ -324,6 +387,9 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
           if (!['approve', 'reject', 'archive-source', 'dismiss-conflict'].includes(action)) {
             return json(res, 400, { error: `action must be approve|reject|archive-source|dismiss-conflict: ${action}` });
           }
+          if (!reason || !String(reason).trim()) {
+            return json(res, 400, { error: `human ${action} requires a reason` });
+          }
           const kb = registry.resolve(kbName).path;
           const rel = normalizeWikiRel(p || '');
           const abs = resolveUnder(kb, rel, 'wiki');
@@ -331,21 +397,19 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
           const job = await jobs.waitFor(jobs.enqueue(kb, {
             type: 'review', label: `${action} ${rel}`,
             run: () => {
-              if (action === 'approve') return flipStatus(abs, 'candidate', 'approved');
+              if (action === 'approve') return approvePage(kb, rel, { via: 'portal', actor: 'human', reason });
               // reject is reject-and-restore (plan 0001 §3.1.5): revert the page to its
               // most recent git-committed approved version and log synchronously, so the
               // sweep backfill cannot mis-record the rejection as an approval (P1-5).
-              // This breaks the "viewer writes no log" convention deliberately — restore
-              // is a content mutation, it belongs on the ledger immediately.
-              if (action === 'reject') return governReject(kb, rel, { via: 'portal' });
+              if (action === 'reject') return governReject(kb, rel, { via: 'portal', actor: 'human', reason });
               // archive the LOSER source page (approved only) — the raw gets tombstoned.
-              if (action === 'archive-source') return governArchive(kb, rel, { note: 'portal adjudication (loser)' });
+              if (action === 'archive-source') return governArchive(kb, rel, { actor: 'human', reason });
               // keep-both: persist the pair as parallel documents; never re-flagged.
               if (action === 'dismiss-conflict') {
                 if (!Array.isArray(raws) || raws.length < 2) {
                   throw new Error('dismiss-conflict requires raws[] (at least two raw paths)');
                 }
-                return { action: 'dismiss-conflict', ...addDismissal(kb, raws, String(reason || 'parallel documents (kept both)')) };
+                return { action: 'dismiss-conflict', ...addDismissal(kb, raws, String(reason)) };
               }
               throw new Error(`unsupported review action: ${action}`);
             },
@@ -354,18 +418,19 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
           return json(res, 200, { page: rel, status: job.result.to ?? job.result.status, result: job.result });
         }
 
-        // C5 batch review (ruling 2026-08-03): one queued job, per-page flips,
-        // per-page fault isolation — a 409-lost page never aborts the batch.
+        // C5 batch review: one queued job, per-page decisions, per-page fault isolation.
         if (url.pathname === '/api/review-batch') {
-          const { paths, action, kb: kbName } = JSON.parse(await readBody(req) || '{}');
+          const { paths, action, kb: kbName, reason } = JSON.parse(await readBody(req) || '{}');
           if (action !== 'approve' && action !== 'reject') {
             return json(res, 400, { error: `action must be approve|reject: ${action}` });
+          }
+          if (!reason || !String(reason).trim()) {
+            return json(res, 400, { error: `human batch ${action} requires a reason` });
           }
           if (!Array.isArray(paths) || !paths.length || paths.length > 200) {
             return json(res, 400, { error: `paths must be a non-empty array (≤200): ${JSON.stringify(paths)?.slice(0, 80)}` });
           }
           const kb = registry.resolve(kbName).path;
-          const to = action === 'approve' ? 'approved' : 'rejected';
           const job = await jobs.waitFor(jobs.enqueue(kb, {
             type: 'review-batch', label: `${action} ×${paths.length}`,
             run: async () => {
@@ -373,7 +438,11 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
               for (const p of paths) {
                 try {
                   const rel = normalizeWikiRel(p);
-                  flipStatus(resolveUnder(kb, rel, 'wiki'), 'candidate', to);
+                  if (action === 'approve') {
+                    approvePage(kb, rel, { via: 'portal', actor: 'human', reason });
+                  } else {
+                    governReject(kb, rel, { via: 'portal', actor: 'human', reason });
+                  }
                   results.push({ path: rel, ok: true });
                 } catch (err) {
                   results.push({ path: String(p), ok: false, error: err.message });
@@ -462,6 +531,14 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
           return json(res, 202, { job: jobs.enqueue(kb, spec) });
         }
 
+        // Phase 3: upstream detect (queued; writes .kb/acquire/upstream-detect.json).
+        if (url.pathname === '/api/detect') {
+          const body = JSON.parse(await readBody(req) || '{}');
+          const kb = registry.resolve(body.kb).path;
+          const spec = detectJob(kb, { connector: body.connector });
+          return json(res, 202, { job: jobs.enqueue(kb, spec) });
+        }
+
         // J5/F4: auth probe — read-only, so off-queue (no KB mutation).
         if (url.pathname === '/api/authcheck') {
           const body = JSON.parse(await readBody(req) || '{}');
@@ -518,6 +595,70 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
           const spec = governRunJob(kb, body, (job, kind, chunk) =>
             runBridge.emit('chunk', { kb, jobId: job.id, kind, chunk }));
           return json(res, 202, { job: jobs.enqueue(kb, spec) });
+        }
+
+        // Phase 4: chat / deep-research streaming endpoint (LLM service).
+        if (url.pathname === '/api/chat') {
+          const refusal = auth.checkWrite(req);
+          if (refusal) return json(res, refusal.code, { error: refusal.error });
+          const body = JSON.parse(await readBody(req) || '{}');
+          const kb = registry.resolve(body.kb).path;
+          const question = String(body.question || '').trim();
+          const level = ['quick', 'deep', 'deep-research'].includes(body.level) ? body.level : 'quick';
+          if (!question) return json(res, 400, { error: 'question required' });
+
+          const id = crypto.randomBytes(6).toString('hex');
+          const inputFile = path.join(kb, '.kb', 'ui', `chat-${id}.in.json`);
+          const outputFile = path.join(kb, '.kb', 'ui', `chat-${id}.out.ndjson`);
+          fs.mkdirSync(path.dirname(inputFile), { recursive: true });
+          fs.writeFileSync(inputFile, JSON.stringify({ question, level, opts: body.opts || {} }), 'utf8');
+
+          const child = spawn(process.execPath, [resolveLlmCli(), 'chat', '--kb', kb, '--input-file', inputFile, '--output-file', outputFile], {
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
+
+          function cleanup() {
+            try { fs.unlinkSync(inputFile); } catch {}
+            try { fs.unlinkSync(outputFile); } catch {}
+          }
+
+          res.writeHead(200, {
+            'content-type': 'text/event-stream; charset=utf-8',
+            'cache-control': 'no-cache',
+            connection: 'keep-alive',
+          });
+
+          let stderr = '';
+          child.stderr.on('data', (c) => { stderr += c; });
+
+          // Stream NDJSON lines as they are written; finish when the child exits.
+          const streamDone = streamNdjson(outputFile, res, child).catch((err) => {
+            if (!res.writableEnded) res.write(`event: error\ndata: ${JSON.stringify({ message: err.message })}\n\n`);
+          });
+
+          child.on('close', async (code) => {
+            await streamDone;
+            if (code !== 0 && !res.writableEnded) {
+              res.write(`event: error\ndata: ${JSON.stringify({ message: stderr.slice(-2000) || `llm.mjs exited ${code}` })}\n\n`);
+            }
+            if (!res.writableEnded) {
+              res.write('event: close\ndata: {}\n\n');
+              res.end();
+            }
+            cleanup();
+          });
+
+          child.on('error', (err) => {
+            if (!res.writableEnded) {
+              res.write(`event: error\ndata: ${JSON.stringify({ message: err.message })}\n\n`);
+              res.write('event: close\ndata: {}\n\n');
+              res.end();
+            }
+            cleanup();
+          });
+
+          req.on('close', () => { child.kill(); cleanup(); });
+          return;
         }
 
         // Cancel a queued/running job (M7c review P3 — long agent runs

@@ -27,4 +27,6 @@ Object.assign(ICONS, {
   circleHelp: `${SVG_OPEN}<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg>`,
   // review queue: archived-loser hint (lucide archive-restore)
   archiveRestore: `${SVG_OPEN}<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h2"/><path d="M20 8v11a2 2 0 0 1-2 2h-2"/><path d="m9 15 3-3 3 3"/><path d="M12 12v9"/></svg>`,
+  // P4 chat
+  messageCircle: `${SVG_OPEN}<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>`,
 });

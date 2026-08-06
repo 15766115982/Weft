@@ -50,13 +50,13 @@ export function readStatus(absPath) {
 
 // normalizeWikiRel(relInput): the single gate for every wiki write path.
 // Backslash-tolerant, segment-wise `..` rejection, and restricted to
-// wiki/sources|topics/<name>.md — wiki/index.md and wiki/archive/ are excluded
-// from ALL write paths by construction.
+// wiki/sources|entities|concepts|syntheses/<name>.md — wiki/index.md and
+// wiki/archive/ are excluded from ALL write paths by construction.
 export function normalizeWikiRel(relInput) {
-  const fail = () => { throw new Error(`page path must be wiki/sources|topics/<name>.md: ${relInput}`); };
+  const fail = () => { throw new Error(`page path must be wiki/sources|entities|concepts|syntheses/<name>.md: ${relInput}`); };
   if (typeof relInput !== 'string' || !relInput.trim()) fail();
   const rel = relInput.replace(/\\/g, '/');
   if (rel.split('/').some((s) => s === '..')) fail();
-  if (!/^wiki\/(sources|topics)\/[^/]+\.md$/.test(rel)) fail();
+  if (!/^wiki\/(sources|entities|concepts|syntheses)\/[^/]+\.md$/.test(rel)) fail();
   return rel;
 }

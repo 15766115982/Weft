@@ -52,10 +52,12 @@ test('missing frontmatter and missing status line', () => {
 });
 
 test('normalizeWikiRel: backslashes normalized, traversal and non-page paths refused', () => {
-  assert.equal(normalizeWikiRel('wiki\\topics\\x.md'), 'wiki/topics/x.md');
+  assert.equal(normalizeWikiRel('wiki\\syntheses\\x.md'), 'wiki/syntheses/x.md');
+  assert.equal(normalizeWikiRel('wiki/entities/x.md'), 'wiki/entities/x.md');
+  assert.equal(normalizeWikiRel('wiki/concepts/x.md'), 'wiki/concepts/x.md');
   assert.equal(normalizeWikiRel('wiki/sources/a-b.md'), 'wiki/sources/a-b.md');
   for (const bad of ['../log.md', 'wiki/../log.md', 'raw/local/a.md', 'wiki/index.md',
-    'wiki/archive/old.md', 'wiki/topics/', 'wiki/topics/nested/x.md', 'log.md', '']) {
-    assert.throws(() => normalizeWikiRel(bad), /page path must be wiki\/sources\|topics\/<name>\.md/, `should refuse: ${bad}`);
+    'wiki/archive/old.md', 'wiki/syntheses/', 'wiki/syntheses/nested/x.md', 'log.md', '']) {
+    assert.throws(() => normalizeWikiRel(bad), /page path must be wiki\/sources\|entities\|concepts\|syntheses\/<name>\.md/, `should refuse: ${bad}`);
   }
 });

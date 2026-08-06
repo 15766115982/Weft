@@ -1,3 +1,222 @@
+# Development Log
+
+## Phase 6 — E2E/eval/docs closeout (2026-08-06, full suite green)
+
+Cross-service regression for the LLM service plus documentation closeout.
+
+Changes:
+
+- `llm/lib/runner.mjs`: added `WEFT_LLM_STUB` deterministic stub mode so E2E tests can
+  exercise `chat` / `deep-research` / task prompts without Azure credentials or network.
+- `llm/lib/research.mjs`: fixed retrieval integration bugs discovered by the new E2E test:
+  - `KB_SEARCH` path had one too many `..` segments (resolved outside the repo).
+  - Search result field is `preview`/`candidates`, not `results`.
+  - Hit identifier is `page`, not `path`.
+- `llm/lib/tasks/chat.mjs`: same field-name fixes (`preview`, `page`).
+- `tests/helpers/kb.mjs`: added `SCRIPTS.llm` and `runLlm()` helper with env merging
+  (supports `WEFT_LLM_STUB=1`).
+- `tests/e2e/pipeline.test.mjs`: added Phase 4 LLM regression tests:
+  - `summarize-source` (stub) returns structured JSON.
+  - `chat` (stub) streams NDJSON with `meta`, `chunk`, `done`.
+  - `deep-research` (stub) drives real `kb_search.mjs search/read` and streams
+    `search`/`read`/`chunk`/`done` events.
+- `docs/installation.md`: documented the LLM service configuration
+  (`.kb/config/models.json`, `WEFT_LLM_STUB`, Azure SPN env vars) and updated smoke-test
+  steps with `llm.mjs check` / `init-prompts`.
+- `README.md`: updated service count to four, test counts, and LLM service pointer.
+
+Verification:
+
+- `acquisition/scripts/`: 69/69 pass.
+- `governance/scripts/` + viewer: 72/72 pass.
+- `retrieval/scripts/`: 46/46 pass.
+- `llm/`: 31/31 pass.
+- `ui/`: 92 pass / 1 skip (non-win32 claude binary test).
+- Cross-service `tests/e2e/pipeline.test.mjs`: 23/23 pass.
+- `tests/eval/retrieval-eval.test.mjs`: 19/19 pass.
+
+---
+
+## Phase 5 — Home + Search + UI polish (2026-08-06, full suite green)
+
+UI polish pass on top of the Phase 4 LLM/chat work.
+
+Changes:
+
+- `ui/public/views/dashboard.js`: updated stat cards to the four page types
+  (`source`, `entity`, `concept`, `synthesis`); added a top quick-action bar with
+  one-click links to Search / Chat / Govern / Queue.
+- `ui/public/views/search.js`: filter chips now include `source`, `entity`,
+  `concept`, `synthesis`; added an "用这个问题去问 agent" chip that jumps to the
+  Chat view with the query pre-filled.
+- `ui/public/views/chat.js`: reads `?q=` from the URL and pre-fills the input box.
+
+Verification:
+
+- All suites green: 350 tests, 349 pass, 1 skip (non-win32 claude binary test).
+
+---
+
+## Phase 4 — LLM tasks + Chat / Deep-Research UI (2026-08-06, all suites green)
+
+Backend (`llm/`):
+
+- Implemented the full task suite under `llm/lib/tasks/*.mjs`:
+  `summarize-source`, `classify-page`, `extract-entity`, `draft-concept`, `synthesize`,
+  `semantic-check`, `govern-decide`, `chat`, `deep-research`.
+- `llm/lib/runner.mjs`: unified `render`, `loadModelConfig`, `runPrompt` (streaming +
+  non-streaming), `runJsonPrompt`, and `extractJson`.
+- `llm/lib/research.mjs`: `searchPages` / `readPages` spawn `kb_search.mjs search/read`;
+  `runResearchLoop` caps rounds and detects no-new-info loops.
+- `llm/lib/openai.mjs`: Azure OpenAI transport with retry/backoff, rate-limit sleep, and
+  streaming support; tolerates test mocks that return the stream directly.
+- `llm/test/helpers.mjs`: `mockFetchJson`, `mockFetchStream`, `sseChunks` for deterministic
+  task tests.
+- `llm/test/tasks.test.mjs`: real task implementations tested against mocked model responses,
+  including NDJSON streaming for `chat` and `deep-research`.
+
+UI:
+
+- `ui/serve.mjs`: added `POST /api/chat` (SSE streaming). It spawns `llm.mjs chat` with
+  temp input/output files and forwards NDJSON lines as SSE data events; temp files are cleaned
+  up after the stream closes. `WEFT_LLM_CLI` env var can override the LLM CLI path for tests.
+- `ui/public/views/chat.js`: new Chat view with quick / deep / deep-research level selector,
+  streaming message rendering, collapsible reasoning steps, citation links, and KB-scoped
+  `localStorage` history.
+- `ui/public/style.css`: chat layout + bubble styles + reasoning steps.
+- `ui/public/app.js` + `index.html`: added `问答` nav entry, palette item, and `g c` shortcut.
+- `ui/public/lib/icons.js`: added `messageCircle` icon.
+- `ui/test/chat.test.mjs`: endpoint tests for SSE streaming (quick + deep-research), validation,
+  security gates, and split-line SSE parsing using a stub LLM CLI.
+
+Verification:
+
+- `acquisition/scripts/`: 69/69 pass.
+- `governance/scripts/` + viewer: 83/83 pass.
+- `retrieval/scripts/`: 46/46 pass.
+- `llm/`: 31/31 pass.
+- `ui/`: 92 pass / 1 skip (non-win32 claude binary test).
+- Cross-service `tests/e2e/pipeline.test.mjs` + `tests/eval/retrieval-eval.test.mjs`: 39/39 pass.
+
+All suites green.
+
+---
+
+## Phase 3 — `acquire detect` + Upstream Detect / Raw UI (2026-08-06, 324 tests green)
+
+Backend:
+
+- `acquire.mjs detect <local|jira|confluence>` subcommand added; it is read-only against
+  `raw/` and writes only `.kb/acquire/upstream-detect.json` (never touches `raw/` or
+  `acquire_runs.jsonl`).
+- `acquisition/scripts/lib/detect.mjs`: shared `writeDetectReport`, `classify`, and
+  `loadLocalBySource` helpers.
+- `acquisition/scripts/connectors/local.mjs`, `jira.mjs`, `confluence.mjs`: each exports a
+  `detect()` that reuses connector-specific version tokens (mtime / `updated` / `version.when`).
+- `acquisition/scripts/test/{local,jira,confluence,cli}.test.mjs`: connector-level and CLI-level
+  detect coverage (new/changed/unchanged/removed_upstream/error classifications).
+
+UI:
+
+- `ui/lib/acquire.mjs`: added `detectJob()` queued runner that spawns `acquire.mjs detect`.
+- `ui/serve.mjs`: `GET /api/detect` serves the last report (wrapped as `{connector, generated_at, detect}`);
+  `POST /api/detect` enqueues a detect job.
+- `ui/public/views/upstream.js`: Upstream Detect view — per-connector detect button, bucketed
+  results (new/changed/removed/unchanged/error), and a one-click pull CTA.
+- `ui/public/views/raw.js`: minimal Raw/ source browser grouped by source, with orphan flagging
+  and a detail panel.
+- `ui/public/app.js` + `index.html`: added `上游` and `来源` nav entries, palette items, and
+  `g u` / `g w` shortcuts.
+- `ui/test/acquire.test.mjs`: endpoint test asserting detect writes the report, does not write
+  `acquire_runs.jsonl`, and GET /api/detect wraps buckets.
+
+Verification:
+
+- `acquisition/scripts/`: 69/69 pass.
+- `governance/scripts/` + viewer: 83/83 pass.
+- `retrieval/scripts/`: 46/46 pass.
+- `ui/`: 87 pass / 1 skip.
+- Cross-service `tests/e2e/pipeline.test.mjs` + `tests/eval/retrieval-eval.test.mjs`: 39/39 pass.
+
+All suites green.
+
+---
+
+## Phase 2 close-out — contract-v2 rename drift fixed, full suite green (2026-08-06)
+
+Closed the remaining test failures after landing Phase 2 (contract-v2 page types + decision-log governance + Decision Inbox UI).
+The implementation changes were already in place; this pass aligned the cross-service tests and viewer tests with the new names.
+
+Fixes:
+
+- `tests/e2e/pipeline.test.mjs`: updated all residual `wiki/topics/` references to `wiki/syntheses/`,
+  including log-line regexes, the dangling-wikilink append path, and the `rebuild-index` format assertion
+  (`sources | entities | concepts | syntheses`).
+- `tests/eval/retrieval-eval.test.mjs`: fixed the `onlyType` directory check so `type:synthesis` maps to
+  `syntheses/` instead of the bogus `synthesess/`.
+- `governance/viewer/test/viewer.test.mjs`: switched the backslash-normalization probe and the git-diff
+  regression fixture from `wiki/topics/` to `wiki/syntheses/`.
+
+Verification:
+
+- `acquisition/scripts/`: 65/65 pass.
+- `governance/scripts/` + viewer: 83/83 pass.
+- `retrieval/scripts/`: 46/46 pass.
+- `ui/`: 86 pass / 1 skip.
+- Cross-service `tests/e2e/pipeline.test.mjs` + `tests/eval/retrieval-eval.test.mjs`: 39/39 pass.
+
+All suites green.
+
+---
+
+## Phase 1 — LLM service skeleton + minimal Settings UI (2026-08-06, 266 tests green)
+
+User-approved plan: four decoupled services (acquisition / governance / retrieval / llm),
+`source | entity | concept | synthesis` page types, decision-log governance, `acquire detect`,
+prompt externalization, Azure OpenAI via SPN, streaming chat/deep-research, incremental UI.
+
+Delivered:
+
+- **`llm/` service skeleton** (`llm.mjs` CLI + `lib/config.mjs` + `lib/auth.mjs` + `lib/openai.mjs` +
+  `lib/prompts.mjs` + `lib/decisions.mjs` + `lib/stream.mjs` + `lib/research.mjs` +
+  stub task modules under `lib/tasks/`).
+- **CLI contract**: `llm.mjs <task> --kb <path> --input-file <json> --output-file <json|ndjson>`;
+  governance tasks emit single JSON; `chat`/`deep-research` emit NDJSON streams.
+- **Azure SPN auth**: client-credentials token fetch with in-process cache; supports `api_key`
+  fallback for testing; retry ×3 with exponential backoff; basic rate-limit sleep.
+- **Prompt externalization**: default prompts in `templates/prompts/`; `init-prompts` seeds
+  `.kb/config/prompts/` per KB; KB copy takes precedence over defaults.
+- **Decision-log reader**: `lib/decisions.mjs` loads `.kb/govern/decisions/` by type for future
+  few-shot precedent retrieval.
+- **Templates**: `templates/models.example.json` documents the expected `.kb/config/models.json`
+  shape (endpoint, deployment, api_version, auth type + env-var secret names).
+- **UI Settings view** (`ui/public/views/settings.html` + `ui/public/js/settings.mjs`): displays
+  model config with secrets masked as env-var names, runs `llm.mjs check`, runs
+  `llm.mjs init-prompts` (with force option), polls job status.
+- **Admin auth** (`ui/lib/adminauth.mjs`): single-operator login via `WEFT_ADMIN_PASSWORD_HASH`
+  env var; sessions in memory; settings routes require admin session.
+- **LLM job runner** (`ui/lib/jobrunner.mjs`): builds queued job specs that spawn `llm.mjs`
+  through the existing serial job center (`ui/lib/jobs.mjs`).
+- **Serve routing**: `ui/routes/api-settings.mjs` mounted in `ui/serve.mjs` for `/api/settings/*`
+  and `/api/admin/*`.
+
+Tests:
+
+- `llm/`: 26 tests (config, auth, prompts, tasks, openai transport, NDJSON streaming).
+- `ui/`: 86 pass + 1 skip (existing suite) + 7 new settings tests.
+- `acquisition/scripts/`: 65/65.
+- `governance/scripts/` + viewer: 83/83.
+- Total: 266 tests green.
+
+Known limitations / next phases:
+
+- Task stubs return deterministic placeholder output; real LLM logic in Phase 4.
+- Admin sessions are in-memory only (per-process); no persistence across portal restarts.
+- Existing portal write endpoints still use the per-startup token model; team-operator
+  migration continues phase by phase.
+
+---
+
 # Development Log (as of 2026-08-03, M0-M6 complete + cross-service test layer + M7a-d UI portal + A7 graph)
 
 > **Gliffy 404 二轮修复(2026-08-04,一轮后内网依旧 404)**。调研推翻一轮核心假设

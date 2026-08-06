@@ -159,6 +159,24 @@ export function authCheck(kb, connector) {
   });
 }
 
+// Phase 3: upstream change detection. Read-only against raw/ (writes only
+// .kb/acquire/upstream-detect.json), but it may call upstream APIs so it runs
+// as a queued job to keep the portal event loop unblocked.
+export function detectJob(kb, { connector }) {
+  if (!ALL_CONNECTORS.includes(connector)) {
+    throw new Error(`unknown connector: ${connector}`);
+  }
+  return {
+    type: 'detect',
+    label: `detect ${connector}`,
+    run: async (job) => {
+      const { log } = await spawnJob(job, process.execPath, [ACQUIRE, 'detect', connector, '--kb', kb]);
+      // The CLI prints a one-line JSON summary; keep the tail for diagnostics.
+      return { report: tail(log), raw: log };
+    },
+  };
+}
+
 // Phase 1: shape probe (Zephyr ZAPI / Gliffy attachment). Same off-queue
 // read-only pattern as authCheck; the CLI output is value-free by design, so
 // what the UI shows is exactly what may be relayed out of the intranet.
