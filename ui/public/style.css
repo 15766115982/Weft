@@ -49,10 +49,14 @@
 /* ---- settings page (standalone) ---- */
 .settings { max-width: 860px; margin: 0 auto; padding: 28px 20px 120px; }
 .settings-top { margin-bottom: 22px; }
-.settings-top h1 { margin: 6px 0 4px; font-size: 26px; }
+.settings-top h1 { margin: 10px 0 4px; font-size: 26px; }
 .settings-top p { font-size: 13px; margin: 0; }
-.settings-back { color: var(--celadon); text-decoration: none; font-size: 13px; }
-.settings-back:hover { text-decoration: underline; }
+.settings-back { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px;
+  color: var(--ink-dim); text-decoration: none; border: 1px solid var(--line);
+  border-radius: 99px; padding: 4px 12px 4px 9px; background: var(--paper-raise);
+  box-shadow: var(--shadow-1); transition: color var(--t-fast), border-color var(--t-fast), transform var(--t-fast); }
+.settings-back:hover { color: var(--celadon); border-color: var(--celadon); transform: translateX(-2px); }
+.settings-back svg { flex: none; }
 .set-card { background: var(--paper-raise); border: 1px solid var(--line); border-radius: var(--r-panel);
   box-shadow: var(--shadow-1); padding: 20px 24px; margin-bottom: 18px; }
 .set-card h2 { margin: 0 0 12px; font-size: 17px; }
