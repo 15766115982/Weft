@@ -16,6 +16,7 @@ export const SCRIPTS = {
   govern: path.join(REPO, 'governance', 'scripts', 'govern.mjs'),
   viewer: path.join(REPO, 'governance', 'viewer', 'serve.mjs'),
   search: path.join(REPO, 'retrieval', 'scripts', 'kb_search.mjs'),
+  llm: path.join(REPO, 'llm', 'llm.mjs'),
 };
 
 // Deterministic mtimes per inbox-relative path — the local connector uses
@@ -105,6 +106,23 @@ export function acquire(kb, extraArgs = []) {
 
 export function govern(kb, args, stdin) {
   return runCli(SCRIPTS.govern, [...args, '--kb', kb], { stdin });
+}
+
+// Run an LLM service task against the scratch KB. Streaming tasks require
+// outputPath; non-streaming tasks may also write there. The env object is
+// merged into process.env so callers can set WEFT_LLM_STUB=1.
+export function runLlm(kb, task, input, outputPath, env = {}) {
+  const inputFile = path.join(kb, '.kb', `llm-input-${task}.json`);
+  fs.mkdirSync(path.dirname(inputFile), { recursive: true });
+  fs.writeFileSync(inputFile, JSON.stringify(input), 'utf8');
+  const args = [task, '--kb', kb, '--input-file', inputFile];
+  if (outputPath) args.push('--output-file', outputPath);
+  const out = execFileSync('node', [SCRIPTS.llm, ...args], {
+    env: { ...process.env, ...env },
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  return JSON.parse(out);
 }
 
 function summaryFor(inboxRelPath) {

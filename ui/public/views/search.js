@@ -65,7 +65,7 @@ export async function render(view, params) {
   bar.append(input);
   const chips = el('div', { class: 'chips' });
   const chipDefs = [
-    ...['topic', 'source'].map((t) => ({ label: `type:${t}`, q: `type:${t}` })),
+    ...['source', 'entity', 'concept', 'synthesis'].map((t) => ({ label: `type:${t}`, q: `type:${t}` })),
     ...sourceNames.map((s) => ({ label: `来源 ${s}`, q: `source:${s}` })),
   ];
   const active = new Set();
@@ -175,6 +175,10 @@ export async function render(view, params) {
       html(list, r.preview.map((c, i) => cardHtml(c, terms, i)).join('') ||
         `<div class="empty-state"><div class="big">没有命中</div>试试去掉过滤器、换更短的词,或确认治理已经跑过(检索只覆盖 approved 页面)。</div>`);
       out.append(head, list);
+      // P5: one-click "ask this" jumps to chat with the current query.
+      const ask = el('a', { href: `#/chat?q=${encodeURIComponent(q)}`, class: 'chip', style: 'margin-bottom:12px' });
+      html(ask, `${icon('messageCircle', 12)} 用这个问题去问 agent`);
+      out.append(ask);
       if (r.candidates.length > r.preview.length) {
         const more = el('details');
         const rest = el('div');

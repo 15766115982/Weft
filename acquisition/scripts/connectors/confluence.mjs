@@ -18,6 +18,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { upsertRawDoc, sha256 } from '../lib/rawdoc.mjs';
+import { writeDetectReport, classify, loadLocalBySource } from '../lib/detect.mjs';
 import { appendLog } from '../lib/log.mjs';
 import { shapeError } from '../lib/shape.mjs';
 import { normalizeConnectorDate, decodeEntities } from './shared.mjs';
@@ -917,6 +918,48 @@ async function searchAll(cfg, cql, fetchImpl) {
     start += batch.length;
   }
   return { pages, total: total ?? pages.length };
+}
+
+/**
+ * Detect upstream changes without writing raw/. Reuses CQL scopes and auth.
+ * @returns summary {new, changed, unchanged, removed_upstream, errors}
+ */
+export async function detect(kbRoot, { kbConfig, cql, maxResults, fetchImpl } = {}) {
+  const cfg = resolveConfig(kbConfig, { cql, maxResults });
+  const result = { new: [], changed: [], unchanged: [], removed_upstream: [], errors: [] };
+  const local = loadLocalBySource(kbRoot, 'confluence');
+  const upstream = new Map();
+
+  for (const scope of cfg.cqlList) {
+    let res;
+    try {
+      res = await searchAll(cfg, scope, fetchImpl);
+    } catch (err) {
+      if (err.authFailed) throw err;
+      result.errors.push({ cql: scope, error: err.message });
+      continue;
+    }
+    for (const page of res.pages) {
+      const id = String(page?.id || '');
+      if (!id || !SAFE_SOURCE_ID.test(id)) continue;
+      const version = normalizeConfluenceDate(page.version?.when);
+      upstream.set(id, { id, upstream_id: id, version, title: page.title || '' });
+    }
+  }
+
+  for (const [id, item] of upstream) {
+    const cls = classify(id, item.version, local);
+    if (cls === 'new') result.new.push(item);
+    else if (cls === 'changed') result.changed.push({ ...item, path: local.get(id).path, local_version: local.get(id).version });
+    else result.unchanged.push({ ...item, path: local.get(id).path });
+  }
+
+  for (const [id, localItem] of local) {
+    if (!upstream.has(id)) {
+      result.removed_upstream.push({ path: localItem.path, source_id: id, upstream_id: id, title: localItem.title });
+    }
+  }
+  return result;
 }
 
 /**

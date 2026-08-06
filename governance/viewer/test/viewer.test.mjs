@@ -10,7 +10,7 @@ import { createViewer } from '../serve.mjs';
 import { buildFrontmatter } from '../../scripts/lib/frontmatter.mjs';
 
 let kb, server, base;
-const topicAbs = (name) => path.join(kb, 'wiki', 'topics', name);
+const synthAbs = (name) => path.join(kb, 'wiki', 'syntheses', name);
 
 function writePage(rel, fields, body) {
   const abs = path.join(kb, rel);
@@ -20,12 +20,12 @@ function writePage(rel, fields, body) {
 
 before(async () => {
   kb = fs.mkdtempSync(path.join(os.tmpdir(), 'kb-viewer-'));
-  writePage('wiki/topics/cand-one.md', {
-    type: 'topic', status: 'candidate', title: 'Candidate One',
+  writePage('wiki/syntheses/cand-one.md', {
+    type: 'synthesis', status: 'candidate', title: 'Candidate One',
     sources: ['raw/local/aaaa1111-pay.md'], updated_at: '2026-07-30T00:00:00Z',
   }, 'Candidate body.');
-  writePage('wiki/topics/ok-page.md', {
-    type: 'topic', status: 'approved', title: 'Approved Page',
+  writePage('wiki/syntheses/ok-page.md', {
+    type: 'synthesis', status: 'approved', title: 'Approved Page',
     sources: ['raw/local/aaaa1111-pay.md'], updated_at: '2026-07-30T00:00:00Z',
   }, 'Approved body.');
   fs.mkdirSync(path.join(kb, 'raw', 'local'), { recursive: true });
@@ -48,18 +48,18 @@ test('S8 write protection: no token / bad Origin / bad Host are all refused', as
   // missing token → 403, page untouched
   let r = await fetch(base + '/api/review', { method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ path: 'wiki/topics/cand-one.md', action: 'approve' }) });
+    body: JSON.stringify({ path: 'wiki/syntheses/cand-one.md', action: 'approve' }) });
   assert.equal(r.status, 403);
   assert.match((await r.json()).error, /x-viewer-token/);
   // wrong token → 403
   r = await fetch(base + '/api/review', { method: 'POST',
     headers: { 'content-type': 'application/json', 'x-viewer-token': 'wrong' },
-    body: JSON.stringify({ path: 'wiki/topics/cand-one.md', action: 'approve' }) });
+    body: JSON.stringify({ path: 'wiki/syntheses/cand-one.md', action: 'approve' }) });
   assert.equal(r.status, 403);
   // cross-origin Origin → 403 even with the token
   r = await fetch(base + '/api/review', { method: 'POST',
     headers: { 'content-type': 'application/json', 'x-viewer-token': server.viewerToken, origin: 'https://evil.example' },
-    body: JSON.stringify({ path: 'wiki/topics/cand-one.md', action: 'approve' }) });
+    body: JSON.stringify({ path: 'wiki/syntheses/cand-one.md', action: 'approve' }) });
   assert.equal(r.status, 403);
   assert.match((await r.json()).error, /cross-origin write/);
   // non-loopback Host (DNS rebinding) → 403 on reads too. fetch() forbids
@@ -82,7 +82,7 @@ test('S8 write protection: no token / bad Origin / bad Host are all refused', as
 
 test('queue lists candidate pages only; pages lists everything', async () => {
   const queue = await (await fetch(base + '/api/queue')).json();
-  assert.deepEqual(queue.pages.map((p) => p.path), ['wiki/topics/cand-one.md']);
+  assert.deepEqual(queue.pages.map((p) => p.path), ['wiki/syntheses/cand-one.md']);
   const all = await (await fetch(base + '/api/pages')).json();
   assert.equal(all.pages.length, 2);
 });
@@ -91,9 +91,9 @@ test('path gates: traversal / raw / index / archive all refused on /api/page', a
   for (const bad of ['../log.md', 'wiki/../log.md', 'raw/local/aaaa1111-pay.md', 'wiki/index.md', 'wiki/archive/old.md']) {
     const r = await fetch(base + '/api/page?path=' + encodeURIComponent(bad));
     assert.equal(r.status, 400, `should refuse: ${bad}`);
-    assert.match((await r.json()).error, /page path must be wiki\/sources\|topics/);
+    assert.match((await r.json()).error, /page path must be wiki\/sources\|entities\|concepts\|syntheses/);
   }
-  const r = await fetch(base + '/api/page?path=' + encodeURIComponent('wiki\\topics\\ok-page.md'));
+  const r = await fetch(base + '/api/page?path=' + encodeURIComponent('wiki\\syntheses\\ok-page.md'));
   assert.equal(r.status, 200, 'backslash variant of a legit path normalizes');
 });
 
@@ -101,14 +101,14 @@ test('raw evidence endpoint: serves raw/ only, refuses traversal and log.md', as
   const ok = await fetch(base + '/api/raw?path=' + encodeURIComponent('raw/local/aaaa1111-pay.md'));
   assert.equal(ok.status, 200);
   assert.ok((await ok.json()).body.includes('Raw evidence body'));
-  for (const bad of ['../log.md', 'raw/../../log.md', 'wiki/topics/ok-page.md', 'log.md']) {
+  for (const bad of ['../log.md', 'raw/../../log.md', 'wiki/syntheses/ok-page.md', 'log.md']) {
     const r = await fetch(base + '/api/raw?path=' + encodeURIComponent(bad));
     assert.ok(r.status === 400 || r.status === 404, `should refuse: ${bad} (got ${r.status})`);
   }
 });
 
 test('review flip over HTTP is byte-preserving (CRLF + BOM + comments)', async () => {
-  const abs = topicAbs('crlf-cand.md');
+  const abs = synthAbs('crlf-cand.md');
   const original = '﻿---\r\n' +
     'type: topic\r\n' +
     'status: candidate\r\n' +
@@ -117,7 +117,7 @@ test('review flip over HTTP is byte-preserving (CRLF + BOM + comments)', async (
     '---\r\n' +
     '\r\nBody.\r\n';
   fs.writeFileSync(abs, original, 'utf8');
-  const r = await post('/api/review', { path: 'wiki/topics/crlf-cand.md', action: 'approve' });
+  const r = await post('/api/review', { path: 'wiki/syntheses/crlf-cand.md', action: 'approve' });
   assert.equal(r.status, 200);
   assert.equal((await r.json()).status, 'approved');
   const expected = original.replace('status: candidate\r\n', 'status: approved\r\n');
@@ -125,18 +125,18 @@ test('review flip over HTTP is byte-preserving (CRLF + BOM + comments)', async (
 });
 
 test('review gates: double flip → 409; approved page → 409; index.md → 400; ghost → 404; bad action → 400', async () => {
-  let r = await post('/api/review', { path: 'wiki/topics/cand-one.md', action: 'approve' });
+  let r = await post('/api/review', { path: 'wiki/syntheses/cand-one.md', action: 'approve' });
   assert.equal(r.status, 200);
-  r = await post('/api/review', { path: 'wiki/topics/cand-one.md', action: 'reject' });
+  r = await post('/api/review', { path: 'wiki/syntheses/cand-one.md', action: 'reject' });
   assert.equal(r.status, 409, 'second flip loses loudly');
   assert.match((await r.json()).error, /page status is "approved", expected "candidate"/);
-  r = await post('/api/review', { path: 'wiki/topics/ok-page.md', action: 'approve' });
+  r = await post('/api/review', { path: 'wiki/syntheses/ok-page.md', action: 'approve' });
   assert.equal(r.status, 409, 'approved page is not flippable');
   r = await post('/api/review', { path: 'wiki/index.md', action: 'approve' });
   assert.equal(r.status, 400);
-  r = await post('/api/review', { path: 'wiki/topics/ghost.md', action: 'approve' });
+  r = await post('/api/review', { path: 'wiki/syntheses/ghost.md', action: 'approve' });
   assert.equal(r.status, 404);
-  r = await post('/api/review', { path: 'wiki/topics/ok-page.md', action: 'delete' });
+  r = await post('/api/review', { path: 'wiki/syntheses/ok-page.md', action: 'delete' });
   assert.equal(r.status, 400);
   assert.match((await r.json()).error, /action must be approve\|reject/);
 });
@@ -156,11 +156,11 @@ test('static serving: index + app.js, no escape from public/', async () => {
 });
 
 test('CJK regression: CJK title and body round-trip through /api/page', async () => {
-  writePage('wiki/topics/cjk-page.md', {
-    type: 'topic', status: 'candidate', title: '支付超时治理',
+  writePage('wiki/syntheses/cjk-page.md', {
+    type: 'synthesis', status: 'candidate', title: '支付超时治理',
     sources: ['raw/local/aaaa1111-pay.md'],
   }, '## 超时\n\n支付网关支持超时重试。');
-  const r = await fetch(base + '/api/page?path=' + encodeURIComponent('wiki/topics/cjk-page.md'));
+  const r = await fetch(base + '/api/page?path=' + encodeURIComponent('wiki/syntheses/cjk-page.md'));
   assert.equal(r.status, 200);
   const data = await r.json();
   assert.equal(data.fields.title, '支付超时治理');
@@ -168,13 +168,13 @@ test('CJK regression: CJK title and body round-trip through /api/page', async ()
 });
 
 test('L3 regression: oversize POST body gets a 413 response, not a hung connection', async () => {
-  const r = await post('/api/review', { path: 'wiki/topics/ok-page.md', action: 'approve', pad: 'x'.repeat(70 * 1024) });
+  const r = await post('/api/review', { path: 'wiki/syntheses/ok-page.md', action: 'approve', pad: 'x'.repeat(70 * 1024) });
   assert.equal(r.status, 413);
   assert.match((await r.json()).error, /request body too large/);
 });
 
 test('diff endpoint: graceful null baseline when the KB has no git history', async () => {
-  const r = await fetch(base + '/api/diff?path=' + encodeURIComponent('wiki/topics/ok-page.md'));
+  const r = await fetch(base + '/api/diff?path=' + encodeURIComponent('wiki/syntheses/ok-page.md'));
   assert.equal(r.status, 200);
   const d = await r.json();
   assert.equal(d.baseline, null, 'temp KB is not a git repo — no baseline');
@@ -193,10 +193,10 @@ test("L5' regression: diff endpoint returns the git baseline and changed=true (h
     return;
   }
   const gkb = fs.mkdtempSync(path.join(os.tmpdir(), 'kb-viewer-git-'));
-  const pageAbs = path.join(gkb, 'wiki', 'topics', 'versioned.md');
+  const pageAbs = path.join(gkb, 'wiki', 'syntheses', 'versioned.md');
   fs.mkdirSync(path.dirname(pageAbs), { recursive: true });
   fs.writeFileSync(pageAbs, buildFrontmatter({
-    type: 'topic', status: 'approved', title: 'Versioned', sources: [],
+    type: 'synthesis', status: 'approved', title: 'Versioned', sources: [],
   }) + '\nOld baseline body line.\n', 'utf8');
   const git = (args) => execFileSync('git', ['-C', gkb, ...args], { stdio: 'ignore' });
   git(['init']);
@@ -204,13 +204,13 @@ test("L5' regression: diff endpoint returns the git baseline and changed=true (h
   git(['-c', 'user.email=t', '-c', 'user.name=t', 'commit', '-m', 'baseline']);
   // a candidate overwrite: status flip + body change, uncommitted
   fs.writeFileSync(pageAbs, buildFrontmatter({
-    type: 'topic', status: 'candidate', title: 'Versioned', sources: [],
+    type: 'synthesis', status: 'candidate', title: 'Versioned', sources: [],
   }) + '\nNew conflicting body line.\n', 'utf8');
 
   const server2 = createViewer(gkb);
   await new Promise((resolve) => server2.listen(0, '127.0.0.1', resolve));
   try {
-    const r = await fetch(`http://127.0.0.1:${server2.address().port}/api/diff?path=` + encodeURIComponent('wiki/topics/versioned.md'));
+    const r = await fetch(`http://127.0.0.1:${server2.address().port}/api/diff?path=` + encodeURIComponent('wiki/syntheses/versioned.md'));
     assert.equal(r.status, 200);
     const d = await r.json();
     assert.ok(d.baseline && d.baseline.includes('Old baseline body line'), 'baseline comes from git HEAD');

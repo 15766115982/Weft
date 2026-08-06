@@ -43,8 +43,8 @@ test('judge registry: claude built-in, mock registered through the same path', (
 
 test('rubric prompt: fixed rubric, bounded fields, ids in order', () => {
   const p = buildJudgePrompt('retry policy', [
-    { page: 'wiki/topics/a.md', title: 'A'.repeat(500), snippet: 'S'.repeat(2000) },
-    { page: 'wiki/topics/b.md', title: 'B', snippet: 's' },
+    { page: 'wiki/syntheses/a.md', title: 'A'.repeat(500), snippet: 'S'.repeat(2000) },
+    { page: 'wiki/syntheses/b.md', title: 'B', snippet: 's' },
   ]);
   assert.ok(p.includes('3 = directly answers'));
   assert.ok(p.includes('"id": 1') && p.includes('"id": 2'));
@@ -63,8 +63,8 @@ test('/api/judge: mock verdicts land per result', async () => {
   const res = await post('/api/judge', {
     q: 'retry compensation',
     results: [
-      { page: 'wiki/topics/a.md', title: 'A', snippet: 'alpha' },
-      { page: 'wiki/topics/b.md', title: 'B', snippet: 'beta' },
+      { page: 'wiki/syntheses/a.md', title: 'A', snippet: 'alpha' },
+      { page: 'wiki/syntheses/b.md', title: 'B', snippet: 'beta' },
     ],
     backend: 'mock',
   }, { 'x-ui-token': token });

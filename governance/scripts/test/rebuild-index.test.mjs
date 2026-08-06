@@ -10,11 +10,11 @@ import { buildFrontmatter } from '../lib/frontmatter.mjs';
 
 function makeKb() {
   const kbRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'kb-idx-'));
-  fs.mkdirSync(path.join(kbRoot, 'wiki', 'topics'), { recursive: true });
+  fs.mkdirSync(path.join(kbRoot, 'wiki', 'syntheses'), { recursive: true });
   fs.mkdirSync(path.join(kbRoot, 'wiki', 'sources'), { recursive: true });
-  fs.writeFileSync(path.join(kbRoot, 'wiki', 'topics', 'retry-budget.md'), [
+  fs.writeFileSync(path.join(kbRoot, 'wiki', 'syntheses', 'retry-budget.md'), [
     buildFrontmatter({
-      type: 'topic', status: 'approved', title: 'Retry Budget',
+      type: 'synthesis', status: 'approved', title: 'Retry Budget',
       created_at: '2026-08-01T00:00:00Z', updated_at: '2026-08-01T00:00:00Z',
       sources: ['raw/local/x1.md'],
     }),
@@ -43,7 +43,7 @@ test('rebuildIndex: second identical run skips write + log; change re-writes', (
   try {
     const first = rebuildIndex(kb);
     assert.equal(first.skipped, false);
-    assert.equal(first.topics, 1);
+    assert.equal(first.syntheses, 1);
     assert.equal(first.sources, 1);
     assert.ok(fs.existsSync(indexPath(kb)));
     assert.equal(logLines(kb), 1);
@@ -51,12 +51,12 @@ test('rebuildIndex: second identical run skips write + log; change re-writes', (
     const contentAfterFirst = fs.readFileSync(indexPath(kb), 'utf8');
     const second = rebuildIndex(kb);
     assert.equal(second.skipped, true);
-    assert.equal(second.topics, 1);
+    assert.equal(second.syntheses, 1);
     assert.equal(fs.readFileSync(indexPath(kb), 'utf8'), contentAfterFirst);
     assert.equal(logLines(kb), 1, 'no log churn on no-op rebuild');
 
     // change a page title → regeneration differs → write + log resume
-    const topicAbs = path.join(kb, 'wiki', 'topics', 'retry-budget.md');
+    const topicAbs = path.join(kb, 'wiki', 'syntheses', 'retry-budget.md');
     fs.writeFileSync(topicAbs, fs.readFileSync(topicAbs, 'utf8').replace('Retry Budget', 'Retry Budget v2'), 'utf8');
     const third = rebuildIndex(kb);
     assert.equal(third.skipped, false);

@@ -192,8 +192,8 @@ test('apply-topic forces candidate fail-closed when a new source sits in a flagg
     // no --candidate, no note — the caller is silently trying to approve the fused topic
     const out = applyTopicPage(kb.kbRoot, { slug: 'payment-timeout', title: 'Payment Timeout', sources: [a] }, 'fusion body');
     assert.equal(out.status, 'candidate', 'bug 0001: fused-version approval must be structurally impossible');
-    assert.equal(out.action, 'candidate:topic');
-    const { fields } = kb.readPage('wiki/topics/payment-timeout.md');
+    assert.equal(out.action, 'candidate:synthesis');
+    const { fields } = kb.readPage('wiki/syntheses/payment-timeout.md');
     assert.equal(fields.status, 'candidate');
     assert.match(fields.review_note, /forced candidate/);
   } finally { kb.cleanup(); }
@@ -240,11 +240,11 @@ test('apply-topic collapses identical-hash sources to one reference and logs aut
     const a = kb.writeRaw('coll-a', { hash: 'sha256:SAME', title: 'Collided', body: 'same content' });
     const b = kb.writeRaw('coll-b', { hash: 'sha256:SAME', title: 'Collided', body: 'same content' });
     const out = applyTopicPage(kb.kbRoot, { slug: 'collapsed', title: 'Collapsed Topic', sources: [a, b] }, 'body');
-    const { fields } = kb.readPage('wiki/topics/collapsed.md');
+    const { fields } = kb.readPage('wiki/syntheses/collapsed.md');
     // neither was previously referenced → lexicographic first survives
     assert.equal(fields.sources.length, 1);
     assert.deepEqual(fields.sources, [a]);
-    assert.match(kb.log(), /govern \| auto:dedup-topic \| wiki\/topics\/collapsed\.md \| collapsed raw\/local\/coll-b\.md into raw\/local\/coll-a\.md/);
+    assert.match(kb.log(), /govern \| auto:dedup-topic \| wiki\/syntheses\/collapsed\.md \| collapsed raw\/local\/coll-b\.md into raw\/local\/coll-a\.md/);
   } finally { kb.cleanup(); }
 });
 
@@ -255,8 +255,8 @@ test('apply-topic emits semantic_check_required when a new source title overlaps
     applyTopicPage(kb.kbRoot, { slug: 'payment-timeout', title: 'Payment Timeout Handling', sources: [base] }, 'topic body');
     const newRaw = kb.writeRaw('new-pay-policy', { title: 'Payment Timeout Policy', body: 'A distinct new document about timeout policy configuration.' });
     const out = applyTopicPage(kb.kbRoot, { slug: 'timeout-policy', title: 'Timeout Policy', sources: [newRaw] }, 'new topic body');
-    assert.ok(out.semantic_check_required.includes('payment-timeout'),
-      `title overlap must surface the topic for the mandatory semantic self-check: ${out.semantic_check_required}`);
+    assert.ok(out.semantic_check_required.includes('syntheses/payment-timeout'),
+      `title overlap must surface the synthesis for the mandatory semantic self-check: ${out.semantic_check_required}`);
     assert.equal(out.status, 'approved', 'semantic_check_required changes nothing about status');
   } finally { kb.cleanup(); }
 });
@@ -277,15 +277,15 @@ test('reject restores the previous git-committed approved version + logs synchro
     gitCommitAll(kb.kbRoot, 'approved baseline');
     // overwrite with a wrong candidate (bug 0001 flow)
     applyTopicPage(kb.kbRoot, { slug: 'payment-timeout', title: 'Payment Timeout (fused)', sources: [a], candidate: true, note: 'bad fusion' }, 'wrong fusion body');
-    assert.equal(readStatus(path.join(kb.kbRoot, 'wiki', 'topics', 'payment-timeout.md')), 'candidate');
-    const out = rejectPage(kb.kbRoot, 'wiki/topics/payment-timeout.md');
+    assert.equal(readStatus(path.join(kb.kbRoot, 'wiki', 'syntheses', 'payment-timeout.md')), 'candidate');
+    const out = rejectPage(kb.kbRoot, 'wiki/syntheses/payment-timeout.md');
     assert.equal(out.restored, true);
     assert.equal(out.status, 'approved');
-    const { fields, body } = kb.readPage('wiki/topics/payment-timeout.md');
+    const { fields, body } = kb.readPage('wiki/syntheses/payment-timeout.md');
     assert.equal(fields.title, 'Payment Timeout', 'restored the approved version, not the candidate');
     assert.ok(body.includes('approved version body'));
     // synchronous log keeps lastLogAction = review|reject → sweep backfills nothing
-    assert.match(kb.log(), /review \| reject \| wiki\/topics\/payment-timeout\.md \| via session \| restored previous approved version/);
+    assert.match(kb.log(), /review \| reject \| wiki\/syntheses\/payment-timeout\.md \| via session \| restored previous approved version/);
     const s = sweep(kb.kbRoot);
     assert.deepEqual(s.backfilled, [], 'P1-5: restore log must prevent a mis-recorded backfilled approve');
   } finally { kb.cleanup(); }
@@ -296,7 +296,7 @@ test('reject on a non-git KB falls back to plain reject with a distinguishable r
   try {
     const a = kb.writeRaw('pay-plain', { title: 'Payment' });
     applyTopicPage(kb.kbRoot, { slug: 'cand-one', title: 'Candidate One', sources: [a], candidate: true }, 'body');
-    const out = rejectPage(kb.kbRoot, 'wiki/topics/cand-one.md');
+    const out = rejectPage(kb.kbRoot, 'wiki/syntheses/cand-one.md');
     assert.equal(out.restored, false);
     assert.equal(out.restore_reason, 'not-a-git-repo');
     assert.equal(out.status, 'rejected');
@@ -310,7 +310,7 @@ test('reject on a git KB with no approved history falls back to plain reject (di
     applyTopicPage(kb.kbRoot, { slug: 'never-approved', title: 'Never Approved', sources: [a], candidate: true }, 'body');
     execFileSync('git', ['init', '-q'], { cwd: kb.kbRoot });
     gitCommitAll(kb.kbRoot, 'only candidate exists');
-    const out = rejectPage(kb.kbRoot, 'wiki/topics/never-approved.md');
+    const out = rejectPage(kb.kbRoot, 'wiki/syntheses/never-approved.md');
     assert.equal(out.restored, false);
     assert.equal(out.restore_reason, 'no-approved-version-in-git-history');
     assert.equal(out.status, 'rejected');
@@ -329,7 +329,7 @@ test('bug 0001 repro: two version files fused into one topic now land as candida
     // the old flow approved outright; the new flow must fail closed
     const out = applyTopicPage(kb.kbRoot, { slug: 'pay-timeout', title: 'Payment Timeout', sources: [v1, v2] }, 'fused synthesis');
     assert.equal(out.status, 'candidate');
-    const { fields } = kb.readPage('wiki/topics/pay-timeout.md');
+    const { fields } = kb.readPage('wiki/syntheses/pay-timeout.md');
     assert.equal(fields.status, 'candidate');
     assert.match(fields.review_note, /forced candidate/);
   } finally { kb.cleanup(); }

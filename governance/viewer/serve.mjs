@@ -70,7 +70,7 @@ export function createViewer(kbRoot) {
 
   const listPages = () => {
     const pages = [];
-    for (const sub of ['sources', 'topics']) {
+    for (const sub of ['sources', 'entities', 'concepts', 'syntheses']) {
       for (const abs of walk(path.join(kbRoot, 'wiki', sub))) {
         const rel = path.relative(kbRoot, abs).replace(/\\/g, '/');
         const { fields } = parseFrontmatter(fs.readFileSync(abs, 'utf8'));

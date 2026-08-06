@@ -22,7 +22,7 @@ const write = (kb, rel, text) => {
 
 function makeKb() {
   const kb = fs.mkdtempSync(path.join(os.tmpdir(), 'kb-gruns-'));
-  write(kb, 'wiki/topics/a.md', '---\ntype: topic\nstatus: approved\ntitle: A\n---\nBody A\n');
+  write(kb, 'wiki/syntheses/a.md', '---\ntype: topic\nstatus: approved\ntitle: A\n---\nBody A\n');
   write(kb, 'wiki/sources/local-x.md', '---\ntype: source\nstatus: approved\ntitle: X\n---\nBody X\n');
   return kb;
 }
@@ -35,7 +35,7 @@ test('wikiHash: stable for same tree, changes on 1-byte edit, null without wiki/
     const h1 = wikiHash(kb);
     assert.ok(typeof h1 === 'string' && h1.length === 64);
     assert.equal(wikiHash(kb), h1);
-    write(kb, 'wiki/topics/a.md', '---\ntype: topic\nstatus: approved\ntitle: A\n---\nBody A!\n');
+    write(kb, 'wiki/syntheses/a.md', '---\ntype: topic\nstatus: approved\ntitle: A\n---\nBody A!\n');
     assert.notEqual(wikiHash(kb), h1);
     const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'kb-gruns-empty-'));
     try { assert.equal(wikiHash(empty), null); } finally { fs.rmSync(empty, { recursive: true, force: true }); }
@@ -88,7 +88,7 @@ test('governRunJob: ok run records start+finish (noop true), writer run noop fal
     registerExecutor('fake-writer', () => {
       const events = new EventEmitter();
       setTimeout(() => {
-        write(kb, 'wiki/topics/b.md', '---\ntype: topic\nstatus: candidate\ntitle: B\n---\nBody B\n');
+        write(kb, 'wiki/syntheses/b.md', '---\ntype: topic\nstatus: candidate\ntitle: B\n---\nBody B\n');
         events.emit('done', { ok: true, text: 'created topics/b' });
       }, 10);
       return { events, kill: () => {} };
@@ -144,7 +144,7 @@ test('governRunJob: postPlan carries dangling links + counts; finish record has 
     registerExecutor('fake-dangler', () => {
       const events = new EventEmitter();
       setTimeout(() => {
-        write(kb, 'wiki/topics/c.md', '---\ntype: topic\nstatus: candidate\ntitle: C\n---\nSee [[missing-page]].\n');
+        write(kb, 'wiki/syntheses/c.md', '---\ntype: topic\nstatus: candidate\ntitle: C\n---\nSee [[missing-page]].\n');
         events.emit('done', { ok: true, text: 'created topics/c with a bad link' });
       }, 10);
       return { events, kill: () => {} };
@@ -156,7 +156,7 @@ test('governRunJob: postPlan carries dangling links + counts; finish record has 
     assert.ok(j.result.postPlan, 'postPlan attached on ok runs');
     assert.deepEqual(
       j.result.postPlan.dangling_links.map((d) => [d.page, d.link]),
-      [['wiki/topics/c.md', 'missing-page']],
+      [['wiki/syntheses/c.md', 'missing-page']],
     );
     assert.equal(j.result.postPlan.counts.dangling_links, 1);
     assert.ok(typeof j.result.postPlan.counts.errors === 'number');
@@ -196,12 +196,12 @@ test('governRunJob: git KB auto-commits run changes; pre-dirty user file untouch
     git(['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init']);
     // the user's own uncommitted work, dirty BEFORE the run — never the
     // governance commit's business
-    write(kb, 'wiki/topics/user-draft.md', '---\ntype: topic\nstatus: candidate\ntitle: Draft\n---\nuser work\n');
+    write(kb, 'wiki/syntheses/user-draft.md', '---\ntype: topic\nstatus: candidate\ntitle: Draft\n---\nuser work\n');
 
     registerExecutor('fake-git-writer', () => {
       const events = new EventEmitter();
       setTimeout(() => {
-        write(kb, 'wiki/topics/b.md', '---\ntype: topic\nstatus: candidate\ntitle: B\n---\nBody B\n');
+        write(kb, 'wiki/syntheses/b.md', '---\ntype: topic\nstatus: candidate\ntitle: B\n---\nBody B\n');
         events.emit('done', { ok: true, text: 'created topics/b' });
       }, 10);
       return { events, kill: () => {} };
@@ -214,7 +214,7 @@ test('governRunJob: git KB auto-commits run changes; pre-dirty user file untouch
     const log = git(['log', '--format=%s | %an']);
     assert.match(log, /govern: agent run .* \| kb-portal/);
     const dirty = git(['status', '--porcelain']);
-    assert.ok(!dirty.includes('wiki/topics/b.md'), 'run output is committed, not dirty');
+    assert.ok(!dirty.includes('wiki/syntheses/b.md'), 'run output is committed, not dirty');
     assert.match(dirty, /user-draft\.md/, 'pre-dirty user file stays uncommitted');
 
     const finish = fs.readFileSync(path.join(kb, '.kb', 'govern_runs.jsonl'), 'utf8')

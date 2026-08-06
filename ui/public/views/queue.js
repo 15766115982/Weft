@@ -41,6 +41,59 @@ function diffHtml(ops) {
     : `<span class="${o.t === '+' ? 'add' : 'del'}">${esc((o.t === '+' ? '+ ' : '- ') + o.text)}</span>\n`).join('');
 }
 
+function promptReason(action, prefill = '') {
+  return new Promise((resolve) => {
+    const mask = el('div', { class: 'cmdk-mask' });
+    const box = el('div', { class: 'cmdk', style: 'padding:18px 22px; max-width:480px' });
+    const title = {
+      approve: '批准理由', reject: '拒绝理由', 'archive-source': '归档理由', 'dismiss-conflict': '保留两者理由',
+    }[action] || '决策理由';
+    box.append(el('h3', { style: 'margin:0 0 10px' }, title));
+    const ta = el('textarea', { class: 'wiki-editor', rows: '4', placeholder: '简短说明为何做出这个决策…' });
+    ta.value = prefill;
+    box.append(ta);
+    const row = el('div', { style: 'display:flex;gap:10px;margin-top:14px;justify-content:flex-end' });
+    const cancel = el('button', {}, '取消');
+    const ok = el('button', { class: 'primary' }, '确认');
+    const note = el('span', { class: 'dim', style: 'font-size:12.5px' });
+    cancel.addEventListener('click', () => { close(); resolve(null); });
+    ok.addEventListener('click', () => {
+      const v = ta.value.trim();
+      if (!v) { note.textContent = '需要填写理由'; return; }
+      close(); resolve(v);
+    });
+    row.append(cancel, ok, note);
+    box.append(row);
+    mask.append(box);
+    mask.addEventListener('click', (e) => { if (e.target === mask) { close(); resolve(null); } });
+    function onKey(e) { if (e.key === 'Escape') { e.preventDefault(); close(); resolve(null); } }
+    function close() { mask.remove(); document.removeEventListener('keydown', onKey, true); }
+    document.addEventListener('keydown', onKey, true);
+    document.body.append(mask);
+    setTimeout(() => ta.focus(), 10);
+  });
+}
+
+async function decisionsPanel(rel) {
+  const box = el('div', { class: 'archive-card', style: 'margin-top:10px' });
+  try {
+    const { decisions } = await api('/api/decisions', { page: rel, limit: 10 });
+    if (!decisions.length) {
+      box.append(el('span', { class: 'dim' }, '暂无决策记录'));
+      return box;
+    }
+    box.append(el('div', { style: 'font-size:12px;font-weight:600;margin-bottom:4px' }, '决策记录'));
+    for (const d of decisions.slice(-5).reverse()) {
+      const line = el('div', { class: 'dim', style: 'font-size:12px' });
+      line.textContent = `[${d.timestamp ? String(d.timestamp).slice(0, 10) : ''}] ${d.actor} · ${d.action}${d.reason ? ': ' + d.reason : ''}`;
+      box.append(line);
+    }
+  } catch {
+    box.append(el('span', { class: 'dim' }, '决策记录加载失败'));
+  }
+  return box;
+}
+
 async function renderReview(container, rel, onDone, conflicts, suppressed) {
   container.textContent = '';
   const [page, diff] = await Promise.all([
@@ -159,15 +212,17 @@ async function renderReview(container, rel, onDone, conflicts, suppressed) {
   const note = el('span', { class: 'dim note', style: 'font-size:12.5px' });
   bar.append(approve, reject, edit, archiveBtn, dismiss, note, hint);
   reader.append(bar);
+  reader.append(await decisionsPanel(rel));
   syncArchiveDisabled(); // normalize initial title; stays disabled until a loser is selected
   container.append(reader);
 
-  async function act(action, targetPath) {
+  async function act(action, targetPath, reason) {
+    if (!reason) return;
     approve.disabled = reject.disabled = edit.disabled = archiveBtn.disabled = dismiss.disabled = true;
     note.textContent = '';
     try {
       const r = await apiPost('/api/review', {
-        path: targetPath || rel, action, raws: group?.raws, reason: 'parallel documents (kept both)',
+        path: targetPath || rel, action, raws: group?.raws, reason,
       });
       note.textContent = ({
         approve: '已批准',
@@ -190,16 +245,24 @@ async function renderReview(container, rel, onDone, conflicts, suppressed) {
       syncArchiveDisabled(); // archive stays gated on an explicit loser selection
     }
   }
-  approve.addEventListener('click', () => act('approve'));
-  reject.addEventListener('click', () => act('reject'));
-  edit.addEventListener('click', () => { location.hash = `#/page?path=${encodeURIComponent(rel)}`; });
-  archiveBtn.addEventListener('click', () => {
-    if (!selectedLoser) { note.textContent = '请先在来源行点选要归档的来源(败方)'; return; }
-    act('archive-source', selectedLoser);
+  approve.addEventListener('click', async () => {
+    const reason = await promptReason('approve');
+    if (reason) act('approve', null, reason);
   });
-  dismiss.addEventListener('click', () => {
+  reject.addEventListener('click', async () => {
+    const reason = await promptReason('reject');
+    if (reason) act('reject', null, reason);
+  });
+  edit.addEventListener('click', () => { location.hash = `#/page?path=${encodeURIComponent(rel)}`; });
+  archiveBtn.addEventListener('click', async () => {
+    if (!selectedLoser) { note.textContent = '请先在来源行点选要归档的来源(败方)'; return; }
+    const reason = await promptReason('archive-source', `归档败方 ${selectedLoser}`);
+    if (reason) act('archive-source', selectedLoser, reason);
+  });
+  dismiss.addEventListener('click', async () => {
     if (!group) { note.textContent = '当前候选不在冲突组内,无需保留两者'; return; }
-    act('dismiss-conflict');
+    const reason = await promptReason('dismiss-conflict', '平行文档,保留两者');
+    if (reason) act('dismiss-conflict', null, reason);
   });
 }
 
@@ -272,11 +335,12 @@ export async function render(view, params) {
   }
 
   let rejectDisarm = 0;
-  async function runBatch(action) {
+  async function runBatch(action, reason) {
+    if (!reason) return;
     approveBtn.disabled = rejectBtn.disabled = true;
     const paths = [...selected];
     try {
-      const { results } = await apiPost('/api/review-batch', { paths, action });
+      const { results } = await apiPost('/api/review-batch', { paths, action, reason });
       const failed = results.filter((r) => !r.ok);
       const verb = action === 'approve' ? '批准' : '拒绝';
       resultNote.textContent = `批量${verb}:${results.length - failed.length} 成功` + (failed.length ? ` / ${failed.length} 失败` : '');
@@ -290,8 +354,11 @@ export async function render(view, params) {
       approveBtn.disabled = rejectBtn.disabled = false;
     }
   }
-  approveBtn.addEventListener('click', () => runBatch('approve'));
-  rejectBtn.addEventListener('click', () => {
+  approveBtn.addEventListener('click', async () => {
+    const reason = await promptReason('approve', `批量批准 ${selected.size} 篇`);
+    if (reason) runBatch('approve', reason);
+  });
+  rejectBtn.addEventListener('click', async () => {
     if (!rejectBtn.dataset.armed) {
       rejectBtn.dataset.armed = '1';
       rejectBtn.textContent = `确认拒绝 ${selected.size} 篇?sweep 后归档,找回是手工活`;
@@ -302,7 +369,8 @@ export async function render(view, params) {
     }
     delete rejectBtn.dataset.armed;
     rejectBtn.classList.remove('danger-solid');
-    runBatch('reject');
+    const reason = await promptReason('reject', `批量拒绝 ${selected.size} 篇`);
+    if (reason) runBatch('reject', reason);
   });
   clearBtn.addEventListener('click', () => { selected.clear(); syncBatchBar(); });
   batchBar.append(selNote, approveBtn, rejectBtn, clearBtn);

@@ -32,15 +32,15 @@ before(async () => {
     updated_at: '2026-08-01T00:00:00Z',
   }, 'Source summary B.');
   // topic whose sources are raw paths (the contract-enforced real shape)
-  writePage('wiki/topics/topic-b.md', {
-    type: 'topic', status: 'approved', title: 'Topic B',
+  writePage('wiki/syntheses/topic-b.md', {
+    type: 'synthesis', status: 'approved', title: 'Topic B',
     sources: ['raw/local/bbbb2222-pay.md'], updated_at: '2026-08-01T00:00:00Z',
   }, 'Synthesis of B.');
   // ungoverned raw: exists, but no source page yet
   fs.writeFileSync(path.join(kb, 'raw', 'local', 'cccc3333-ungoverned.md'),
     buildFrontmatter({ source: 'local', source_id: 'cccc3333', title: 'Ungoverned' }) + '\nNot yet governed.\n', 'utf8');
-  writePage('wiki/topics/topic-c.md', {
-    type: 'topic', status: 'candidate', title: 'Topic C',
+  writePage('wiki/syntheses/topic-c.md', {
+    type: 'synthesis', status: 'candidate', title: 'Topic C',
     sources: ['raw/local/cccc3333-ungoverned.md'], updated_at: '2026-08-01T00:00:00Z',
   }, 'Draft over ungoverned raw.');
   server = createPortal({ kb, port: 0 });
@@ -52,13 +52,13 @@ after(() => { server.close(); fs.rmSync(kb, { recursive: true, force: true }); }
 const get = (p) => fetch(base + p);
 
 test('page sources resolve raw path → source summary page', async () => {
-  const { sources_resolved } = await (await get('/api/page?path=wiki/topics/topic-b.md')).json();
+  const { sources_resolved } = await (await get('/api/page?path=wiki/syntheses/topic-b.md')).json();
   assert.deepEqual(sources_resolved,
     [{ raw: 'raw/local/bbbb2222-pay.md', page: 'wiki/sources/local-bbbb2222.md' }]);
 });
 
 test('page sources resolve to null when no source page exists yet (ungoverned raw)', async () => {
-  const { sources_resolved } = await (await get('/api/page?path=wiki/topics/topic-c.md')).json();
+  const { sources_resolved } = await (await get('/api/page?path=wiki/syntheses/topic-c.md')).json();
   assert.deepEqual(sources_resolved, [{ raw: 'raw/local/cccc3333-ungoverned.md', page: null }]);
 });
 

@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import http from 'node:http';
-import { run, check, normalizeJiraDate, adfToText, issueToMarkdown, CONNECTOR_ID } from '../connectors/jira.mjs';
+import { run, check, normalizeJiraDate, adfToText, issueToMarkdown, CONNECTOR_ID, detect } from '../connectors/jira.mjs';
 import { parseFrontmatter } from '../lib/frontmatter.mjs';
 
 const PAT_ENV = 'JIRA_PAT_TEST_M5';
@@ -251,6 +251,30 @@ test('check(): myself endpoint round-trip', async (t) => {
   const { baseUrl } = await mockJira(t, {});
   const me = await check(kbConf(baseUrl));
   assert.deepEqual(me, { name: 'alice', displayName: 'Alice A', emailAddress: 'a@example.com' });
+});
+
+test('detect: classifies issues as new/changed/unchanged/removed_upstream without writing raw', async (t) => {
+  const dkb = fs.mkdtempSync(path.join(os.tmpdir(), 'kb-jira-detect-'));
+  t.after(() => fs.rmSync(dkb, { recursive: true, force: true }));
+  const issues = [makeIssue('PROJ-50'), makeIssue('PROJ-51')];
+  const { baseUrl } = await mockJira(t, { 'project = PROJ': issues });
+  await run(dkb, { kbConfig: kbConf(baseUrl) });
+
+  // unchanged
+  let d = await detect(dkb, { kbConfig: kbConf(baseUrl) });
+  assert.equal(d.unchanged.length, 2);
+  assert.equal(d.new.length, 0);
+
+  // changed + new + removed
+  issues[0] = makeIssue('PROJ-50', { summary: 'revised', updated: '2026-07-30T08:00:00.000+0800' });
+  issues[1] = makeIssue('PROJ-52'); // replaces PROJ-51 in upstream
+  d = await detect(dkb, { kbConfig: kbConf(baseUrl) });
+  assert.equal(d.changed.length, 1);
+  assert.equal(d.changed[0].id, 'PROJ-50');
+  assert.equal(d.new.length, 1);
+  assert.equal(d.new[0].id, 'PROJ-52');
+  assert.equal(d.removed_upstream.length, 1);
+  assert.equal(d.removed_upstream[0].source_id, 'PROJ-51');
 });
 
 test('unit: normalizeJiraDate / adfToText / issueToMarkdown edge cases', () => {

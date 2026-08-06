@@ -23,7 +23,7 @@ export function loadKbConfig(kbRoot) {
 
 // ensure the contract directory skeleton exists (idempotent)
 export function ensureKbSkeleton(kbRoot) {
-  for (const d of ['raw', 'wiki', path.join('wiki', 'sources'), path.join('wiki', 'topics'), path.join('wiki', 'archive')]) {
+  for (const d of ['raw', 'wiki', path.join('wiki', 'sources'), path.join('wiki', 'entities'), path.join('wiki', 'concepts'), path.join('wiki', 'syntheses'), path.join('wiki', 'archive')]) {
     fs.mkdirSync(path.join(kbRoot, d), { recursive: true });
   }
 }

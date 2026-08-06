@@ -38,7 +38,7 @@ export function buildGraph(kbRoot) {
     const { fields } = parseFrontmatter(fs.readFileSync(indexAbs, 'utf8'));
     nodes.push({ path: 'wiki/index.md', title: fields.title || 'Index', type: fields.type, status: fields.status, isIndex: true });
   }
-  for (const sub of ['sources', 'topics']) {
+  for (const sub of ['sources', 'entities', 'concepts', 'syntheses']) {
     for (const abs of walkMd(path.join(kbRoot, 'wiki', sub))) {
       const rel = path.relative(kbRoot, abs).replace(/\\/g, '/');
       const { fields } = parseFrontmatter(fs.readFileSync(abs, 'utf8'));
@@ -80,7 +80,7 @@ export function buildGraph(kbRoot) {
     if (indexed.has(n.path)) continue;
     const { fields, body } = parseFrontmatter(fs.readFileSync(path.join(kbRoot, n.path), 'utf8'));
     for (const to of resolveLinks(extractWikilinks(body), knownSorted)) push(n.path, to, 'authored');
-    if (n.type === 'topic' && Array.isArray(fields.sources) && fields.sources.length) {
+    if (['entity', 'concept', 'synthesis'].includes(fields.type) && Array.isArray(fields.sources) && fields.sources.length) {
       for (const to of deriveProvlinks(approvedSources, fields.sources).links) push(n.path, to, 'derived');
     }
   }

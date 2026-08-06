@@ -34,6 +34,35 @@ function runCli(args, env) {
   });
 }
 
+test('detect CLI end-to-end: read-only, writes upstream-detect.json, does not write raw or acquire_runs', async (t) => {
+  const baseUrl = await mockJira(t);
+  const kb = fs.mkdtempSync(path.join(os.tmpdir(), 'kb-acq-detect-'));
+  t.after(() => fs.rmSync(kb, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(kb, 'kb.json'), JSON.stringify({
+    version: 1,
+    connectors: { jira: { base_url: baseUrl, pat_env: PAT_ENV, jql: ['project = PROJ'] } },
+  }));
+
+  const detect1 = await runCli(['detect', 'jira', '--kb', kb], { [PAT_ENV]: 'cli-pat' });
+  assert.equal(detect1.code, 0, detect1.stderr);
+  const out1 = JSON.parse(detect1.stdout);
+  assert.equal(out1.connector, 'jira');
+  assert.ok(out1.detect);
+  assert.equal(out1.detect.new.length, 1);
+  assert.equal(out1.detect.new[0].id, 'PROJ-42');
+  assert.ok(fs.existsSync(path.join(kb, '.kb', 'acquire', 'upstream-detect.json')));
+  assert.ok(!fs.existsSync(path.join(kb, 'raw', 'jira')), 'detect must not write raw/');
+  assert.ok(!fs.existsSync(path.join(kb, '.kb', 'acquire_runs.jsonl')), 'detect must not record a pull');
+
+  // pull then detect again → unchanged
+  const pull = await runCli(['jira', '--kb', kb], { [PAT_ENV]: 'cli-pat' });
+  assert.equal(pull.code, 0, pull.stderr);
+  const detect2 = await runCli(['detect', 'jira', '--kb', kb], { [PAT_ENV]: 'cli-pat' });
+  const out2 = JSON.parse(detect2.stdout);
+  assert.equal(out2.detect.unchanged.length, 1);
+  assert.equal(out2.detect.new.length, 0);
+});
+
 const PAT_ENV = 'JIRA_PAT_CLI_M5';
 
 async function mockJira(t) {

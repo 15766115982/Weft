@@ -62,6 +62,73 @@ function reconcile(kbRoot, inbox, { prune }) {
   return { orphaned, pruned };
 }
 
+export function detect(kbRoot, { inbox }) {
+  const result = { new: [], changed: [], unchanged: [], removed_upstream: [], errors: [] };
+  if (!fs.existsSync(inbox)) {
+    result.errors.push({ inbox, error: 'inbox directory does not exist' });
+    return result;
+  }
+
+  // Map existing raw/local docs by their inbox path.
+  const byInbox = new Map();
+  const rawLocalDir = path.join(kbRoot, 'raw', 'local');
+  if (fs.existsSync(rawLocalDir)) {
+    for (const f of fs.readdirSync(rawLocalDir)) {
+      if (!f.endsWith('.md')) continue;
+      const abs = path.join(rawLocalDir, f);
+      try {
+        const { fields } = parseFrontmatter(fs.readFileSync(abs, 'utf8'));
+        const inboxPath = fields.extra?.inbox_path;
+        if (inboxPath) {
+          byInbox.set(inboxPath, {
+            path: `raw/local/${f}`,
+            version: String(fields.source_version || ''),
+            title: String(fields.title || ''),
+            source_id: String(fields.source_id || ''),
+          });
+        }
+      } catch { /* skip malformed */ }
+    }
+  }
+
+  const seen = new Set();
+  for (const absPath of walk(inbox)) {
+    const ext = path.extname(absPath).toLowerCase();
+    const relInbox = path.relative(inbox, absPath).replace(/\\/g, '/');
+    if (!converters[ext]) continue; // same extension filter as run()
+    try {
+      const stat = fs.statSync(absPath);
+      const version = stat.mtime.toISOString();
+      const stem = path.basename(absPath, ext);
+      const sourceId = sha256(relInbox).slice(0, 8);
+      const existing = byInbox.get(relInbox);
+      const item = {
+        id: sourceId,
+        upstream_id: relInbox,
+        version,
+        title: extractTitle(normalizeBody(converters[ext](fs.readFileSync(absPath, 'utf8'), { title: stem })), stem),
+      };
+      if (!existing) {
+        result.new.push(item);
+      } else if (existing.version !== version) {
+        result.changed.push({ ...item, path: existing.path, local_version: existing.version });
+      } else {
+        result.unchanged.push({ ...item, path: existing.path });
+      }
+      seen.add(relInbox);
+    } catch (err) {
+      result.errors.push({ file: relInbox, error: err.message });
+    }
+  }
+
+  for (const [inboxPath, local] of byInbox) {
+    if (!seen.has(inboxPath)) {
+      result.removed_upstream.push({ path: local.path, source_id: local.source_id, upstream_id: inboxPath, title: local.title });
+    }
+  }
+  return result;
+}
+
 export function run(kbRoot, { inbox, prune = false }) {
   const summary = { created: [], updated: [], unchanged: [], unsupported: [], orphaned: [], pruned: [], errors: [] };
   if (!fs.existsSync(inbox)) {

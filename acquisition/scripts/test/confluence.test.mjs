@@ -9,7 +9,7 @@ import path from 'node:path';
 import os from 'node:os';
 import http from 'node:http';
 import {
-  run, check, normalizeConfluenceDate, storageToMarkdown, pageToMarkdown, CONNECTOR_ID,
+  run, check, normalizeConfluenceDate, storageToMarkdown, pageToMarkdown, CONNECTOR_ID, detect,
 } from '../connectors/confluence.mjs';
 import { parseFrontmatter } from '../lib/frontmatter.mjs';
 
@@ -266,6 +266,28 @@ test('check(): user/current endpoint round-trip', async (t) => {
   const { baseUrl } = await mockConfluence(t, {});
   const me = await check(kbConf(baseUrl));
   assert.deepEqual(me, { username: 'alice', displayName: 'Alice A', userKey: 'ff8080abc' });
+});
+
+test('detect: classifies pages as new/changed/unchanged/removed_upstream without writing raw', async (t) => {
+  const dkb = fs.mkdtempSync(path.join(os.tmpdir(), 'kb-conf-detect-'));
+  t.after(() => fs.rmSync(dkb, { recursive: true, force: true }));
+  const pages = [makePage('100001'), makePage('100002')];
+  const { baseUrl } = await mockConfluence(t, { [SPACE_CQL]: pages });
+  await run(dkb, { kbConfig: kbConf(baseUrl) });
+
+  let d = await detect(dkb, { kbConfig: kbConf(baseUrl) });
+  assert.equal(d.unchanged.length, 2);
+  assert.equal(d.new.length, 0);
+
+  pages[0] = makePage('100001', { title: 'revised', version: { number: 4, when: '2026-07-30T08:00:00.000+08:00', by: { displayName: 'Bob' } } });
+  pages[1] = makePage('100003'); // replaces 100002 in upstream
+  d = await detect(dkb, { kbConfig: kbConf(baseUrl) });
+  assert.equal(d.changed.length, 1);
+  assert.equal(d.changed[0].id, '100001');
+  assert.equal(d.new.length, 1);
+  assert.equal(d.new[0].id, '100003');
+  assert.equal(d.removed_upstream.length, 1);
+  assert.equal(d.removed_upstream[0].source_id, '100002');
 });
 
 test('unit: normalizeConfluenceDate / storageToMarkdown / pageToMarkdown edge cases', () => {

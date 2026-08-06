@@ -2,11 +2,12 @@
 
 > Weft(纬线):wikilink 把页面织成网。项目原名 knowledge-extension(仓库目录名沿用)。
 
-A self-governing knowledge base system for Claude Code: three fully decoupled services —
+A self-governing knowledge base system for Claude Code: four fully decoupled services —
 **acquisition** (Jira / Confluence / local files → normalized `raw/`), **governance**
 (`raw/` → curated `wiki/` with a candidate state machine), **retrieval** (hybrid FTS5
-search over approved pages) — distributed as Claude Code skills + Node.js scripts.
-No Python, no always-on services, no web platform.
+search over approved pages), and **llm** (all model calls behind a stable CLI contract) —
+distributed as Claude Code skills + Node.js scripts. No Python, no always-on services,
+no web platform.
 
 - **完整安装上手指南(中文,含 KB Portal)**: [docs/guide.zh-CN.md](docs/guide.zh-CN.md)
 - **安装配置教程(中文,服务层)**: [docs/installation.zh-CN.md](docs/installation.zh-CN.md)
@@ -43,6 +44,7 @@ Full smoke-test commands: [docs/installation.md](docs/installation.md) §7.
 | `acquisition/` | Acquisition service: `scripts/` (connectors: local, jira, confluence) + `skills/acquire/` |
 | `governance/` | Governance service: `scripts/` (plan/apply/review/sweep) + `skills/govern/` + `viewer/` (thin review UI) |
 | `retrieval/` | Retrieval service: `scripts/` (dual FTS5 + graph expansion) + `skills/search/` |
+| `llm/` | LLM service: `scripts/` (all model calls: governance tasks, chat, deep-research) |
 | `ui/` | UI portal (M7, ADR-0006): on-demand localhost human console — pure consumer, zero reverse dependency (design: [docs/webui/](docs/webui/README.md)) |
 | `schema/` | The frozen contract (`contract.md`) + governance conventions (`governance.md`) |
 | `docs/` | Installation guides (EN/中文), real-env acceptance checklist, DEVLOG, ADRs |
@@ -54,17 +56,18 @@ through the knowledge base directory per `schema/contract.md`.
 
 ## Tests / 测试
 
-258 tests (all mocked, no network, no PATs) across five suites — three service
-suites, the UI portal suite, and a cross-service layer (scratch-KB pipeline
-regression + retrieval effectiveness eval):
+380 tests (all mocked, no network, no PATs, no Azure) across six suites — four service
+suites, the UI portal suite, and a cross-service layer (scratch-KB pipeline regression
++ retrieval effectiveness eval):
 
 ```bash
-cd acquisition/scripts && npm test            # 59
-cd governance/scripts && npm test             # 54 (includes the thin viewer)
-cd retrieval/scripts  && npm test             # 37 (npm install first)
-cd ui                 && node --test test/    # 69 (no dependencies)
+cd acquisition/scripts && npm test            # 69
+cd governance/scripts && npm test             # 72 (includes the thin viewer)
+cd retrieval/scripts  && npm test             # 46 (npm install first)
+cd llm                && node --test test/    # 31
+cd ui                 && node --test test/    # 92 / 1 skip (no dependencies)
 
-node --test tests/e2e/ tests/eval/            # 39: e2e pipeline (20) + retrieval eval (19)
+node --test tests/e2e/ tests/eval/            # 42: e2e pipeline (23) + retrieval eval (19)
 ```
 
 `tests/` builds a scratch KB from a fixture corpus (`tests/fixtures/inbox/`) and

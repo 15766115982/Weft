@@ -13,6 +13,7 @@
 // The old Python reference (LLM-Wiki backend/app/jira.py) is logic reference
 // only; this is a from-scratch Node rewrite on the global fetch (Node >= 18).
 import { upsertRawDoc, sha256 } from '../lib/rawdoc.mjs';
+import { writeDetectReport, classify, loadLocalBySource } from '../lib/detect.mjs';
 import { appendLog } from '../lib/log.mjs';
 import { describeShape, shapeError } from '../lib/shape.mjs';
 import { normalizeConnectorDate, decodeEntities } from './shared.mjs';
@@ -319,6 +320,49 @@ async function searchAll(cfg, jql, fetchImpl) {
     startAt += batch.length;
   }
   return { issues, total: total ?? issues.length };
+}
+
+/**
+ * Detect upstream changes without writing raw/. Reuses JQL scopes and auth.
+ * @returns summary {new, changed, unchanged, removed_upstream, errors}
+ */
+export async function detect(kbRoot, { kbConfig, jql, maxResults, fetchImpl } = {}) {
+  const cfg = resolveConfig(kbConfig, { jql, maxResults });
+  const result = { new: [], changed: [], unchanged: [], removed_upstream: [], errors: [] };
+  const local = loadLocalBySource(kbRoot, 'jira');
+  const upstream = new Map();
+
+  for (const scope of cfg.jqlList) {
+    let res;
+    try {
+      res = await searchAll(cfg, scope, fetchImpl);
+    } catch (err) {
+      if (err.authFailed) throw err;
+      result.errors.push({ jql: scope, error: err.message });
+      continue;
+    }
+    for (const issue of res.issues) {
+      const key = issue?.key;
+      if (!key || !SAFE_SOURCE_ID.test(key)) continue;
+      const f = issue.fields || {};
+      const version = normalizeJiraDate(f.updated);
+      upstream.set(key, { id: key, upstream_id: key, version, title: `[${key}] ${f.summary || ''}` });
+    }
+  }
+
+  for (const [key, item] of upstream) {
+    const cls = classify(key, item.version, local);
+    if (cls === 'new') result.new.push(item);
+    else if (cls === 'changed') result.changed.push({ ...item, path: local.get(key).path, local_version: local.get(key).version });
+    else result.unchanged.push({ ...item, path: local.get(key).path });
+  }
+
+  for (const [key, localItem] of local) {
+    if (!upstream.has(key)) {
+      result.removed_upstream.push({ path: localItem.path, source_id: key, upstream_id: key, title: localItem.title });
+    }
+  }
+  return result;
 }
 
 /**

@@ -253,7 +253,45 @@ test('raw delete in a git KB snapshots via pathspec-scoped commit (G6 git path)'
   fs.rmSync(kb2, { recursive: true, force: true });
 });
 
-// ---- phase 1: /api/raw-asset (Gliffy sidecars) + /api/probe (shape probe) ----
+test('detect endpoint: queued detect job writes .kb/acquire/upstream-detect.json, never touches raw/ or acquire_runs', async () => {
+  fs.mkdirSync(path.join(kb, 'inbox'), { recursive: true });
+  // Seed a tracked raw doc by pulling from inbox, then wipe the run record so
+  // we can assert detect itself does not write one.
+  fs.writeFileSync(path.join(kb, 'inbox', 'detect-me.md'), '# Detect Me\n', 'utf8');
+  const pull = await post('/api/pull', { connector: 'local' }, { 'x-ui-token': token });
+  assert.equal(pull.status, 202);
+  assert.equal((await waitJob((await pull.json()).job.id)).status, 'done');
+  fs.rmSync(path.join(kb, '.kb', 'acquire_runs.jsonl'), { force: true });
+
+  // raw-only doc with an inbox_path that no longer exists → removed_upstream
+  fs.writeFileSync(path.join(kb, 'raw', 'local', 'orphan.md'),
+    buildFrontmatter({ source: 'local', source_id: 'orphan', title: 'Orphan',
+      extra: { inbox_path: 'inbox/gone.md' } }) + '\n# Orphan\n', 'utf8');
+
+  const res = await post('/api/detect', { connector: 'local' }, { 'x-ui-token': token });
+  assert.equal(res.status, 202);
+  const { job } = await res.json();
+  const done = await waitJob(job.id);
+  assert.equal(done.status, 'done', done.error || 'detect job failed');
+
+  const reportPath = path.join(kb, '.kb', 'acquire', 'upstream-detect.json');
+  assert.ok(fs.existsSync(reportPath), 'detect wrote upstream-detect.json');
+  const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+  assert.equal(report.connector, 'local');
+  assert.ok(report.new || report.changed || report.unchanged || report.removed_upstream, 'report has at least one bucket');
+  assert.ok(report.unchanged.length >= 1, 'matching inbox file is unchanged');
+  assert.ok(report.removed_upstream.some((d) => d.source_id === 'orphan'), 'raw-only doc is removed_upstream');
+  assert.ok(!fs.existsSync(path.join(kb, '.kb', 'acquire_runs.jsonl')), 'detect must not append to acquire_runs.jsonl');
+
+  const getR = await get('/api/detect');
+  assert.equal(getR.status, 200);
+  const getData = await getR.json();
+  assert.equal(getData.connector, 'local');
+  assert.ok(getData.detect, 'GET /api/detect wraps buckets under detect');
+  assert.ok(getData.detect.unchanged.length >= 1, 'wrapped unchanged bucket present');
+});
+
+// Phase 1: /api/raw-asset (Gliffy sidecars) + /api/probe (shape probe)
 
 test('raw-asset: whitelist-gated image serving', async () => {
   fs.mkdirSync(path.join(kb, 'raw', 'confluence', '501.assets'), { recursive: true });
@@ -265,7 +303,7 @@ test('raw-asset: whitelist-gated image serving', async () => {
 
   const traversal = await get(`/api/raw-asset?path=${encodeURIComponent('raw/../kb.json')}`);
   assert.equal(traversal.status, 400);
-  const outsideRaw = await get(`/api/raw-asset?path=${encodeURIComponent('wiki/topics/x.png')}`);
+  const outsideRaw = await get(`/api/raw-asset?path=${encodeURIComponent('wiki/syntheses/x.png')}`);
   assert.equal(outsideRaw.status, 400);
   const notAssetsDir = await get(`/api/raw-asset?path=${encodeURIComponent('raw/confluence/501/arch.png')}`);
   assert.equal(notAssetsDir.status, 400);
