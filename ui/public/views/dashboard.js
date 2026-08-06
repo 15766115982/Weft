@@ -4,7 +4,10 @@ import { api } from '../lib/api.js';
 import { html, esc, el } from '../lib/render.js';
 import { icon } from '../lib/icons.js';
 
-const STAT = (ic, num, label) => `<div class="stat">
+// Zero counts dim to background noise; problem metrics (orphans/dangling/
+// errors) turn amber the moment they are non-zero — attention goes to what
+// needs action, not to a uniform wall of numbers.
+const STAT = (ic, num, label, problem) => `<div class="stat${num ? '' : ' zero'}${problem && num ? ' alert' : ''}">
   <div class="stat-top"><span class="ic">${icon(ic, 14)}</span><span class="label">${esc(label)}</span></div>
   <div class="num">${esc(num)}</div></div>`;
 
@@ -120,14 +123,14 @@ export async function render(view) {
   html(cards, [
     STAT('library', h.pages.total, 'wiki 页面总数'),
     STAT('check', h.pages.byStatus.approved || 0, '已批准(可检索)'),
-    STAT('circleAlert', h.pages.byStatus.candidate || 0, '候选(待评审)'),
+    STAT('circleAlert', h.pages.byStatus.candidate || 0, '候选(待评审)', true),
     STAT('fileText', h.pages.byType.source || 0, '来源摘要页'),
     STAT('database', h.pages.byType.entity || 0, '实体页'),
     STAT('tag', h.pages.byType.concept || 0, '概念页'),
     STAT('layers', h.pages.byType.synthesis || 0, '主题综合页'),
-    STAT('fileX', h.plan.orphaned_pages, '孤儿页'),
-    STAT('link2', h.plan.dangling_links, '悬空链接'),
-    STAT('activity', h.plan.errors, '治理错误'),
+    STAT('fileX', h.plan.orphaned_pages, '孤儿页', true),
+    STAT('link2', h.plan.dangling_links, '悬空链接', true),
+    STAT('activity', h.plan.errors, '治理错误', true),
   ].join(''));
   view.append(cards);
 

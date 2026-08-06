@@ -383,7 +383,7 @@ export async function render(view, params) {
     syncBatchBar();
   });
   allRow.append(allBox, el('span', { style: 'font-size:12px' }, ' 全选'));
-  list.append(allRow);
+  if (queue.length) list.append(allRow); // batch controls are meaningless on an empty queue
 
   for (const p of queue) {
     const row = el('div', { class: 'batch-row' });
@@ -399,7 +399,6 @@ export async function render(view, params) {
     row.append(cb, a);
     list.append(row);
   }
-  if (!queue.length) list.append(el('p', { class: 'dim', style: 'padding:4px' }, '队列已清空 🎉'));
   syncBatchBar(); // restore checkbox/batchbar state after a j/k remount (selected is module-scoped)
 
   const spacer = el('div');

@@ -48,6 +48,10 @@ function wikiGroups(pages, current, filter) {
   const folds = JSON.parse(store.get('folds', '{}'));
   const frag = el('div');
   for (const [name, list] of Object.entries(groups)) {
+    // Hide empty type groups (entities/concepts/syntheses start at zero on most
+    // KBs) — a "无" row per group is noise, not information. Filtering reveals
+    // them again so a no-hit group still shows as 无.
+    if (!list.length && !filter) continue;
     const items = list.map((p) =>
       `<a class="${p.path === current ? 'current' : ''}" href="#/page?path=${encodeURIComponent(p.path)}" title="${esc(p.path)}"><span class="t">${esc(p.title)}</span>${badge(p.status) || ''}</a>`
     ).join('') || '<p class="dim pad">无</p>';

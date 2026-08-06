@@ -67,9 +67,31 @@ export async function render(view, params) {
 
   function renderMessages() {
     msgBox.textContent = '';
+    clearBtn.hidden = messages.length === 0;
+    if (!messages.length) {
+      msgBox.append(welcomeCard());
+      return;
+    }
     for (const m of messages) msgBox.append(renderMessage(m));
     msgBox.append(thinkingBox);
     scrollBottom();
+  }
+
+  // First-run empty state: what this chat is for, what the levels mean, and
+  // clickable example questions instead of a blank white void.
+  function welcomeCard() {
+    const card = el('div', { class: 'chat-welcome' });
+    card.append(el('h3', {}, '基于这座知识库提问'));
+    card.append(el('p', { class: 'dim' },
+      '回答只来自已批准的 wiki 页面并附引用。三种深度:快速 = 直接回答;深度 = 先检索相关页再回答;深研 = 多轮检索 + 推理,带完整检索轨迹。'));
+    const examples = el('div', { class: 'chat-examples' });
+    for (const q of ['这个系统的重试策略是什么?', '支付超时后会发生什么?', '帮我梳理熔断和重试的关系']) {
+      const b = el('button', { class: 'sm' }, q);
+      b.addEventListener('click', () => { input.value = q; input.focus(); });
+      examples.append(b);
+    }
+    card.append(examples);
+    return card;
   }
 
   function renderMessage(m) {
