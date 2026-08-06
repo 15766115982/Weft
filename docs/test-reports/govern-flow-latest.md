@@ -1,6 +1,6 @@
 # Govern-flow behavior report
 
-Run: 2026-08-06T16:45:05.208Z · 12/12 passed
+Run: 2026-08-06T16:47:29.810Z · 12/12 passed
 
 | case | result | detail |
 |---|---|---|
