@@ -52,14 +52,16 @@ function stripStopwords(query) {
 function terms(query) {
   const out = [];
   for (const tok of query.split(/\s+/).filter(Boolean)) {
-    if (/^[-0-9a-zA-Z_.]+$/.test(tok) && tok.length >= 2) out.push(tok);
-    else if (tok.length > 2) {
-      // CJK run: slide bigrams ("重试预算" → 重试 试预 预算 would be too noisy;
-      // the whole run searched as one term lets the trigram index do its job)
-      out.push(tok);
-    } else if (tok.length === 2) out.push(tok);
+    if (/^[-0-9a-zA-Z_.]+$/.test(tok)) {
+      if (tok.length >= 2) out.push(tok);
+      continue;
+    }
+    // CJK run: 2-char terms hit the LIKE leg; slide bigrams so a long
+    // stopword-stripped run still yields searchable anchors ("重试几次" → 重试).
+    if (tok.length === 2) { out.push(tok); continue; }
+    for (let i = 0; i < tok.length - 1; i++) out.push(tok.slice(i, i + 2));
   }
-  return out;
+  return [...new Set(out)];
 }
 
 export async function searchWithFallback(kbRoot, query, { limit = 10 } = {}) {

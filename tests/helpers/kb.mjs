@@ -139,6 +139,8 @@ const TAGS = {
   '订单超时关闭.md': 'order,timeout',
   '支付对账流程.md': 'reconciliation,operations',
   'mixed-locale.md': 'incident,retry',
+  'faq-retry.md': 'retry,faq',
+  'incident-settlement-delay.md': 'incident,settlement,reconciliation',
   'notes.txt': 'operations,handover',
   'empty.md': 'placeholder',
   'deep/structured-doc.md': 'operations,runbook,retry',

@@ -1,17 +1,19 @@
-// Retrieval effectiveness evaluation: builds a deterministic scratch KB from
-// the fixture corpus (all docs governed, three approved topics), runs the
-// golden query set (queries.json) through the REAL kb_search CLI, and scores
-// Hit@1 / Hit@5 / MRR plus gate/routing behavior. Writes a markdown report to
-// docs/test-reports/retrieval-eval-latest.md.
+// Retrieval effectiveness evaluation (catalog docs/plans/test-catalog.md §C):
+// golden dataset tests/eval/golden/queries.json (~45 queries, categorized,
+// graded relevance) against a deterministic scratch KB. CLI AND-semantics path
+// for exact/phrase/CJK/filter/negative; conversational queries run through
+// searchWithFallback (the chat product path). Report: overall Hit@1/Hit@5/MRR
+// plus per-category breakdown; gate Hit@5 ≥ 0.85 on non-conversational.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  SCRIPTS, REPO, sourcePageFor, runCli, copyInbox, makeScratchKb, acquire, govern, applyAllSources, rawRelFor,
+  SCRIPTS, REPO, FIXTURES, sourcePageFor, runCli, copyInbox, makeScratchKb, acquire, govern, applyAllSources, rawRelFor,
 } from '../helpers/kb.mjs';
+import { searchWithFallback } from '../../llm/lib/research.mjs';
 
-const QUERIES = JSON.parse(fs.readFileSync(path.join(REPO, 'tests', 'eval', 'queries.json'), 'utf8'));
+const QUERIES = JSON.parse(fs.readFileSync(path.join(REPO, 'tests', 'eval', 'golden', 'queries.json'), 'utf8'));
 const HIT5_THRESHOLD = 0.85;
 
 let kb;
@@ -21,6 +23,18 @@ const pageOf = (ref) => ref.startsWith('topic:') ? `wiki/syntheses/${ref.slice(6
 before(() => {
   kb = makeScratchKb('kb-eval-');
   copyInbox(kb);
+  // conversational corpus (kept out of the shared inbox so pipeline counts stay
+  // stable; deterministic mtimes for the date-filter queries)
+  const SCENARIO_MTIMES = {
+    'faq-retry.md': '2026-07-26T08:00:00.000Z',
+    'incident-settlement-delay.md': '2026-07-29T08:00:00.000Z',
+  };
+  for (const [f, m] of Object.entries(SCENARIO_MTIMES)) {
+    const dst = path.join(kb, 'inbox', f);
+    fs.copyFileSync(path.join(FIXTURES, 'scenarios', f), dst);
+    const t = new Date(m);
+    fs.utimesSync(dst, t, t);
+  }
   acquire(kb);
   applyAllSources(kb);
   govern(kb, ['apply-topic', '--slug', 'retry-resilience', '--title', 'Retry Resilience',
@@ -35,66 +49,94 @@ before(() => {
     'Daily reconciliation compares settlement files with the ledger; discrepancies follow a two-business-day SLA.\n');
   govern(kb, ['rebuild-index']);
 });
+
 after(() => {
   writeReport();
   fs.rmSync(kb, { recursive: true, force: true });
 });
 
+function hit5of(rs) { return rs.length ? rs.filter((r) => r.firstRank >= 0 && r.firstRank < 5).length / rs.length : 0; }
+
 function writeReport() {
   const dir = path.join(REPO, 'docs', 'test-reports');
   fs.mkdirSync(dir, { recursive: true });
   const scored = rows.filter((r) => !r.expectEmpty);
+  const cli = scored.filter((r) => r.category !== 'conversational');
+  const convo = scored.filter((r) => r.category === 'conversational');
   const hit1 = scored.filter((r) => r.firstRank === 0).length / scored.length;
-  const hit5 = scored.filter((r) => r.firstRank >= 0 && r.firstRank < 5).length / scored.length;
+  const hit5 = hit5of(scored);
   const mrr = scored.reduce((s, r) => s + (r.firstRank >= 0 ? 1 / (r.firstRank + 1) : 0), 0) / scored.length;
-  // ADR-0007 candidate-space dilution observation: how many candidates each
-  // query produces and how many arrive via graph expansion (authored via:link
-  // + derived via:provenance, appended after all search hits at score 0). The
-  // Hit@5 gate is preview-based so expansion cannot break it structurally, but
-  // a runaway expansion would silently inflate `total` / the on-disk candidate
-  // file — that growth must stay visible.
+
+  const cats = [...new Set(scored.map((r) => r.category))];
+  const catLines = cats.map((c) => {
+    const rs = scored.filter((r) => r.category === c);
+    return `| ${c} | ${rs.length} | ${rs.filter((r) => r.firstRank === 0).length} | ${hit5of(rs).toFixed(2)} |`;
+  });
+
   const exp = scored.filter((r) => r.expansionTotal).map((r) => r.expansionTotal);
   const dilutionLine = exp.length
     ? `expansion per query: avg ${(exp.reduce((s, x) => s + x, 0) / exp.length).toFixed(1)} candidates · max ${Math.max(...exp)}`
     : 'no graph expansion in this run';
+
   const lines = [
     '# Retrieval Evaluation Report',
     '',
-    `Date: ${new Date().toISOString()} · KB: fixture corpus (${scored.length + 1} queries, ${scored.length} scored + 1 negative)`,
+    `Date: ${new Date().toISOString()} · golden set: ${QUERIES.length} queries (${scored.length} scored + ${QUERIES.length - scored.length} negative)`,
     '',
-    `**Hit@1 = ${hit1.toFixed(3)} · Hit@5 = ${hit5.toFixed(3)} (threshold ${HIT5_THRESHOLD}) · MRR = ${mrr.toFixed(3)}**`,
+    `**Hit@1 = ${hit1.toFixed(3)} · Hit@5 = ${hit5.toFixed(3)} (gate ≥${HIT5_THRESHOLD}, non-conversational ${hit5of(cli).toFixed(3)}) · MRR = ${mrr.toFixed(3)}**`,
+    `**conversational (fallback path, tracked, not gated): Hit@5 = ${hit5of(convo).toFixed(3)} (${convo.length} queries)**`,
     '',
+    '## per-category',
+    '',
+    '| category | n | hit@1 | hit@5 |', '|---|---|---|---|', ...catLines, '',
     `candidate dilution: ${dilutionLine}`,
     '',
-    '| id | query | expected | first-rank | top-5 pages | routed | total | result |',
+    '| id | cat | query | expected | first-rank | top-5 | routed | result |',
     '|---|---|---|---|---|---|---|---|',
-    ...rows.map((r) => `| ${r.id} | \`${r.q}\` | ${r.expect.join('<br>') || '(empty expected)'} | ${r.expectEmpty ? '—' : (r.firstRank < 0 ? 'MISS' : r.firstRank + 1)} | ${r.top5.join('<br>')} | ${r.routed} | ${r.total} | ${r.ok ? '✅' : '❌'} |`),
+    ...rows.map((r) => `| ${r.id} | ${r.category} | \`${r.q}\` | ${r.expect.join('<br>') || '(empty expected)'} | ${r.expectEmpty ? '—' : (r.firstRank < 0 ? 'MISS' : r.firstRank + 1)} | ${r.top5.join('<br>')} | ${r.routed} | ${r.ok ? '✅' : '❌'} |`),
     '',
   ];
   fs.writeFileSync(path.join(dir, 'retrieval-eval-latest.md'), lines.join('\n'));
-  console.log(`\n[eval] Hit@1=${hit1.toFixed(3)} Hit@5=${hit5.toFixed(3)} MRR=${mrr.toFixed(3)} · ${dilutionLine} → docs/test-reports/retrieval-eval-latest.md`);
+  console.log(`\n[eval] Hit@1=${hit1.toFixed(3)} Hit@5=${hit5.toFixed(3)} MRR=${mrr.toFixed(3)} · conversational Hit@5=${hit5of(convo).toFixed(3)} · ${dilutionLine} → docs/test-reports/retrieval-eval-latest.md`);
 }
 
 test('retrieval effectiveness: golden query set', async (t) => {
   for (const q of QUERIES) {
-    await t.test(`${q.id} ${q.q}`, () => {
-      const res = runCli(SCRIPTS.search, ['search', q.q, '--kb', kb]);
-      const preview = res.preview.map((c) => c.page);
+    await t.test(`${q.id} [${q.category}] ${q.q}`, async () => {
       const expectPages = (q.expect || []).map(pageOf);
+      let preview, routed, candidatesFile;
+      if (q.via === 'fallback') {
+        const res = await searchWithFallback(kb, q.q, { limit: 10 });
+        preview = (res.preview || []).map((c) => c.page);
+        routed = res.relaxed ? `fallback(${res.relaxed_query || (res.relaxed_terms || []).join('|')})` : 'direct';
+        candidatesFile = null;
+      } else {
+        const res = runCli(SCRIPTS.search, ['search', q.q, '--kb', kb]);
+        preview = res.preview.map((c) => c.page);
+        routed = Object.entries(res.routed).filter(([, v]) => v.length).map(([k, v]) => `${k}:${v.join('/')}`).join(' ') || '(filters only)';
+        candidatesFile = res.candidates_file;
+      }
       const firstRank = preview.findIndex((p) => expectPages.includes(p));
       const row = {
-        id: q.id, q: q.q, expect: expectPages, expectEmpty: !!q.expectEmpty,
+        id: q.id, category: q.category, q: q.q, expect: expectPages, expectEmpty: !!q.expectEmpty,
         firstRank, top5: preview.slice(0, 5).map((p) => p.replace('wiki/', '')),
-        routed: Object.entries(res.routed).filter(([, v]) => v.length).map(([k, v]) => `${k}:${v.join('/')}`).join(' ') || '(filters only)',
-        total: res.total, expansionTotal: 0, ok: true,
+        routed, expansionTotal: 0, ok: true,
       };
       rows.push(row);
       try {
         if (q.expectEmpty) {
-          assert.equal(res.total, 0, `negative query must return nothing, got ${JSON.stringify(preview)}`);
+          assert.equal(preview.length, 0, `negative query must return nothing, got ${JSON.stringify(preview)}`);
           return;
         }
-        assert.ok(firstRank >= 0, `none of ${JSON.stringify(expectPages)} in preview ${JSON.stringify(preview)}`);
+        if (q.knownMiss) {
+          // Documented baseline: misses today, and the test FAILS LOUDLY the day
+          // query rewriting makes it hit — so the dataset gets re-annotated.
+          assert.ok(firstRank < 0,
+            `knownMiss baseline flipped — ${q.q} now hits ${JSON.stringify(preview.slice(0, 3))}; promote it to a scored expect`);
+          row.routed += ' (knownMiss baseline)';
+          return;
+        }
+        assert.ok(firstRank >= 0, `none of ${JSON.stringify(expectPages)} in preview ${JSON.stringify(preview.slice(0, 8))}`);
         for (const abs of (q.absent || []).map(pageOf)) {
           assert.ok(!preview.includes(abs), `${abs} must be absent from preview`);
         }
@@ -103,20 +145,20 @@ test('retrieval effectiveness: golden query set', async (t) => {
           for (const p of preview) assert.ok(p.includes(`/${typeDir}/`), `${p} is not a ${q.onlyType} page`);
         }
         if (q.routed) {
+          const res = runCli(SCRIPTS.search, ['search', q.q, '--kb', kb]);
           assert.ok(res.routed[q.routed.leg].includes(q.routed.term),
             `term ${q.routed.term} must route to ${q.routed.leg}, got ${JSON.stringify(res.routed)}`);
         }
         if (q.expectViaLink) {
-          const full = JSON.parse(fs.readFileSync(path.join(kb, res.candidates_file), 'utf8'));
+          const full = JSON.parse(fs.readFileSync(path.join(kb, candidatesFile), 'utf8'));
           const target = pageOf(q.expectViaLink);
           assert.ok(full.candidates.some((c) => c.page === target && c.via === 'link'),
             `${target} must appear via graph expansion`);
         }
-        // ADR-0007 dilution observation: expansion neighbors (link + provenance)
-        // are appended after all search hits; count them so their growth is visible
-        const full = JSON.parse(fs.readFileSync(path.join(kb, res.candidates_file), 'utf8'));
-        row.expansionTotal = full.candidates.filter((c) => c.via === 'link' || c.via === 'provenance').length;
-        row.total = full.candidates.length;
+        if (candidatesFile) {
+          const full = JSON.parse(fs.readFileSync(path.join(kb, candidatesFile), 'utf8'));
+          row.expansionTotal = full.candidates.filter((c) => c.via === 'link' || c.via === 'provenance').length;
+        }
       } catch (err) {
         row.ok = false;
         throw err;
@@ -125,6 +167,7 @@ test('retrieval effectiveness: golden query set', async (t) => {
   }
 
   const scored = rows.filter((r) => !r.expectEmpty);
-  const hit5 = scored.filter((r) => r.firstRank >= 0 && r.firstRank < 5).length / scored.length;
-  assert.ok(hit5 >= HIT5_THRESHOLD, `Hit@5 ${hit5.toFixed(3)} below threshold ${HIT5_THRESHOLD}`);
+  const cli = scored.filter((r) => r.category !== 'conversational');
+  const hit5 = hit5of(cli);
+  assert.ok(hit5 >= HIT5_THRESHOLD, `non-conversational Hit@5 ${hit5.toFixed(3)} below threshold ${HIT5_THRESHOLD}`);
 });
