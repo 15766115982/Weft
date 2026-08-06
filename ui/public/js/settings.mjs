@@ -1,11 +1,13 @@
-// Settings page controller (Phase 1).
+// Settings page controller.
 const kb = new URLSearchParams(location.search).get('kb') || '';
+
+const $ = (sel) => document.querySelector(sel);
 
 async function api(path, opts = {}) {
   const url = `/api${path}${path.includes('?') ? '&' : '?'}kb=${encodeURIComponent(kb)}`;
   const res = await fetch(url, {
     credentials: 'same-origin',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', 'x-ui-token': document.querySelector('meta[name="ui-token"]')?.content || '' },
     ...opts,
   });
   const data = await res.json().catch(() => ({}));
@@ -20,13 +22,9 @@ function log(text) {
 async function loadSettings() {
   const { ok, data } = await api('/settings');
   if (!ok) {
-    $('#login-section').hidden = false;
-    $('#settings-section').hidden = true;
-    $('#login-status').textContent = data.error || 'Please login.';
+    $('#config-display code').textContent = `Failed to load settings: ${data.error || 'unknown'}`;
     return;
   }
-  $('#login-section').hidden = true;
-  $('#settings-section').hidden = false;
   $('#config-display code').textContent = data.config ? JSON.stringify(data.config, null, 2) : 'No .kb/config/models.json found.';
 
   const envList = $('#env-list');
@@ -49,33 +47,12 @@ async function loadSettings() {
   }
 }
 
-function $(sel) { return document.querySelector(sel); }
 function el(tag, attrs = {}, text) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
   if (text !== undefined) node.textContent = text;
   return node;
 }
-
-$('#login-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const password = $('#password').value;
-  const { ok, data } = await api('/admin/login', {
-    method: 'POST',
-    body: JSON.stringify({ password }),
-  });
-  if (!ok) {
-    $('#login-status').textContent = data.error || 'Login failed';
-    return;
-  }
-  await loadSettings();
-});
-
-$('#btn-logout').addEventListener('click', async () => {
-  await api('/admin/logout', { method: 'POST', body: '{}' });
-  $('#login-section').hidden = false;
-  $('#settings-section').hidden = true;
-});
 
 async function runJob(path, body = {}) {
   log(`POST ${path} ...`);

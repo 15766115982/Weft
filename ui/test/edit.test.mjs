@@ -12,9 +12,8 @@ import { createPortal } from '../serve.mjs';
 import { buildFrontmatter, parseFrontmatter } from '../../governance/scripts/lib/frontmatter.mjs';
 import { sweep, applyTopicPage } from '../../governance/scripts/lib/govern.mjs';
 import { flipStatus } from '../../governance/scripts/lib/statusflip.mjs';
-import { useTestAdminEnv, clearTestAdminEnv, adminCookie } from './helpers/auth.mjs';
 
-let kb, server, base, token, cookie;
+let kb, server, base, token;
 
 function writePage(rel, fields, body) {
   const abs = path.join(kb, rel);
@@ -23,7 +22,6 @@ function writePage(rel, fields, body) {
 }
 
 before(async () => {
-  useTestAdminEnv(); // ADR-0009: /api/history is an operator-only GET
   kb = fs.mkdtempSync(path.join(os.tmpdir(), 'kb-portal-m7d-'));
   writePage('wiki/syntheses/ok-page.md', {
     type: 'synthesis', status: 'approved', title: 'Approved Page',
@@ -39,12 +37,10 @@ before(async () => {
   base = `http://127.0.0.1:${server.address().port}`;
   const html = await (await fetch(base + '/')).text();
   token = html.match(/name="ui-token" content="([^"]+)"/)[1];
-  cookie = await adminCookie(base);
 });
 after(() => {
   server.close();
   fs.rmSync(kb, { recursive: true, force: true });
-  clearTestAdminEnv();
 });
 
 const post = (p, obj, headers = {}) => fetch(base + p, {
@@ -143,7 +139,7 @@ test('edit guards: traversal, empty body, pasted frontmatter, missing page, secu
 
 test('history on a non-git KB: G6 snapshots + git-init hint', async () => {
   // runs after the edit test above, which created one snapshot of ok-page
-  const res = await fetch(base + '/api/history?path=wiki/syntheses/ok-page.md', { headers: { cookie } });
+  const res = await fetch(base + '/api/history?path=wiki/syntheses/ok-page.md');
   assert.equal(res.status, 200);
   const h = await res.json();
   assert.equal(h.kind, 'snapshots');
@@ -169,8 +165,7 @@ test('history on a git KB: git log --follow entries, newest first', async () => 
   const s2 = createPortal({ kb: kb2, port: 0 });
   await new Promise((resolve) => s2.listen(0, '127.0.0.1', resolve));
   const b2 = `http://127.0.0.1:${s2.address().port}`;
-  const cookie2 = await adminCookie(b2);
-  const hRes = await fetch(b2 + '/api/history?path=wiki/syntheses/p.md', { headers: { cookie: cookie2 } });
+  const hRes = await fetch(b2 + '/api/history?path=wiki/syntheses/p.md');
   assert.equal(hRes.status, 200);
   const h = await hRes.json();
   s2.close();

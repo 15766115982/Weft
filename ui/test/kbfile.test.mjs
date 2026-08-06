@@ -8,12 +8,10 @@ import path from 'node:path';
 import os from 'node:os';
 import { createPortal } from '../serve.mjs';
 import { buildGovernPrompt } from '../lib/govern.mjs';
-import { useTestAdminEnv, clearTestAdminEnv, adminCookie } from './helpers/auth.mjs';
 
-let kb, server, base, token, cookie;
+let kb, server, base, token;
 
 before(async () => {
-  useTestAdminEnv(); // ADR-0009: GET /api/kbfile is an operator-only read
   kb = fs.mkdtempSync(path.join(os.tmpdir(), 'kb-portal-kbfile-'));
   fs.mkdirSync(path.join(kb, 'wiki', 'topics'), { recursive: true });
   server = createPortal({ kb, port: 0 });
@@ -21,18 +19,16 @@ before(async () => {
   base = `http://127.0.0.1:${server.address().port}`;
   const html = await (await fetch(base + '/')).text();
   token = html.match(/name="ui-token" content="([^"]+)"/)[1];
-  cookie = await adminCookie(base);
 });
 after(() => {
   server.close();
   fs.rmSync(kb, { recursive: true, force: true });
-  clearTestAdminEnv();
 });
 
 const post = (p, obj, headers = {}) => fetch(base + p, {
   method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(obj),
 });
-const get = (p) => fetch(base + p, { headers: { cookie } });
+const get = (p) => fetch(base + p);
 const briefPath = () => path.join(kb, 'GOVERNANCE.md');
 
 test('kbfile: 404 before creation, POST creates, GET round-trips with hash, log.md audited', async () => {

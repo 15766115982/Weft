@@ -16,7 +16,6 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { EventEmitter } from 'node:events';
 import { createAuth } from './lib/auth.mjs';
-import { createAdminAuth } from './lib/adminauth.mjs';
 import { settingsRoutes } from './routes/api-settings.mjs';
 import { createKbRegistry } from './lib/kb.mjs';
 import { resolveUnder, normalizeWikiRelRead, normalizeRawRel, normalizeKbFileName, walkMd, normalizeRawAssetRel, assetMime } from './lib/paths.mjs';
@@ -78,7 +77,6 @@ const MIME = {
 
 export function createPortal({ kb: cliKb, port = 8322 } = {}) {
   const auth = createAuth();
-  const adminAuth = createAdminAuth();
   const registry = createKbRegistry({ cliKb });
   const jobs = createJobCenter();
   const watcher = createWatcher();
@@ -90,25 +88,6 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
     res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify(obj));
   };
-
-  // Phase 1+ team portal: operator-only views/APIs require an admin session.
-  // The per-startup token (auth.checkWrite) protects writes; adminAuth protects
-  // operator read surfaces so readers cannot see the decision inbox, governance
-  // console, raw/source management, or settings.
-  function requireAdmin(req, res) {
-    const admin = adminAuth.check(req);
-    if (admin.ok) return true;
-    if (!adminAuth.isConfigured()) {
-      return json(res, 403, { error: 'admin authentication is not configured (WEFT_ADMIN_PASSWORD_HASH)' });
-    }
-    return json(res, 401, { error: admin.error });
-  }
-
-  const OPERATOR_GET_PATHS = new Set([
-    '/api/settings', '/api/plan', '/api/conflicts', '/api/decisions', '/api/detect',
-    '/api/rawlist', '/api/raw', '/api/raw-asset', '/api/inbox', '/api/sources', '/api/jobs',
-    '/api/diff', '/api/kbfile', '/api/history', '/api/queue',
-  ]);
 
   // /api/health is polled every 30s by every open client AND on every SSE
   // change event; health() walks the whole wiki and plan() scans raw+wiki
@@ -188,21 +167,9 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
       if (req.method === 'GET' && url.pathname.startsWith('/api/')) {
         const kb = registry.resolve(url.searchParams.get('kb')).path;
 
-        // Session state for the SPA: readers see only public nav; operator pages
-        // require an admin session.
-        if (url.pathname === '/api/session') {
-          const admin = adminAuth.check(req);
-          return json(res, 200, { admin: admin.ok, configured: adminAuth.isConfigured() });
-        }
-
-        // Operator-only read endpoints.
-        if (OPERATOR_GET_PATHS.has(url.pathname)) {
-          if (!requireAdmin(req, res)) return;
-        }
-
-        // Phase 1: team portal admin/settings reads.
+        // Settings reads.
         if (url.pathname === '/api/settings') {
-          const settingsHandler = settingsRoutes({ adminAuth, jobs, registry });
+          const settingsHandler = settingsRoutes({ jobs, registry });
           const handled = await settingsHandler(req, res, url, readBody, json);
           if (handled !== null) return handled;
         }
@@ -403,15 +370,15 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
 
       // ---- writes (token + Origin/Host, S8; all KB mutations via the serial queue, S10) ----
       if (req.method === 'POST' && url.pathname.startsWith('/api/')) {
-        // Phase 1: team portal admin routes (login does not require a session).
-        if (url.pathname.startsWith('/api/admin/') || url.pathname.startsWith('/api/settings/')) {
-          const settingsHandler = settingsRoutes({ adminAuth, jobs, registry });
+        const refusal = auth.checkWrite(req);
+        if (refusal) return json(res, refusal.code, { error: refusal.error });
+
+        // Settings actions (llm check / init-prompts) enqueue jobs.
+        if (url.pathname.startsWith('/api/settings/')) {
+          const settingsHandler = settingsRoutes({ jobs, registry });
           const handled = await settingsHandler(req, res, url, readBody, json);
           if (handled !== null) return handled;
         }
-
-        const refusal = auth.checkWrite(req);
-        if (refusal) return json(res, refusal.code, { error: refusal.error });
 
         if (url.pathname === '/api/review') {
           const { path: p, action, kb: kbName, raws, reason } = JSON.parse(await readBody(req) || '{}');

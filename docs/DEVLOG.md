@@ -1,5 +1,29 @@
 # Development Log
 
+## Role gating reverted (open portal) + OpenAI-compatible LLM providers (2026-08-06)
+
+User decision: the ADR-0009 reader/operator role matrix was over-engineered for the
+current team size. **All portal features are open to everyone again.** The previous
+entry's G1 decision ("writes stay token-gated") is now the whole security model:
+loopback Host check + per-startup write token, nothing else.
+
+Removed: `ui/lib/adminauth.mjs`, `/api/session`, `/api/admin/login|logout`,
+`OPERATOR_GET_PATHS`/`requireAdmin` (serve.mjs), `OPERATOR_ROUTES`/session checks
+(app.js, browse.js), the settings login form, `test/helpers/auth.mjs`. Settings POSTs
+moved behind the standard write-token check. Tests: `authz.test.mjs` rewritten as an
+open-portal matrix (all formerly-gated GETs must stay public; writes still need the
+token), e2e `role-matrix.spec.mjs` replaced by `open-portal.spec.mjs` (15 cases).
+The `g g` hotkey sequence was also fixed (second `g` dispatched govern instead of
+re-arming).
+
+LLM service: `models.json` gains `"provider": "azure" | "openai"` (default `azure`).
+`openai` = any OpenAI-compatible endpoint (Kimi, DeepSeek, vLLM): `<endpoint>/chat/completions`,
+`Authorization: Bearer <api_key>`, `model` field in the body. Azure keeps SPN/api-key
+auth and deployment URLs. Examples: `templates/models.example.json` (Azure),
+`templates/models.example.openai.json` (Kimi). `llm check` validates per provider.
+
+---
+
 ## Portal test-pass fixes + G1 write-gating decision (2026-08-06)
 
 Playwright/API regression pass over the UI portal surfaced five client bugs and one

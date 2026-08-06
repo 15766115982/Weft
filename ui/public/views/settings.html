@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="ui-token" content="%%UI_TOKEN%%">
 <title>Settings — Weft</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230d7a6f' stroke-width='2'%3E%3Cpath d='M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="../vendor/pico.min.css">
@@ -12,49 +13,36 @@
 <div class="container" style="max-width: 720px; padding: 2rem 1rem;">
   <h1>⚙️ Settings</h1>
 
-  <section id="login-section">
-    <h2>Operator Login</h2>
-    <p id="login-status" class="dim">Admin login is required to change settings.</p>
-    <form id="login-form">
-      <label>Password
-        <input type="password" id="password" required autocomplete="current-password">
-      </label>
-      <button type="submit">Login</button>
-    </form>
-  </section>
+  <div class="grid">
+    <article>
+      <header><strong>Model Configuration</strong></header>
+      <pre id="config-display"><code>Loading...</code></pre>
+      <p class="dim">Edit <code>.kb/config/models.json</code> directly. Secrets are env vars only.</p>
+    </article>
 
-  <section id="settings-section" hidden>
+    <article>
+      <header><strong>Environment</strong></header>
+      <ul id="env-list"></ul>
+    </article>
+  </div>
+
+  <article>
+    <header><strong>Prompts</strong></header>
+    <ul id="prompts-list"></ul>
+    <p class="dim">Prompts live in <code>.kb/config/prompts/</code>. Use <em>Init default prompts</em> to seed them, or edit them directly on disk.</p>
+  </article>
+
+  <article>
+    <header><strong>LLM Service Actions</strong></header>
     <div class="grid">
-      <article>
-        <header><strong>Model Configuration</strong></header>
-        <pre id="config-display"><code>Loading...</code></pre>
-        <p class="dim">Edit <code>.kb/config/models.json</code> directly. Secrets are env vars only.</p>
-      </article>
-
-      <article>
-        <header><strong>Environment</strong></header>
-        <ul id="env-list"></ul>
-      </article>
+      <button id="btn-check">Run llm.mjs check</button>
+      <button id="btn-init-prompts">Init default prompts</button>
+      <button id="btn-init-force">Init prompts (force overwrite)</button>
     </div>
+    <pre id="action-log"><code></code></pre>
+  </article>
 
-    <article>
-      <header><strong>Prompts</strong></header>
-      <ul id="prompts-list"></ul>
-      <p class="dim">Prompts live in <code>.kb/config/prompts/</code>. Use <em>Init default prompts</em> to seed them, or edit them directly on disk.</p>
-    </article>
-
-    <article>
-      <header><strong>LLM Service Actions</strong></header>
-      <div class="grid">
-        <button id="btn-check">Run llm.mjs check</button>
-        <button id="btn-init-prompts">Init default prompts</button>
-        <button id="btn-init-force">Init prompts (force overwrite)</button>
-      </div>
-      <pre id="action-log"><code></code></pre>
-    </article>
-
-    <button id="btn-logout" class="secondary">Logout</button>
-  </section>
+  <p><a href="/">← 回到门户</a></p>
 </div>
 
 <script type="module" src="../js/settings.mjs"></script>
