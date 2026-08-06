@@ -5,8 +5,8 @@ import { html, esc, el } from '../lib/render.js';
 import { icon } from '../lib/icons.js';
 
 const LEVELS = [
-  { key: 'quick', label: '快速', hint: '直接回答,不检索' },
-  { key: 'deep', label: '深度', hint: '先检索 top 页再回答' },
+  { key: 'quick', label: '快速', hint: '轻量检索(top 3)后回答,最快' },
+  { key: 'deep', label: '深度', hint: '检索 top 5 页后回答' },
   { key: 'deep-research', label: '深研', hint: '多轮检索 + 推理' },
 ];
 
@@ -83,7 +83,7 @@ export async function render(view, params) {
     const card = el('div', { class: 'chat-welcome' });
     card.append(el('h3', {}, '基于这座知识库提问'));
     card.append(el('p', { class: 'dim' },
-      '回答只来自已批准的 wiki 页面并附引用。三种深度:快速 = 直接回答;深度 = 先检索相关页再回答;深研 = 多轮检索 + 推理,带完整检索轨迹。'));
+      '回答只来自已批准的 wiki 页面并附引用。三种深度都会先检索:快速 = top 3 轻量检索,最快;深度 = top 5 页;深研 = 多轮检索 + 推理,带完整检索轨迹。'));
     const examples = el('div', { class: 'chat-examples' });
     for (const q of ['这个系统的重试策略是什么?', '支付超时后会发生什么?', '帮我梳理熔断和重试的关系']) {
       const b = el('button', { class: 'sm' }, q);

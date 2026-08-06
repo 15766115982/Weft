@@ -31,6 +31,63 @@ export async function searchPages(kbRoot, query, { limit = 10 } = {}) {
   return runKbSearch(kbRoot, ['search', query, '--limit', String(limit)]);
 }
 
+// Conversational questions ("retry 策略是怎么设计的?") defeat the index's
+// cross-leg AND: question stopwords become CJK trigrams no page contains.
+// Fallback ladder, cheapest first:
+//   1. full query
+//   2. query with question stopwords/punctuation stripped
+//   3. each remaining term searched separately, merged by hit frequency
+const STOP_PHRASES = [
+  '是怎么设计的', '是什么意思', '是什么', '为什么', '怎么', '怎样', '如何',
+  '哪些', '哪个', '请问', '一下', '有没有', '是不是', '能不能', '可以',
+  '的', '了', '吗', '呢', '吧', '啊', '呀', '嘛', '么',
+];
+
+function stripStopwords(query) {
+  let q = ` ${query} `;
+  for (const s of STOP_PHRASES) q = q.split(s).join(' ');
+  return q.replace(/[?,!。?,!;:;:·…—\-()()【】"'"']/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function terms(query) {
+  const out = [];
+  for (const tok of query.split(/\s+/).filter(Boolean)) {
+    if (/^[-0-9a-zA-Z_.]+$/.test(tok) && tok.length >= 2) out.push(tok);
+    else if (tok.length > 2) {
+      // CJK run: slide bigrams ("重试预算" → 重试 试预 预算 would be too noisy;
+      // the whole run searched as one term lets the trigram index do its job)
+      out.push(tok);
+    } else if (tok.length === 2) out.push(tok);
+  }
+  return out;
+}
+
+export async function searchWithFallback(kbRoot, query, { limit = 10 } = {}) {
+  const first = await searchPages(kbRoot, query, { limit });
+  if ((first?.total ?? 0) > 0) return { ...first, relaxed: false };
+
+  const stripped = stripStopwords(query);
+  if (stripped && stripped !== query.trim()) {
+    const second = await searchPages(kbRoot, stripped, { limit });
+    if ((second?.total ?? 0) > 0) return { ...second, relaxed: true, relaxed_query: stripped };
+  }
+
+  const ts = terms(stripped || query);
+  if (!ts.length) return first;
+  const hits = new Map(); // page -> { page, title, snippet, n }
+  for (const t of ts) {
+    const r = await searchPages(kbRoot, t, { limit });
+    for (const h of r?.preview || []) {
+      const e = hits.get(h.page) || { ...h, n: 0 };
+      e.n += 1;
+      hits.set(h.page, e);
+    }
+  }
+  const merged = [...hits.values()].sort((a, b) => b.n - a.n).slice(0, limit);
+  if (!merged.length) return first;
+  return { query, total: merged.length, preview: merged, relaxed: true, relaxed_terms: ts };
+}
+
 export async function readPage(kbRoot, pagePath) {
   return runKbSearch(kbRoot, ['read', pagePath]);
 }

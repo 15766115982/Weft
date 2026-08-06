@@ -163,7 +163,7 @@ test('govern-decide loads precedents by type and fails closed', async () => {
   delete process.env.WEFT_TEST_KEY;
 });
 
-test('chat writes NDJSON stream (quick, no retrieval)', async () => {
+test('chat writes NDJSON stream (quick: light retrieval + answer)', async () => {
   const kb = makeKb(tmpDir());
   writeModelsConfig(kb, MODELS);
   process.env.WEFT_TEST_KEY = 'key';

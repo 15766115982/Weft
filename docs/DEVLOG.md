@@ -1,5 +1,31 @@
 # Development Log
 
+## Chat pipeline live-debug + quick-level retrieval (2026-08-07)
+
+First real LLM (Kimi coding endpoint) surfaced a chain of latent bugs; all fixed
+with regression tests:
+
+- `models.json` endpoint was missing `/v1` and k3 only accepts `temperature=1` —
+  runner no longer hard-codes sampling fallbacks (only sends configured values).
+- `llm check` used to validate credential *presence* only; it now makes a live
+  minimal completion so "ok" means "can answer" (bad endpoint/key fail loudly).
+- Portal SSE `streamNdjson` returned at the first EOF (empty just-created file)
+  — rewritten as an incremental tail that drains until child exit. Chat abort
+  moved from `req.on('close')` (Node ≥18 fires it when the request *body* is
+  consumed, killing the child at birth) to `res.on('close')`.
+- LLM SSE decode used string methods on fetch's Uint8Array chunks — TextDecoder
+  with carry-over lines now; string chunks (test mocks) still accepted.
+- In-band `{type:'error'}` frames render into the chat bubble (was a bare
+  "(无回答)").
+- **All chat levels now retrieve** (product promise is KB-grounding; quick was
+  designed as no-retrieval and could only refuse). quick = top-3, deep = top-5,
+  deep-research = multi-round. `research.mjs` gains `searchWithFallback`:
+  full query → stopword-stripped query → per-term merge, fixing conversational
+  Chinese questions ("retry 策略是怎么设计的?") that scored 0 under the index's
+  cross-leg AND.
+
+---
+
 ## Role gating reverted (open portal) + OpenAI-compatible LLM providers (2026-08-06)
 
 User decision: the ADR-0009 reader/operator role matrix was over-engineered for the
