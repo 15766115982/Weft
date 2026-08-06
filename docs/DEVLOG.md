@@ -1,5 +1,37 @@
 # Development Log
 
+## Portal test-pass fixes + G1 write-gating decision (2026-08-06)
+
+Playwright/API regression pass over the UI portal surfaced five client bugs and one
+open design question; all fixed or decided here.
+
+Fixes:
+
+- `ui/public/app.js`: operator-login gate CTA now navigates to the standalone
+  `/views/settings.html` page (was a `#/settings.html` hash the router fell back to
+  the dashboard from).
+- `ui/public/app.js`: `g x` hotkeys reimplemented as a real two-key sequence layer
+  (1s window). hotkeys-js v3 strips whitespace and folds every `g x` combo onto
+  keycode 71, so one `g` keypress fired all eleven bindings at once.
+- `ui/public/views/chat.js`: `readSse` tracks the SSE `event:` line; server
+  `event: error` frames are synthesized into `{type:'error', streamError:true}` and
+  render the `流式输出失败` note in the bubble instead of `(无回答)`.
+- `ui/public/app.js`: the header no longer seeds `/api/jobs` for readers (operator-
+  only endpoint; the swallowed 401 was console noise).
+- `ui/public/app.js`: command palette ranks pages above the two utility actions and
+  candidates first for operators, so pages list unfiltered within the 12-row cap.
+
+Decision (G1, previously "known gap pending ADR-0009 intent"): **mutating POSTs stay
+token-gated, not session-gated.** The per-startup UI token + loopback Host/Origin
+checks are the write boundary; the admin session gates operator *read* surfaces and
+nav only. Rationale: chat and feedback are reader features that legitimately write
+(via the serial queue), and the portal is a loopback single-team tool where the token
+is already a per-launch secret. If operator-only writes are ever wanted, that is a
+new ADR: exempt `/api/chat` + `/api/feedback` and flip the G1 regression in
+`ui/test/authz.test.mjs` to expect 401 without a session cookie.
+
+---
+
 ## Phase 6 — E2E/eval/docs closeout (2026-08-06, full suite green)
 
 Cross-service regression for the LLM service plus documentation closeout.

@@ -156,6 +156,10 @@ export async function render(view, params) {
           if (obj.level) assistantMsg.level = obj.level;
         } else if (obj.type === 'chunk') {
           assistantMsg.text += obj.text;
+        } else if (obj.type === 'error' && obj.streamError) {
+          // Server-side stream failure (SSE 'event: error' frame): surface the
+          // same note the fetch-level catch path would, not '(无回答)' (P15).
+          assistantMsg.text += `\n\n*(流式输出失败: ${obj.message})*`;
         } else if (obj.type === 'search' || obj.type === 'read' || obj.type === 'error') {
           assistantMsg.steps.push(obj);
         } else if (obj.type === 'done') {
@@ -197,6 +201,25 @@ export async function render(view, params) {
     const reader = body.getReader();
     const decoder = new TextDecoder();
     let buf = '';
+    // Track the preceding 'event:' line: the server reports LLM child failures
+    // as 'event: error' frames whose data payload is {message} with no 'type'
+    // field — without this they fell through the NDJSON type switch (P15).
+    let pendingEvent = null;
+    const handleLine = (line) => {
+      if (line.startsWith('event:')) { pendingEvent = line.slice(6).trim(); return; }
+      if (!line.startsWith('data:')) { if (!line.trim()) pendingEvent = null; return; }
+      const payload = line.slice(5).trim();
+      if (!payload) { pendingEvent = null; return; }
+      try {
+        const obj = JSON.parse(payload);
+        if (pendingEvent === 'error' && obj.type !== 'error') {
+          obj.type = 'error';
+          obj.streamError = true;
+        }
+        onObj(obj);
+      } catch { /* ignore malformed line */ }
+      pendingEvent = null;
+    };
     try {
       for (;;) {
         const { done, value } = await reader.read();
@@ -204,19 +227,10 @@ export async function render(view, params) {
         buf += decoder.decode(value, { stream: true });
         const lines = buf.split('\n');
         buf = lines.pop();
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i];
-          if (!line.startsWith('data:')) continue;
-          const payload = line.slice(5).trim();
-          if (!payload) continue;
-          try { onObj(JSON.parse(payload)); } catch { /* ignore malformed line */ }
-        }
+        for (const line of lines) handleLine(line);
       }
       // trailing line
-      if (buf.startsWith('data:')) {
-        const payload = buf.slice(5).trim();
-        if (payload) try { onObj(JSON.parse(payload)); } catch { /* ignore */ }
-      }
+      if (buf) handleLine(buf);
     } finally {
       reader.releaseLock?.();
     }
@@ -224,7 +238,10 @@ export async function render(view, params) {
 
   // ---- input handlers ----
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    // Ignore IME composition Enter; Shift+Enter inserts a newline.
+    if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+    e.preventDefault();
+    send();
   });
   input.addEventListener('input', () => {
     input.rows = Math.min(5, Math.max(1, Math.ceil(input.scrollHeight / 22)));

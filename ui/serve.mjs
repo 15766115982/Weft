@@ -91,6 +91,25 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
     res.end(JSON.stringify(obj));
   };
 
+  // Phase 1+ team portal: operator-only views/APIs require an admin session.
+  // The per-startup token (auth.checkWrite) protects writes; adminAuth protects
+  // operator read surfaces so readers cannot see the decision inbox, governance
+  // console, raw/source management, or settings.
+  function requireAdmin(req, res) {
+    const admin = adminAuth.check(req);
+    if (admin.ok) return true;
+    if (!adminAuth.isConfigured()) {
+      return json(res, 403, { error: 'admin authentication is not configured (WEFT_ADMIN_PASSWORD_HASH)' });
+    }
+    return json(res, 401, { error: admin.error });
+  }
+
+  const OPERATOR_GET_PATHS = new Set([
+    '/api/settings', '/api/plan', '/api/conflicts', '/api/decisions', '/api/detect',
+    '/api/rawlist', '/api/raw', '/api/raw-asset', '/api/inbox', '/api/sources', '/api/jobs',
+    '/api/diff', '/api/kbfile', '/api/history', '/api/queue',
+  ]);
+
   // /api/health is polled every 30s by every open client AND on every SSE
   // change event; health() walks the whole wiki and plan() scans raw+wiki
   // (review 2026-08-04). Cache per KB; invalidate on watcher events (debounced
@@ -168,6 +187,18 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
       }
       if (req.method === 'GET' && url.pathname.startsWith('/api/')) {
         const kb = registry.resolve(url.searchParams.get('kb')).path;
+
+        // Session state for the SPA: readers see only public nav; operator pages
+        // require an admin session.
+        if (url.pathname === '/api/session') {
+          const admin = adminAuth.check(req);
+          return json(res, 200, { admin: admin.ok, configured: adminAuth.isConfigured() });
+        }
+
+        // Operator-only read endpoints.
+        if (OPERATOR_GET_PATHS.has(url.pathname)) {
+          if (!requireAdmin(req, res)) return;
+        }
 
         // Phase 1: team portal admin/settings reads.
         if (url.pathname === '/api/settings') {

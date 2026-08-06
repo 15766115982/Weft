@@ -25,11 +25,15 @@ const ROUTES = {
 let pageCache = { kb: null, pages: [] };
 let currentRoute = 'dashboard';
 
+const OPERATOR_ROUTES = new Set(['queue', 'acquire', 'upstream', 'raw', 'govern', 'settings']);
+let session = { configured: false, admin: false };
+
 // ---- shortcuts help overlay (P1-2) ----
 
 const SHORTCUTS = [
   ['Ctrl K / ⌘ K', '命令面板(搜页面 / 动作)'],
-  ['g d / g b / g r / g s / g q / g a / g u / g w / g g / g c', '前往 总览 / 浏览 / 图谱 / 检索 / 评审 / 采集 / 上游 / 来源 / 治理 / 问答'],
+  ['g d / g b / g r / g s / g c', '前往 总览 / 浏览 / 图谱 / 检索 / 问答'],
+  ['g q / g a / g u / g w / g g', '前往 评审 / 采集 / 上游 / 来源 / 治理 (operator)'],
   ['g t', '切换暗色 / 亮色'],
   ['/', '聚焦搜索框(检索页)/ 命令面板(其他页)'],
   ['j k 或 [ ]', '评审队列:上 / 下一条'],
@@ -76,6 +80,29 @@ async function mount() {
   const { route, params } = parseHash();
   hotkeys.setScope('all'); // route change kills any view-scoped bindings (P0-2)
   currentRoute = route;
+
+  // Operator pages require an admin session.
+  if (OPERATOR_ROUTES.has(route) && !session.admin) {
+    const view = document.getElementById('view');
+    view.textContent = '';
+    const stage = el('div', { style: 'padding:2rem 1rem;max-width:720px' });
+    if (!session.configured) {
+      stage.append(el('h2', {}, 'Operator features are disabled'));
+      stage.append(el('p', { class: 'dim' }, 'Admin authentication is not configured. Set the WEFT_ADMIN_PASSWORD_HASH environment variable and restart the portal to enable the decision inbox, governance console, source management, and settings.'));
+    } else {
+      stage.append(el('h2', {}, 'Operator login required'));
+      stage.append(el('p', { class: 'dim' }, 'This view is restricted to the admin operator. Go to Settings to log in.'));
+      // Settings is a standalone page, not an SPA hash route — navigate for real.
+      const a = el('a', { href: '/views/settings.html', class: 'button' }, 'Go to Settings login');
+      stage.append(a);
+    }
+    view.append(stage);
+    for (const a of document.querySelectorAll('nav a')) {
+      a.classList.toggle('active', a.dataset.route === (route === 'page' ? 'browse' : route));
+    }
+    return;
+  }
+
   const loader = document.getElementById('route-loader');
   loader.classList.add('on');
   for (const a of document.querySelectorAll('nav a')) {
@@ -103,6 +130,37 @@ async function initHeader() {
   html(document.getElementById('brand-icon'), icon('library', 19));
   for (const s of document.querySelectorAll('[data-ic]')) html(s, icon(s.dataset.ic, 15));
   html(document.getElementById('stale-banner'), `${icon('circleAlert', 14)} 待治理`);
+
+  // Hide operator nav entries until we prove an admin session exists — prevents
+  // a flash of operator links on load (ADR-0009 role matrix).
+  for (const a of document.querySelectorAll('nav a')) {
+    if (OPERATOR_ROUTES.has(a.dataset.route)) a.hidden = true;
+  }
+
+  // Load session state before rendering nav so operator-only entries are hidden
+  // for readers (ADR-0009 role matrix).
+  try {
+    session = await api('/api/session');
+  } catch {
+    session = { configured: false, admin: false };
+  }
+  for (const a of document.querySelectorAll('nav a')) {
+    if (OPERATOR_ROUTES.has(a.dataset.route)) a.hidden = !session.admin;
+  }
+
+  // Re-check session when the tab regains focus so a login in another tab is
+  // reflected without a full reload.
+  window.addEventListener('focus', async () => {
+    try {
+      session = await api('/api/session');
+    } catch {
+      session = { configured: false, admin: false };
+    }
+    for (const a of document.querySelectorAll('nav a')) {
+      if (OPERATOR_ROUTES.has(a.dataset.route)) a.hidden = !session.admin;
+    }
+    mount();
+  });
 
   const { kbs } = await api('/api/kbs');
   // D5 (M7c review P2-1): the stale banner is a call-to-action, not a label —
@@ -151,7 +209,8 @@ function toggleTheme() { applyTheme(document.documentElement.dataset.theme !== '
 async function refreshHeader() {
   try {
     const h = await api('/api/health');
-    document.getElementById('stale-banner').hidden = !h.stale;
+    // The stale banner is an operator call-to-action; readers do not need it.
+    document.getElementById('stale-banner').hidden = !h.stale || !session.admin;
     const qc = document.getElementById('queue-count');
     qc.hidden = h.plan.review_queue === 0;
     qc.textContent = h.plan.review_queue;
@@ -171,21 +230,38 @@ async function paletteItems() {
     { icon: 'library', label: '前往:浏览', hint: 'g b', go: '#/browse' },
     { icon: 'network', label: '前往:图谱', hint: 'g r', go: '#/graph' },
     { icon: 'search', label: '前往:检索', hint: 'g s', go: '#/search' },
-    { icon: 'listChecks', label: '前往:评审队列', hint: 'g q', go: '#/queue' },
-    { icon: 'inbox', label: '前往:采集控制台', hint: 'g a', go: '#/acquire' },
-    { icon: 'search', label: '前往:上游检测', hint: 'g u', go: '#/upstream' },
-    { icon: 'folderGit-2', label: '前往:来源管理', hint: 'g w', go: '#/raw' },
-    { icon: 'sparkles', label: '前往:治理控制台', hint: 'g g', go: '#/govern' },
     { icon: 'messageCircle', label: '前往:问答', hint: 'g c', go: '#/chat' },
+  ];
+  if (session.admin) {
+    actions.push(
+      { icon: 'listChecks', label: '前往:评审队列', hint: 'g q', go: '#/queue' },
+      { icon: 'inbox', label: '前往:采集控制台', hint: 'g a', go: '#/acquire' },
+      { icon: 'search', label: '前往:上游检测', hint: 'g u', go: '#/upstream' },
+      { icon: 'folderGit-2', label: '前往:来源管理', hint: 'g w', go: '#/raw' },
+      { icon: 'sparkles', label: '前往:治理控制台', hint: 'g g', go: '#/govern' },
+    );
+  }
+  const utilityActions = [
     { icon: 'keyboard', label: '键盘快捷键', hint: '?', action: showShortcuts },
     { icon: 'moon', label: '切换暗色 / 亮色', hint: 'g t', action: toggleTheme },
   ];
-  const pages = pageCache.pages.map((p) => ({
+  // Readers only navigate to approved pages from the palette; operators see all.
+  const visiblePages = session.admin
+    ? pageCache.pages
+    : pageCache.pages.filter((p) => p.status === 'approved' || p.isIndex);
+  const pages = visiblePages.map((p) => ({
     icon: p.status === 'candidate' ? 'circleAlert' : 'fileText',
     label: p.title, hint: p.path.replace('wiki/', ''),
     go: `#/page?path=${encodeURIComponent(p.path)}`,
   }));
-  return [...actions, ...pages];
+  // Candidates first for operators — they are the actionable pages, and the
+  // 12-row cap would otherwise push them below the fold (Playwright P9).
+  if (session.admin) pages.sort((a, b) => (b.icon === 'circleAlert') - (a.icon === 'circleAlert'));
+  // Pages rank above the two utility actions: the palette caps at 12 rows and
+  // operators have 10 nav actions, so utility actions last would otherwise push
+  // every page out of the unfiltered list (Playwright P9). Shortcuts/theme
+  // remain reachable via filter.
+  return [...actions, ...pages, ...utilityActions];
 }
 
 function showPalette() {
@@ -198,19 +274,45 @@ function showPalette() {
 // ---- global hotkeys (I2) ----
 
 hotkeys('ctrl+k,command+k', (e) => { e.preventDefault(); showPalette(); });
-hotkeys('g d', () => { location.hash = '#/dashboard'; });
-hotkeys('g b', () => { location.hash = '#/browse'; });
-hotkeys('g r', () => { location.hash = '#/graph'; });
-hotkeys('g s', () => { location.hash = '#/search'; });
-hotkeys('g q', () => { location.hash = '#/queue'; });
-hotkeys('g a', () => { location.hash = '#/acquire'; });
-hotkeys('g u', () => { location.hash = '#/upstream'; });
-hotkeys('g w', () => { location.hash = '#/raw'; });
-hotkeys('g g', () => { location.hash = '#/govern'; });
-hotkeys('g c', () => { location.hash = '#/chat'; });
-hotkeys('g t', toggleTheme);
-hotkeys('g k', () => document.getElementById('kb-select')?.focus()); // P2-3
 hotkeys('shift+/', (e) => { e.preventDefault(); showShortcuts(); }); // "?" (P1-2)
+
+// 'g x' two-key sequences (Gmail-style). hotkeys-js has no sequence support —
+// it strips the space and folds every 'g x' combo onto keycode 71, so a single
+// 'g' fired all eleven bindings at once (Playwright P10). This layer records
+// the leading 'g' and dispatches the second key within a 1s window.
+const G_SEQUENCES = {
+  d: () => { location.hash = '#/dashboard'; },
+  b: () => { location.hash = '#/browse'; },
+  r: () => { location.hash = '#/graph'; },
+  s: () => { location.hash = '#/search'; },
+  c: () => { location.hash = '#/chat'; },
+  q: () => { if (session.admin) location.hash = '#/queue'; },
+  a: () => { if (session.admin) location.hash = '#/acquire'; },
+  u: () => { if (session.admin) location.hash = '#/upstream'; },
+  w: () => { if (session.admin) location.hash = '#/raw'; },
+  g: () => { if (session.admin) location.hash = '#/govern'; },
+  t: toggleTheme,
+  k: () => document.getElementById('kb-select')?.focus(), // P2-3
+};
+const G_WINDOW_MS = 1000;
+let gPendingAt = 0;
+document.addEventListener('keydown', (e) => {
+  if (e.ctrlKey || e.metaKey || e.altKey) { gPendingAt = 0; return; }
+  const tag = document.activeElement?.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || document.activeElement?.isContentEditable) {
+    gPendingAt = 0;
+    return;
+  }
+  const key = e.key.toLowerCase();
+  if (key === 'g') { gPendingAt = Date.now(); return; } // arms (and re-arms) the sequence
+  if (gPendingAt && Date.now() - gPendingAt <= G_WINDOW_MS) {
+    const action = G_SEQUENCES[key];
+    gPendingAt = 0;
+    if (action) { e.preventDefault(); action(); }
+    return;
+  }
+  gPendingAt = 0;
+});
 hotkeys('/', (e) => {
   const tag = document.activeElement?.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA') return;
@@ -273,12 +375,15 @@ document.getElementById('job-indicator').addEventListener('click', () => {
 });
 setInterval(() => { if (!document.hidden) refreshHeader(); }, 30_000);
 await initHeader();
-// seed the indicator from persisted history (jobs finished while we were away)
-api('/api/jobs').then(({ jobs }) => {
-  for (const j of jobs) if (j.status === 'queued' || j.status === 'running') activeJobs.add(j.id);
-  if (jobs.some((j) => j.status === 'failed' && Date.now() - new Date(j.finishedAt) < 3600_000)) recentFail = true;
-  syncJobIndicator();
-}).catch(() => {});
+// seed the indicator from persisted history (jobs finished while we were away).
+// /api/jobs is operator-only — readers skip the seed instead of logging a 401.
+if (session.admin) {
+  api('/api/jobs').then(({ jobs }) => {
+    for (const j of jobs) if (j.status === 'queued' || j.status === 'running') activeJobs.add(j.id);
+    if (jobs.some((j) => j.status === 'failed' && Date.now() - new Date(j.finishedAt) < 3600_000)) recentFail = true;
+    syncJobIndicator();
+  }).catch(() => {});
+}
 connectEvents();
 // KB switch re-targets the stream (the watcher is per-KB server-side)
 document.getElementById('kb-select').addEventListener('change', connectEvents);

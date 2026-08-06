@@ -1,8 +1,6 @@
 // Settings page controller (Phase 1).
 const kb = new URLSearchParams(location.search).get('kb') || '';
 
-const $ = (sel) => document.querySelector(sel);
-
 async function api(path, opts = {}) {
   const url = `/api${path}${path.includes('?') ? '&' : '?'}kb=${encodeURIComponent(kb)}`;
   const res = await fetch(url, {
@@ -38,6 +36,25 @@ async function loadSettings() {
     li.textContent = `${k}: ${v ? '✅ set' : '❌ not set'}`;
     envList.appendChild(li);
   }
+
+  const promptsList = $('#prompts-list');
+  promptsList.innerHTML = '';
+  const prompts = data.prompts || [];
+  if (!prompts.length) {
+    promptsList.appendChild(el('li', { class: 'dim' }, 'No prompts found. Run “Init default prompts” to seed .kb/config/prompts/.'));
+  } else {
+    for (const p of prompts) {
+      promptsList.appendChild(el('li', {}, `${p.title} (${p.file}, ${p.size} bytes)`));
+    }
+  }
+}
+
+function $(sel) { return document.querySelector(sel); }
+function el(tag, attrs = {}, text) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  if (text !== undefined) node.textContent = text;
+  return node;
 }
 
 $('#login-form').addEventListener('submit', async (e) => {

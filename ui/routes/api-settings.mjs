@@ -9,6 +9,20 @@ function loadModelsConfig(kbRoot) {
   return JSON.parse(fs.readFileSync(p, 'utf8'));
 }
 
+function loadPromptsList(kbRoot) {
+  const dir = path.join(kbRoot, '.kb', 'config', 'prompts');
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir)
+    .filter((f) => f.endsWith('.md'))
+    .sort()
+    .map((f) => {
+      const abs = path.join(dir, f);
+      const text = fs.readFileSync(abs, 'utf8');
+      const title = text.split('\n')[0].replace(/^#+\s*/, '').trim() || f;
+      return { file: f, title, size: text.length };
+    });
+}
+
 function maskSecrets(config) {
   if (!config || !config.auth) return config;
   const masked = JSON.parse(JSON.stringify(config));
@@ -33,6 +47,7 @@ export function settingsRoutes({ adminAuth, jobs, registry }) {
       return json(res, 200, {
         admin_configured: adminAuth.isConfigured(),
         config: maskSecrets(config),
+        prompts: loadPromptsList(kb),
         env,
       });
     }
