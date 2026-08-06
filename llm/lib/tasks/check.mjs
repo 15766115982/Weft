@@ -1,7 +1,9 @@
-// check — validate LLM config and credential availability.
+// check — validate LLM config, credential availability, and REAL reachability.
+// Credential presence alone proved misleading (a 404 endpoint passed) — every
+// check ends with a minimal live call so "ok" actually means "can answer".
 import { loadModelsConfig, resolveSecret } from '../config.mjs';
 import { fetchSpnToken } from '../auth.mjs';
-import { providerOf } from '../openai.mjs';
+import { providerOf, chatCompletion } from '../openai.mjs';
 
 export async function run({ kbRoot }) {
   const config = loadModelsConfig(kbRoot);
@@ -42,6 +44,13 @@ export async function run({ kbRoot }) {
     } else {
       throw new Error('unknown auth.type');
     }
+
+    // Live probe: one minimal completion. This is what makes check meaningful —
+    // wrong endpoint paths and bad keys surface here, not at first chat.
+    const probe = await chatCompletion(config, [{ role: 'user', content: 'ping' }], {
+      max_tokens: 1, fetchImpl: globalThis.__WEFT_LLM_FETCH_IMPL__,
+    });
+    checks.live = !!(probe.choices?.length);
   } catch (err) {
     return { ok: false, config: checks, error: err.message };
   }

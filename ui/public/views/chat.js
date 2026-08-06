@@ -184,8 +184,15 @@ export async function render(view, params) {
           assistantMsg.text += `\n\n*(流式输出失败: ${obj.message})*`;
         } else if (obj.type === 'search' || obj.type === 'read' || obj.type === 'error') {
           assistantMsg.steps.push(obj);
+          // In-band LLM failures (bad endpoint, bad key) arrive as {type:'error'}
+          // frames — surface them in the bubble, not only in the steps drawer,
+          // or the user sees a bare '(无回答)' with no explanation.
+          if (obj.type === 'error') assistantMsg.error = obj.message;
         } else if (obj.type === 'done') {
           if (Array.isArray(obj.citations)) assistantMsg.citations = obj.citations;
+        }
+        if (obj.type === 'error' && !assistantMsg.text) {
+          assistantMsg.text = `*(请求失败: ${obj.message})*`;
         }
         updateLiveBubble(assistantMsg);
       });

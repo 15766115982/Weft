@@ -50,20 +50,41 @@ function resolveLlmCli() { return process.env.WEFT_LLM_CLI || path.resolve(UI_DI
 // every other request on the event loop (review 2026-08-04)
 const execFileP = promisify(execFile);
 
-// Phase 4: stream an NDJSON file as it is written by the LLM service, forwarding
-// each line as an SSE data event. Stops when the file reaches EOF or the child exits.
+// Phase 4: tail the NDJSON file the LLM service is writing, forwarding each
+// complete line as an SSE data event until the child exits and the file is
+// fully drained. (An earlier createReadStream version hit EOF on the empty
+// just-created file and gave up before the model answered — 2026-08-06.)
 async function streamNdjson(filePath, res, child) {
-  // Wait briefly for the writer to create the file.
-  while (!fs.existsSync(filePath)) {
-    if (child.exitCode !== null || child.signalCode !== null) return;
-    await new Promise((r) => setTimeout(r, 50));
-  }
-  const stream = fs.createReadStream(filePath, { encoding: 'utf8' });
-  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
-  for await (const line of rl) {
-    if (!line.trim()) continue;
-    if (res.writableEnded) break;
-    res.write(`data: ${line}\n\n`);
+  const decoder = new TextDecoder();
+  let offset = 0;
+  let pending = '';
+  const flush = (final) => {
+    const lines = pending.split('\n');
+    pending = final ? '' : lines.pop();
+    const out = final ? lines.concat(pending ? [pending] : []) : lines;
+    for (const line of out) {
+      if (line.trim() && !res.writableEnded) res.write(`data: ${line}\n\n`);
+    }
+    if (final) pending = '';
+  };
+  const drain = () => {
+    if (!fs.existsSync(filePath)) return;
+    const size = fs.statSync(filePath).size;
+    if (size <= offset) return;
+    const fd = fs.openSync(filePath, 'r');
+    const chunk = Buffer.alloc(size - offset);
+    fs.readSync(fd, chunk, 0, chunk.length, offset);
+    fs.closeSync(fd);
+    offset = size;
+    pending += decoder.decode(chunk, { stream: true });
+    flush(false);
+  };
+  const deadline = Date.now() + 300_000;
+  for (;;) {
+    drain();
+    if (child.exitCode !== null || child.signalCode !== null) { drain(); flush(true); return; }
+    if (res.writableEnded || Date.now() > deadline) return;
+    await new Promise((r) => setTimeout(r, 60));
   }
 }
 
@@ -655,7 +676,14 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
             cleanup();
           });
 
-          req.on('close', () => { child.kill(); cleanup(); });
+          // Abort only when the CLIENT goes away mid-stream. Node ≥18 fires
+          // req 'close' as soon as the request BODY is consumed — using it here
+          // killed every chat child at birth (2026-08-06 bug: empty SSE with a
+          // bare close frame). res 'close' is the real disconnect signal.
+          res.on('close', () => {
+            if (child.exitCode === null && child.signalCode === null) child.kill();
+            cleanup();
+          });
           return;
         }
 

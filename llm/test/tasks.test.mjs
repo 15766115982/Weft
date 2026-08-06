@@ -43,6 +43,29 @@ test('check task validates SPN', async () => {
   delete process.env.WEFT_TEST_CS;
 });
 
+test('check task live-probes the endpoint (api_key provider)', async () => {
+  const kb = makeKb(tmpDir());
+  writeModelsConfig(kb, {
+    provider: 'openai', endpoint: 'https://api.example.com/v1', model: 'm',
+    auth: { type: 'api_key', api_key: 'WEFT_TEST_KEY' },
+  });
+  process.env.WEFT_TEST_KEY = 'k';
+  const good = await withMock(async () => ({
+    ok: true, status: 200, text: async () => '',
+    json: async () => ({ choices: [{ message: { content: '' } }] }),
+  }), () => runTask('check', { kbRoot: kb }));
+  assert.strictEqual(good.ok, true);
+  assert.strictEqual(good.config.live, true);
+  // a wrong endpoint path must fail check — the regression that made chat silently 404
+  const bad = await withMock(async () => ({
+    ok: false, status: 404, text: async () => 'resource_not_found',
+    json: async () => ({}),
+  }), () => runTask('check', { kbRoot: kb }));
+  assert.strictEqual(bad.ok, false);
+  assert.match(bad.error, /404/);
+  delete process.env.WEFT_TEST_KEY;
+});
+
 test('init-prompts task seeds prompts', async () => {
   const kb = makeKb(tmpDir());
   const res = await runTask('init-prompts', { kbRoot: kb, input: {} });

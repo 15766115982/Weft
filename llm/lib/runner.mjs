@@ -78,8 +78,10 @@ export async function runPrompt(kbRoot, promptName, vars, { stream = false, temp
 
   const res = await chatCompletion(config, messages, {
     stream,
-    temperature: temperature ?? defaults.temperature ?? 0.2,
-    max_tokens: max_tokens ?? defaults.max_tokens ?? 4096,
+    // Only send sampling params the KB explicitly configured — some providers
+    // reject non-default values outright (Kimi k3: "only 1 is allowed").
+    temperature: temperature ?? defaults.temperature,
+    max_tokens: max_tokens ?? defaults.max_tokens,
     fetchImpl: effectiveFetch,
   });
 
@@ -88,16 +90,21 @@ export async function runPrompt(kbRoot, promptName, vars, { stream = false, temp
     return { prompt, content, config };
   }
 
-  // Streaming: consume the SSE body and emit deltas.
+  // Streaming: consume the SSE body and emit deltas. fetch bodies yield
+  // Uint8Array (not Buffer) — decode, don't call string methods on the chunk.
   const reader = res.getReader();
+  const sseDecoder = new TextDecoder();
   let full = '';
+  let carry = '';
   try {
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
-      const chunk = Buffer.isBuffer(value) ? value.toString('utf8') : (value || '');
-      for (const line of chunk.split('\n')) {
-        const trimmed = line.trim();
+      // fetch bodies yield Uint8Array; test mocks may yield plain strings.
+      carry += typeof value === 'string' ? value : sseDecoder.decode(value || new Uint8Array(), { stream: true });
+      const lines = carry.split('\n');
+      carry = lines.pop();
+      for (const trimmed of lines.map((l) => l.trim())) {
         if (!trimmed || !trimmed.startsWith('data:')) continue;
         const payload = trimmed.slice(5).trim();
         if (payload === '[DONE]') continue;
