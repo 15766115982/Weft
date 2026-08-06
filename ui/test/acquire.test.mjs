@@ -13,10 +13,12 @@ import { execFileSync } from 'node:child_process';
 import { createPortal } from '../serve.mjs';
 import { createJobCenter } from '../lib/jobs.mjs';
 import { buildFrontmatter } from '../../governance/scripts/lib/frontmatter.mjs';
+import { useTestAdminEnv, clearTestAdminEnv, adminCookie } from './helpers/auth.mjs';
 
-let kb, server, base, token;
+let kb, server, base, token, cookie;
 
 before(async () => {
+  useTestAdminEnv(); // ADR-0009: /api/jobs /api/inbox /api/sources /api/rawlist /api/detect /api/raw-asset are operator-only GETs
   kb = fs.mkdtempSync(path.join(os.tmpdir(), 'kb-portal-m7b-'));
   fs.mkdirSync(path.join(kb, 'raw', 'local'), { recursive: true });
   fs.mkdirSync(path.join(kb, 'wiki'), { recursive: true });
@@ -27,13 +29,15 @@ before(async () => {
   base = `http://127.0.0.1:${server.address().port}`;
   const html = await (await fetch(base + '/')).text();
   token = html.match(/name="ui-token" content="([^"]+)"/)[1];
+  cookie = await adminCookie(base);
 });
 after(() => {
   server.close();
   fs.rmSync(kb, { recursive: true, force: true });
+  clearTestAdminEnv();
 });
 
-const get = (p) => fetch(base + p);
+const get = (p) => fetch(base + p, { headers: { cookie } });
 const post = (p, obj, headers = {}) => fetch(base + p, {
   method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(obj),
 });
@@ -47,11 +51,12 @@ async function until(fn, ms = 20000, step = 150) {
   }
 }
 
-async function waitJob(id, baseOverride) {
+async function waitJob(id, baseOverride, cookieOverride) {
   const b = baseOverride || base;
+  const c = cookieOverride || cookie;
   let job;
   await until(async () => {
-    const { jobs } = await (await fetch(b + '/api/jobs')).json();
+    const { jobs } = await (await fetch(b + '/api/jobs', { headers: { cookie: c } })).json();
     job = jobs.find((j) => j.id === id);
     return job && (job.status === 'done' || job.status === 'failed');
   });
@@ -238,12 +243,13 @@ test('raw delete in a git KB snapshots via pathspec-scoped commit (G6 git path)'
   await new Promise((r) => portal2.listen(0, '127.0.0.1', r));
   const base2 = `http://127.0.0.1:${portal2.address().port}`;
   const token2 = (await (await fetch(base2 + '/')).text()).match(/name="ui-token" content="([^"]+)"/)[1];
+  const cookie2 = await adminCookie(base2);
   const res = await fetch(base2 + '/api/raw-delete', {
     method: 'POST', headers: { 'content-type': 'application/json', 'x-ui-token': token2 },
     body: JSON.stringify({ path: 'raw/local/x.md' }),
   });
   assert.equal(res.status, 202);
-  const done = await waitJob((await res.json()).job.id, base2);
+  const done = await waitJob((await res.json()).job.id, base2, cookie2);
   assert.equal(done.status, 'done', done.error || '');
   assert.equal(done.result.snapshot.kind, 'git');
   assert.ok(!fs.existsSync(path.join(kb2, 'raw', 'local', 'x.md')));

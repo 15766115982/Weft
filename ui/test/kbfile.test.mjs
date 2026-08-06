@@ -8,10 +8,12 @@ import path from 'node:path';
 import os from 'node:os';
 import { createPortal } from '../serve.mjs';
 import { buildGovernPrompt } from '../lib/govern.mjs';
+import { useTestAdminEnv, clearTestAdminEnv, adminCookie } from './helpers/auth.mjs';
 
-let kb, server, base, token;
+let kb, server, base, token, cookie;
 
 before(async () => {
+  useTestAdminEnv(); // ADR-0009: GET /api/kbfile is an operator-only read
   kb = fs.mkdtempSync(path.join(os.tmpdir(), 'kb-portal-kbfile-'));
   fs.mkdirSync(path.join(kb, 'wiki', 'topics'), { recursive: true });
   server = createPortal({ kb, port: 0 });
@@ -19,16 +21,22 @@ before(async () => {
   base = `http://127.0.0.1:${server.address().port}`;
   const html = await (await fetch(base + '/')).text();
   token = html.match(/name="ui-token" content="([^"]+)"/)[1];
+  cookie = await adminCookie(base);
 });
-after(() => { server.close(); fs.rmSync(kb, { recursive: true, force: true }); });
+after(() => {
+  server.close();
+  fs.rmSync(kb, { recursive: true, force: true });
+  clearTestAdminEnv();
+});
 
 const post = (p, obj, headers = {}) => fetch(base + p, {
   method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(obj),
 });
+const get = (p) => fetch(base + p, { headers: { cookie } });
 const briefPath = () => path.join(kb, 'GOVERNANCE.md');
 
 test('kbfile: 404 before creation, POST creates, GET round-trips with hash, log.md audited', async () => {
-  const missing = await fetch(base + '/api/kbfile?path=GOVERNANCE.md');
+  const missing = await get('/api/kbfile?path=GOVERNANCE.md');
   assert.equal(missing.status, 404);
 
   const create = await post('/api/kbfile-edit', { path: 'GOVERNANCE.md', body: '# 治理纲要\n\nAPI 文档优先。' }, { 'x-ui-token': token });
@@ -36,7 +44,7 @@ test('kbfile: 404 before creation, POST creates, GET round-trips with hash, log.
   assert.deepEqual(await create.json(), { path: 'GOVERNANCE.md', created: true });
   assert.ok(fs.existsSync(briefPath()));
 
-  const got = await (await fetch(base + '/api/kbfile?path=GOVERNANCE.md')).json();
+  const got = await (await get('/api/kbfile?path=GOVERNANCE.md')).json();
   assert.ok(got.hash);
   assert.ok(got.body.includes('API 文档优先'));
 
@@ -48,7 +56,7 @@ test('kbfile: 404 before creation, POST creates, GET round-trips with hash, log.
 });
 
 test('kbfile optimistic lock: stale base_hash → 409; re-based force save succeeds', async () => {
-  const { hash } = await (await fetch(base + '/api/kbfile?path=GOVERNANCE.md')).json();
+  const { hash } = await (await get('/api/kbfile?path=GOVERNANCE.md')).json();
 
   fs.appendFileSync(briefPath(), 'External touch.\n', 'utf8'); // change behind the editor's back
 
@@ -57,7 +65,7 @@ test('kbfile optimistic lock: stale base_hash → 409; re-based force save succe
   assert.match((await stale.json()).error, /^edit conflict:/);
   assert.ok(fs.readFileSync(briefPath(), 'utf8').includes('External touch.'), 'conflicting save did NOT overwrite');
 
-  const fresh = await (await fetch(base + '/api/kbfile?path=GOVERNANCE.md')).json();
+  const fresh = await (await get('/api/kbfile?path=GOVERNANCE.md')).json();
   const force = await post('/api/kbfile-edit', { path: 'GOVERNANCE.md', body: 'My edit.', base_hash: fresh.hash }, { 'x-ui-token': token });
   assert.equal(force.status, 200);
   assert.ok(fs.readFileSync(briefPath(), 'utf8').includes('My edit.'));
@@ -68,7 +76,7 @@ test('kbfile gates: whitelist, traversal, empty body, security', async () => {
     const res = await post('/api/kbfile-edit', { path: bad, body: 'x' }, { 'x-ui-token': token });
     assert.equal(res.status, 400, `rejected: ${bad}`);
   }
-  assert.equal((await fetch(base + '/api/kbfile?path=kb.json')).status, 400);
+  assert.equal((await get('/api/kbfile?path=kb.json')).status, 400);
   assert.equal((await post('/api/kbfile-edit', { path: 'GOVERNANCE.md', body: '   ' }, { 'x-ui-token': token })).status, 400);
   assert.equal((await post('/api/kbfile-edit', { path: 'GOVERNANCE.md', body: 'x' })).status, 403, 'no token');
   assert.equal((await post('/api/kbfile-edit', { path: 'GOVERNANCE.md', body: 'x' }, { 'x-ui-token': token, origin: 'http://evil.example' })).status, 403, 'forged Origin');

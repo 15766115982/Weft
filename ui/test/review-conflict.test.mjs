@@ -12,9 +12,10 @@ import { fileURLToPath } from 'node:url';
 import { createPortal } from '../serve.mjs';
 import { applyTopicPage, applySourcePage } from '../../governance/scripts/lib/govern.mjs';
 import { buildFrontmatter, parseFrontmatter } from '../../governance/scripts/lib/frontmatter.mjs';
+import { useTestAdminEnv, clearTestAdminEnv, adminCookie } from './helpers/auth.mjs';
 
 const UI_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-let kb, server, base, token;
+let kb, server, base, token, cookie;
 
 const writePage = (rel, fields, body) => {
   const abs = path.join(kb, rel);
@@ -28,6 +29,7 @@ const gitCommit = (msg) => {
 };
 
 before(async () => {
+  useTestAdminEnv(); // ADR-0009: /api/plan and /api/conflicts are operator-only GETs
   kb = fs.mkdtempSync(path.join(os.tmpdir(), 'kb-portal-conflict-'));
   fs.mkdirSync(path.join(kb, 'raw', 'local'), { recursive: true });
   const rawA = 'raw/local/pay-v1.md';
@@ -59,16 +61,18 @@ before(async () => {
   base = `http://127.0.0.1:${server.address().port}`;
   const html = await (await fetch(base + '/')).text();
   token = html.match(/name="ui-token" content="([^"]+)"/)[1];
+  cookie = await adminCookie(base);
 });
 after(() => {
   server.close();
   fs.rmSync(kb, { recursive: true, force: true });
+  clearTestAdminEnv();
 });
 
 const post = (p, obj) => fetch(base + p, {
   method: 'POST', headers: { 'content-type': 'application/json', 'x-ui-token': token }, body: JSON.stringify(obj),
 });
-const get = (p) => fetch(base + p);
+const get = (p) => fetch(base + p, { headers: { cookie } });
 
 test('/api/conflicts exposes the plan side-channel (conflict group + fingerprint)', async () => {
   // trigger plan via the health/plan read path so the side-channel is fresh

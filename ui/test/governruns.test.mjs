@@ -13,6 +13,7 @@ import { registerExecutor } from '../lib/executor.mjs';
 import { createJobCenter } from '../lib/jobs.mjs';
 import { governRunJob, wikiHash } from '../lib/govern.mjs';
 import { appendGovernRun, governRunFreshness } from '../lib/governruns.mjs';
+import { useTestAdminEnv, clearTestAdminEnv, adminCookie } from './helpers/auth.mjs';
 
 const write = (kb, rel, text) => {
   const abs = path.join(kb, rel);
@@ -250,12 +251,14 @@ test('governRunJob: non-git KB omits gitCommitted (S4 silent skip)', async () =>
 
 test('/api/health exposes lastGovernRun after a portal agent run', async () => {
   const kb = makeKb();
+  useTestAdminEnv(); // ADR-0009: /api/jobs is an operator-only GET
   const server = createPortal({ kb, port: 0 });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
     const page = await (await fetch(base + '/')).text();
     const token = page.match(/name="ui-token" content="([^"]+)"/)[1];
+    const cookie = await adminCookie(base);
 
     let h = await (await fetch(base + '/api/health')).json();
     assert.equal(h.lastGovernRun, null, 'no runs yet');
@@ -269,7 +272,7 @@ test('/api/health exposes lastGovernRun after a portal agent run', async () => {
     const { job } = await res.json();
     // poll until terminal
     for (;;) {
-      const { jobs: list } = await (await fetch(base + '/api/jobs')).json();
+      const { jobs: list } = await (await fetch(base + '/api/jobs', { headers: { cookie } })).json();
       const j = list.find((x) => x.id === job.id);
       if (j.status === 'done' || j.status === 'failed') break;
       await new Promise((r) => setTimeout(r, 100));
@@ -281,5 +284,6 @@ test('/api/health exposes lastGovernRun after a portal agent run', async () => {
   } finally {
     server.close();
     fs.rmSync(kb, { recursive: true, force: true });
+    clearTestAdminEnv();
   }
 });

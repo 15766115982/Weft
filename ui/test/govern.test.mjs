@@ -14,10 +14,12 @@ import { createPortal } from '../serve.mjs';
 import { registerExecutor, executorNames, buildClaudeArgs, buildAgentSettings } from '../lib/executor.mjs';
 import { boundaryViolations } from '../lib/govern.mjs';
 import { buildFrontmatter } from '../../governance/scripts/lib/frontmatter.mjs';
+import { useTestAdminEnv, clearTestAdminEnv, adminCookie } from './helpers/auth.mjs';
 
-let kb, server, base, token;
+let kb, server, base, token, cookie;
 
 before(async () => {
+  useTestAdminEnv(); // ADR-0009: /api/plan and /api/jobs are operator-only GETs
   kb = fs.mkdtempSync(path.join(os.tmpdir(), 'kb-portal-m7c-'));
   fs.mkdirSync(path.join(kb, 'raw', 'local'), { recursive: true });
   fs.mkdirSync(path.join(kb, 'wiki', 'topics'), { recursive: true });
@@ -33,6 +35,7 @@ before(async () => {
   base = `http://127.0.0.1:${server.address().port}`;
   const html = await (await fetch(base + '/')).text();
   token = html.match(/name="ui-token" content="([^"]+)"/)[1];
+  cookie = await adminCookie(base);
 
   // Mock executor: the I3 plug point. Emits two progressive chunks then a
   // successful done — mirrors the claude executor's event contract.
@@ -55,9 +58,10 @@ before(async () => {
 after(() => {
   server.close();
   fs.rmSync(kb, { recursive: true, force: true });
+  clearTestAdminEnv();
 });
 
-const get = (p) => fetch(base + p);
+const get = (p) => fetch(base + p, { headers: { cookie } });
 const post = (p, obj, headers = {}) => fetch(base + p, {
   method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(obj),
 });

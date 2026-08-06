@@ -10,10 +10,11 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createPortal } from '../serve.mjs';
 import { buildFrontmatter } from '../../governance/scripts/lib/frontmatter.mjs';
+import { useTestAdminEnv, clearTestAdminEnv, adminCookie } from './helpers/auth.mjs';
 import http from 'node:http';
 
 const UI_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-let kb, server, base, token;
+let kb, server, base, token, cookie;
 
 function writePage(rel, fields, body) {
   const abs = path.join(kb, rel);
@@ -22,6 +23,7 @@ function writePage(rel, fields, body) {
 }
 
 before(async () => {
+  useTestAdminEnv(); // ADR-0009: operator GETs (/api/raw, /api/rawlist, /api/queue, …) need an admin session
   kb = fs.mkdtempSync(path.join(os.tmpdir(), 'kb-portal-'));
   writePage('wiki/syntheses/cand-one.md', {
     type: 'synthesis', status: 'candidate', title: 'Candidate One', review_note: 'check this',
@@ -48,13 +50,15 @@ before(async () => {
   assert.match(homeRes.headers.get('cache-control') || '', /no-cache/);
   const html = await homeRes.text();
   token = html.match(/name="ui-token" content="([^"]+)"/)[1];
+  cookie = await adminCookie(base);
 });
 after(() => {
   server.close();
   fs.rmSync(kb, { recursive: true, force: true });
+  clearTestAdminEnv();
 });
 
-const get = (p) => fetch(base + p);
+const get = (p, opts = {}) => fetch(base + p, { ...opts, headers: { cookie, ...(opts.headers || {}) } });
 const post = (p, obj, headers = {}) => fetch(base + p, {
   method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(obj),
 });

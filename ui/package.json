@@ -1,3 +1,9 @@
 {
-  "type": "module"
+  "type": "module",
+  "scripts": {
+    "test:e2e": "node e2e/prepare.mjs && playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "~1.61.0"
+  }
 }
