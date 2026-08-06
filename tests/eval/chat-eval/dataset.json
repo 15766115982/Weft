@@ -1,0 +1,14 @@
+[
+  { "id": "ce01", "question": "retry 策略是怎么设计的?", "level": "quick", "behavior": "answer", "must_cite": ["payment-timeout-retry.md"] },
+  { "id": "ce02", "question": "幂等键有什么用?", "level": "deep", "behavior": "answer", "must_cite": ["idempotency-design.md", "faq-retry.md"], "cite_any": true },
+  { "id": "ce03", "question": "什么是 saga 补偿?", "level": "quick", "behavior": "answer", "must_cite": ["payment-compensation.md"] },
+  { "id": "ce04", "question": "对账超时是什么原因?", "level": "deep", "behavior": "answer", "must_cite": ["incident-settlement-delay.md"] },
+  { "id": "ce05", "question": "重试几次之后不行怎么办?", "level": "quick", "behavior": "answer", "must_cite": ["faq-retry.md"] },
+  { "id": "ce06", "question": "什么时候会触发 RETRY_BUDGET_EXHAUSTED?", "level": "deep", "behavior": "answer", "must_cite": ["payment-timeout-retry.md", "faq-retry.md"], "cite_any": true },
+  { "id": "ce07", "question": "kubernetes operator 怎么升级?", "level": "quick", "behavior": "refuse" },
+  { "id": "ce08", "question": "区块链智能合约怎么写?", "level": "deep", "behavior": "refuse" },
+  { "id": "ce09", "question": "对账窗口有多长?", "level": "quick", "behavior": "answer", "must_cite": ["incident-settlement-delay.md"], "must_say": ["120"] },
+  { "id": "ce10", "question": "settlement 延迟了会影响什么?", "level": "deep", "behavior": "answer", "must_cite": ["incident-settlement-delay.md"] },
+  { "id": "ce11", "question": "429 是怎么产生的?", "level": "quick", "behavior": "answer", "must_cite": ["rate-limiting.md"] },
+  { "id": "ce12", "question": "重试预算是什么意思?", "level": "quick", "behavior": "answer", "must_cite": ["faq-retry.md"] }
+]

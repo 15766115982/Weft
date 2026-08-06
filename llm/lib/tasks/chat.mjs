@@ -14,7 +14,7 @@ export async function run({ kbRoot, input, outputPath }) {
   const level = input?.level || 'quick';
   const question = input?.question || '';
   let context = '';
-  let citations = [];
+  const hits = []; // { page, title } — citation candidates, resolved against the answer
 
   writer.write({ type: 'meta', level, kb: kbRoot });
 
@@ -22,26 +22,37 @@ export async function run({ kbRoot, input, outputPath }) {
     const limit = LEVEL_LIMIT[level] || LEVEL_LIMIT.quick;
     writer.write({ type: 'search', query: question, round: 1 });
     const result = await searchWithFallback(kbRoot, question, { limit });
-    const hits = Array.isArray(result?.preview) ? result.preview : [];
+    const previews = Array.isArray(result?.preview) ? result.preview : [];
     const parts = [];
-    for (const hit of hits.slice(0, limit)) {
+    for (const hit of previews.slice(0, limit)) {
       writer.write({ type: 'read', page: hit.page, round: 1 });
       parts.push(`## ${hit.title || hit.page}\n${hit.snippet || ''}`);
-      citations.push(hit.page);
+      hits.push({ page: hit.page, title: hit.title || '' });
     }
     context = parts.join('\n\n---\n\n');
   } catch (err) {
     writer.write({ type: 'error', message: err.message });
   }
 
+  let answer = '';
   try {
-    await runPrompt(kbRoot, 'chat', { question, context }, {
+    const res = await runPrompt(kbRoot, 'chat', { question, context }, {
       stream: true,
       onDelta: (delta) => writer.write({ type: 'chunk', text: delta }),
     });
+    answer = res.content || '';
   } catch (err) {
     writer.write({ type: 'error', message: err.message });
   }
+
+  // Citations = pages the ANSWER actually references (wikilink, title, or slug),
+  // not every page retrieval happened to read. A grounded refusal therefore
+  // yields [] even when the fallback surfaced weak pages.
+  const citations = hits.filter((h) => {
+    const slug = h.page.split('/').pop().replace(/\.md$/, '');
+    return answer.includes(`[[${h.title}]]`) || answer.includes(`[[${slug}]]`)
+      || (h.title && answer.includes(h.title)) || answer.includes(slug);
+  }).map((h) => h.page);
 
   writer.write({ type: 'done', citations });
   writer.end();

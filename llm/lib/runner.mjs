@@ -211,8 +211,11 @@ function stubFor(promptName, vars) {
         reasoning: 'Stub mode reports no conflict.',
         contradicting_pages: [],
       });
-    case 'chat':
-      return `Stub answer for "${question}". In real mode this would cite approved wiki pages.`;
+    case 'chat': {
+      // cite the first context page so citation-resolution tests have a target
+      const first = String(vars?.context || '').match(/^## (.+)$/m)?.[1];
+      return `Stub answer for "${question}". ${first ? `See [[${first}]]. ` : ''}In real mode this would cite approved wiki pages.`;
+    }
     case 'deep-research':
       return `Stub deep-research answer for "${question}". In real mode this would perform multi-round retrieval.`;
     default:
