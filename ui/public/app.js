@@ -32,6 +32,7 @@ const SHORTCUTS = [
   ['g d / g b / g r / g s / g c', '前往 总览 / 浏览 / 图谱 / 检索 / 问答'],
   ['g q / g a / g u / g w / g g', '前往 评审 / 采集 / 上游 / 来源 / 治理 (operator)'],
   ['g t', '切换暗色 / 亮色'],
+  ['g ,', '设置(模型 / prompts)'],
   ['/', '聚焦搜索框(检索页)/ 命令面板(其他页)'],
   ['j k 或 [ ]', '评审队列:上 / 下一条'],
   ['a / r', '评审队列:批准 / 拒绝'],
@@ -140,7 +141,14 @@ async function initHeader() {
   document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
 
   document.getElementById('cmdk-btn').addEventListener('click', showPalette);
+  document.getElementById('settings-btn').addEventListener('click', openSettings);
   document.getElementById('sb-help').addEventListener('click', (e) => { e.preventDefault(); showShortcuts(); });
+}
+
+// Settings is a standalone page (not an SPA route) — carry the current KB over.
+function openSettings() {
+  const qs = getKb() ? `?kb=${encodeURIComponent(getKb())}` : '';
+  location.href = '/views/settings.html' + qs;
 }
 
 function applyTheme(dark) {
@@ -181,6 +189,7 @@ async function paletteItems() {
     { icon: 'sparkles', label: '前往:治理控制台', hint: 'g g', go: '#/govern' },
   ];
   const utilityActions = [
+    { icon: 'settings', label: '设置(模型 / prompts)', hint: 'g ,', action: openSettings },
     { icon: 'keyboard', label: '键盘快捷键', hint: '?', action: showShortcuts },
     { icon: 'moon', label: '切换暗色 / 亮色', hint: 'g t', action: toggleTheme },
   ];
@@ -228,6 +237,7 @@ const G_SEQUENCES = {
   g: () => { location.hash = '#/govern'; },
   t: toggleTheme,
   k: () => document.getElementById('kb-select')?.focus(), // P2-3
+  ',': openSettings,
 };
 const G_WINDOW_MS = 1000;
 let gPendingAt = 0;
