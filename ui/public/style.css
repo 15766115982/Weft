@@ -46,6 +46,61 @@
   --shadow-2: 0 8px 24px rgb(0 0 0 / .5);
 }
 
+/* ---- settings page (standalone) ---- */
+.settings { max-width: 860px; margin: 0 auto; padding: 28px 20px 120px; }
+.settings-top { margin-bottom: 22px; }
+.settings-top h1 { margin: 6px 0 4px; font-size: 26px; }
+.settings-top p { font-size: 13px; margin: 0; }
+.settings-back { color: var(--celadon); text-decoration: none; font-size: 13px; }
+.settings-back:hover { text-decoration: underline; }
+.set-card { background: var(--paper-raise); border: 1px solid var(--line); border-radius: var(--r-panel);
+  box-shadow: var(--shadow-1); padding: 20px 24px; margin-bottom: 18px; }
+.set-card h2 { margin: 0 0 12px; font-size: 17px; }
+.section-note { font-size: 12.5px; margin: -6px 0 14px; }
+.provider-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+.provider-card { display: block; border: 1.5px solid var(--line); border-radius: var(--r-panel);
+  padding: 12px 14px; cursor: pointer; transition: border-color var(--t-fast), background var(--t-fast); }
+.provider-card input { position: absolute; opacity: 0; pointer-events: none; }
+.provider-card strong { display: block; font-size: 14px; margin-bottom: 4px; }
+.provider-card span { font-size: 12px; color: var(--ink-dim); line-height: 1.55; }
+.provider-card.on { border-color: var(--celadon); background: var(--celadon-soft); }
+.provider-card.on strong { color: var(--celadon); }
+.field { margin-bottom: 14px; }
+.field label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.field input, .field select { width: 100%; font-size: 13.5px; padding: 8px 10px; margin: 0;
+  background: var(--paper); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r-btn); }
+.field input:focus, .field select:focus { border-color: var(--celadon); box-shadow: 0 0 0 3px var(--celadon-soft); outline: none; }
+.field .hint { font-size: 12px; color: var(--ink-dim); margin: 4px 0 0; line-height: 1.5; }
+.field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.env-badge { font-size: 11px; font-weight: 500; margin-left: 8px; padding: 1px 8px; border-radius: 99px; }
+.env-badge.ok { color: var(--pine); background: color-mix(in srgb, var(--pine) 12%, transparent); }
+.env-badge.missing { color: var(--wine); background: color-mix(in srgb, var(--wine) 10%, transparent); }
+.save-bar { position: sticky; bottom: 16px; display: flex; align-items: center; gap: 10px;
+  background: var(--paper-raise); border: 1px solid var(--celadon); border-radius: var(--r-panel);
+  box-shadow: var(--shadow-2); padding: 10px 16px; margin-bottom: 18px; z-index: 5;
+  animation: rise var(--t-med) ease-out; }
+.save-bar span { flex: 1; font-size: 13px; color: var(--ink-dim); }
+.prompt-list .prompt-item { border: 1px solid var(--line); border-radius: var(--r-btn); margin-bottom: 8px; }
+.prompt-list summary { display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+  padding: 9px 14px; cursor: pointer; font-size: 13.5px; list-style: none; }
+.prompt-list summary::-webkit-details-marker { display: none; }
+.prompt-list summary .dim { font-size: 11.5px; font-family: var(--font-mono); }
+.prompt-list .prompt-item[open] summary { border-bottom: 1px solid var(--line); color: var(--celadon); }
+.prompt-body { padding: 12px 14px; }
+.prompt-editor { width: 100%; font: 12.5px/1.6 var(--font-mono); padding: 10px 12px; margin: 0;
+  background: var(--paper); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r-btn); }
+.prompt-editor:focus { border-color: var(--celadon); outline: none; box-shadow: 0 0 0 3px var(--celadon-soft); }
+.prompt-actions { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.prompt-actions .save-note { font-size: 12px; }
+.tool-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.tool button { width: 100%; }
+.tool .hint { font-size: 12px; color: var(--ink-dim); margin: 6px 0 0; line-height: 1.5; }
+.action-log { margin-top: 14px; max-height: 180px; overflow: auto; font-size: 12px;
+  background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-btn); padding: 10px 12px; }
+@media (max-width: 720px) {
+  .provider-cards, .field-pair, .tool-grid { grid-template-columns: 1fr; }
+}
+
 /* route loading bar (P2) */
 #route-loader { position: fixed; top: 0; left: 0; height: 2px; width: 0; z-index: 100;
   background: var(--celadon); opacity: 0; transition: width 300ms ease, opacity 200ms; }

@@ -55,8 +55,11 @@ export function buildFixtureKb({ config = true, detect = true, dir } = {}) {
 
   if (config) {
     write('.kb/config/models.json', JSON.stringify({
-      default: 'gpt-5.4',
-      auth: { api_key: 'WEFT_LLM_API_KEY' },
+      provider: 'openai',
+      endpoint: 'https://api.moonshot.cn/v1',
+      model: 'kimi-k2-0711-preview',
+      auth: { type: 'api_key', api_key: 'WEFT_LLM_API_KEY' },
+      defaults: { temperature: 0.2, max_tokens: 4096 },
     }, null, 2));
     write('.kb/config/prompts/chat.md', '# Chat prompt\n\nAnswer with citations.\n');
     write('.kb/config/prompts/govern.md', '# Govern prompt\n\nFollow the contract.\n');

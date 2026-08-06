@@ -168,7 +168,7 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
         const kb = registry.resolve(url.searchParams.get('kb')).path;
 
         // Settings reads.
-        if (url.pathname === '/api/settings') {
+        if (url.pathname === '/api/settings' || url.pathname.startsWith('/api/settings/')) {
           const settingsHandler = settingsRoutes({ jobs, registry });
           const handled = await settingsHandler(req, res, url, readBody, json);
           if (handled !== null) return handled;

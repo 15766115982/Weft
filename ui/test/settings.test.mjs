@@ -38,14 +38,63 @@ const post = (p, obj, headers = {}) => fetch(base + p, {
   body: JSON.stringify(obj),
 });
 
-test('settings read is public and masks secrets', async () => {
+test('settings read is public; secret fields hold env var names verbatim', async () => {
   const res = await get('/api/settings');
   assert.equal(res.status, 200);
   const data = await res.json();
-  assert.equal(data.config.auth.api_key, 'env:WEFT_TEST_LLM_KEY');
-  // env flags report the referenced secret var names, never values
+  // auth fields are env var NAMES (never secret values) — returned as-is so
+  // the settings form can edit them
+  assert.equal(data.config.auth.api_key, 'WEFT_TEST_LLM_KEY');
+  // env flags report whether each referenced var is set
   assert.equal(data.env.WEFT_TEST_LLM_KEY, false);
   assert.deepEqual(data.prompts, []);
+});
+
+test('settings/config saves a valid config and backs up the old one', async () => {
+  const config = {
+    provider: 'openai', endpoint: 'https://api.moonshot.cn/v1', model: 'kimi-k2',
+    auth: { type: 'api_key', api_key: 'WEFT_TEST_LLM_KEY' },
+    defaults: { temperature: 0.2 },
+  };
+  const res = await post('/api/settings/config', { config }, { 'x-ui-token': token });
+  assert.equal(res.status, 200);
+  const onDisk = JSON.parse(fs.readFileSync(path.join(kb, '.kb', 'config', 'models.json'), 'utf8'));
+  assert.equal(onDisk.provider, 'openai');
+  assert.equal(onDisk.model, 'kimi-k2');
+  assert.ok(fs.existsSync(path.join(kb, '.kb', 'config', 'models.json.bak')), 'previous file backed up');
+  const readBack = await (await get('/api/settings')).json();
+  assert.equal(readBack.config.model, 'kimi-k2');
+});
+
+test('settings/config rejects invalid shapes with actionable errors', async () => {
+  const cases = [
+    [{}, 'endpoint'],
+    [{ provider: 'openai', endpoint: 'https://x', auth: { type: 'api_key', api_key: 'K' } }, 'requires model'],
+    [{ provider: 'azure', endpoint: 'https://x', auth: { type: 'api_key', api_key: 'K' } }, 'requires deployment'],
+    [{ provider: 'openai', endpoint: 'https://x', model: 'm', auth: { type: 'spn' } }, 'only valid for provider azure'],
+    [{ provider: 'bedrock', endpoint: 'https://x', model: 'm', auth: { type: 'api_key', api_key: 'K' } }, 'azure|openai'],
+  ];
+  for (const [config, msg] of cases) {
+    const res = await post('/api/settings/config', { config }, { 'x-ui-token': token });
+    assert.equal(res.status, 400, JSON.stringify(config));
+    assert.match((await res.json()).error, new RegExp(msg), msg);
+  }
+});
+
+test('settings/prompt read + save with whitelist', async () => {
+  fs.mkdirSync(path.join(kb, '.kb', 'config', 'prompts'), { recursive: true });
+  fs.writeFileSync(path.join(kb, '.kb', 'config', 'prompts', 'chat.md'), '# Chat\noriginal\n');
+  const read = await (await get('/api/settings/prompt?file=chat.md')).json();
+  assert.match(read.body, /original/);
+  const save = await post('/api/settings/prompt', { file: 'chat.md', body: '# Chat\nedited\n' }, { 'x-ui-token': token });
+  assert.equal(save.status, 200);
+  assert.match(fs.readFileSync(path.join(kb, '.kb', 'config', 'prompts', 'chat.md'), 'utf8'), /edited/);
+  for (const bad of ['../models.json', 'a/b.md', 'chat.txt', 'chat.md.md..']) {
+    const res = await post('/api/settings/prompt', { file: bad, body: 'x' }, { 'x-ui-token': token });
+    assert.equal(res.status, 400, bad);
+  }
+  const missing = await get('/api/settings/prompt?file=nope.md');
+  assert.equal(missing.status, 404);
 });
 
 test('settings/check enqueues an llm check job (write token required)', async () => {
@@ -74,6 +123,6 @@ test('settings page static asset is served with injected token', async () => {
   const res = await get('/views/settings.html');
   assert.equal(res.status, 200);
   const html = await res.text();
-  assert.match(html, /Settings/);
+  assert.match(html, /设置|Settings/);
   assert.match(html, /name="ui-token" content="[^%]/);
 });

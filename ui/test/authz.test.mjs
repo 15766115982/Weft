@@ -96,12 +96,12 @@ test('SSE /api/events opens without any auth', async () => {
   await res.body.cancel();
 });
 
-test('settings masks secret values', async () => {
+test('settings returns config verbatim (auth fields are env var names, not secrets)', async () => {
   const res = await fetch(base + '/api/settings');
   const data = await res.json();
   assert.equal(res.status, 200);
   if (data.config?.auth?.api_key) {
-    assert.match(data.config.auth.api_key, /^env:/);
+    assert.doesNotMatch(String(data.config.auth.api_key), /^sk-/);
   }
 });
 

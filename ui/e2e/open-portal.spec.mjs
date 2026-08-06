@@ -23,12 +23,27 @@ for (const route of ['queue', 'govern', 'raw', 'upstream', 'acquire']) {
   });
 }
 
-test('O3 settings renders config/prompts with no login form', async ({ page }) => {
+test('O3 settings is an editable form: provider cards, field hints, prompts editor', async ({ page }) => {
   await page.goto('/views/settings.html');
   await expect(page.locator('#login-section')).toHaveCount(0);
-  await expect(page.locator('#config-display')).toContainText('api_key');
-  await expect(page.locator('#config-display')).toContainText('env:'); // secrets masked
-  await expect(page.locator('#prompts-list li').first()).toBeVisible();
+  // back link at the top, not the bottom
+  await expect(page.locator('.settings-back')).toBeVisible();
+  // provider cards: pick OpenAI-compatible → model field appears, deployment hides
+  await page.locator('.provider-card[data-provider="openai"]').click();
+  await expect(page.locator('#wrap-model')).toBeVisible();
+  await expect(page.locator('#wrap-deployment')).toBeHidden();
+  // form loads the fixture config values
+  await expect(page.locator('#f-api-key')).toHaveValue('WEFT_LLM_API_KEY');
+  // every field carries an explanation
+  await expect(page.locator('.field .hint').first()).toBeVisible();
+  // edit → dirty bar appears → save → persists
+  await page.locator('#f-model').fill('kimi-k2');
+  await expect(page.locator('#save-bar')).toBeVisible();
+  await page.locator('#btn-save').click();
+  await expect(page.locator('#save-note')).toContainText('已保存');
+  // prompts accordion expands into an inline editor
+  await page.locator('.prompt-item summary').first().click();
+  await expect(page.locator('.prompt-editor').first()).toBeVisible();
 });
 
 test('O4 palette lists all routes and pages unfiltered', async ({ page }) => {

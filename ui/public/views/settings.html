@@ -4,47 +4,146 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="ui-token" content="%%UI_TOKEN%%">
-<title>Settings — Weft</title>
+<title>设置 — Weft</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230d7a6f' stroke-width='2'%3E%3Cpath d='M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="../vendor/pico.min.css">
 <link rel="stylesheet" href="../style.css">
+<script>
+// apply the portal's saved theme before first paint (no flash)
+document.documentElement.dataset.theme =
+  localStorage.getItem('ui.theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+</script>
 </head>
 <body>
-<div class="container" style="max-width: 960px; padding: 2rem 1rem;">
-  <h1>⚙️ Settings</h1>
+<div class="settings">
 
-  <div class="grid">
-    <article>
-      <header><strong>Model Configuration</strong></header>
-      <pre id="config-display"><code>Loading...</code></pre>
-      <p class="dim">Edit <code>.kb/config/models.json</code> directly. Secrets are env vars only.</p>
-    </article>
+  <header class="settings-top">
+    <a class="settings-back" href="/">← 返回门户</a>
+    <h1>设置</h1>
+    <p class="dim">LLM 服务配置 — 存在 <code>.kb/config/models.json</code>,secrets 只走环境变量,这里填的都是<b>变量名</b>。</p>
+  </header>
 
-    <article>
-      <header><strong>Environment</strong></header>
-      <ul id="env-list"></ul>
-    </article>
+  <!-- provider: two radio cards, each explains itself -->
+  <section class="set-card">
+    <h2>模型提供方</h2>
+    <div class="provider-cards" id="provider-cards">
+      <label class="provider-card" data-provider="azure">
+        <input type="radio" name="provider" value="azure">
+        <strong>Azure OpenAI</strong>
+        <span>企业部署。URL 形如 <code>…/openai/deployments/&lt;deployment&gt;</code>,支持 SPN(服务主体)或 api-key 两种认证。</span>
+      </label>
+      <label class="provider-card" data-provider="openai">
+        <input type="radio" name="provider" value="openai">
+        <strong>OpenAI 兼容接口</strong>
+        <span>Kimi / DeepSeek / vLLM 等任何 <code>/chat/completions</code> 端点。Bearer api_key 认证,请求带 <code>model</code> 字段。</span>
+      </label>
+    </div>
+
+    <div class="field">
+      <label for="f-endpoint">Endpoint</label>
+      <input id="f-endpoint" type="url" placeholder="https://…" spellcheck="false">
+      <p class="hint" id="hint-endpoint"></p>
+    </div>
+    <div class="field" id="wrap-deployment">
+      <label for="f-deployment">Deployment</label>
+      <input id="f-deployment" type="text" placeholder="gpt-5-4" spellcheck="false">
+      <p class="hint">Azure 里的部署名 — 拼进请求 URL,决定实际用哪个模型。</p>
+    </div>
+    <div class="field" id="wrap-model">
+      <label for="f-model">Model</label>
+      <input id="f-model" type="text" placeholder="kimi-k2-0711-preview" spellcheck="false">
+      <p class="hint">OpenAI 兼容接口的模型名 — 放进请求体的 <code>model</code> 字段。</p>
+    </div>
+    <div class="field" id="wrap-api-version">
+      <label for="f-api-version">API Version <span class="dim">(可选)</span></label>
+      <input id="f-api-version" type="text" placeholder="2025-01-01-preview" spellcheck="false">
+      <p class="hint">Azure REST API 版本,留空用默认 <code>2025-01-01-preview</code>。</p>
+    </div>
+  </section>
+
+  <!-- auth -->
+  <section class="set-card">
+    <h2>认证</h2>
+    <p class="dim section-note">密钥本身永远不进配置文件、不进 git — 这里只填<b>环境变量的名字</b>,运行时从 env 读值。</p>
+    <div class="field">
+      <label for="f-auth-type">认证方式</label>
+      <select id="f-auth-type">
+        <option value="api_key">api_key — 一个密钥环境变量</option>
+        <option value="spn">spn — Azure 服务主体(tenant + client + secret)</option>
+      </select>
+    </div>
+    <div class="field" id="wrap-api-key">
+      <label for="f-api-key">API Key 环境变量名 <span class="env-badge" id="env-api-key"></span></label>
+      <input id="f-api-key" type="text" placeholder="WEFT_LLM_API_KEY" spellcheck="false">
+      <p class="hint" id="hint-api-key">例:设为 <code>WEFT_LLM_API_KEY</code> 后,在系统里 <code>setx WEFT_LLM_API_KEY "sk-…"</code> 并重启门户。</p>
+    </div>
+    <div id="wrap-spn">
+      <div class="field">
+        <label for="f-tenant">Tenant ID</label>
+        <input id="f-tenant" type="text" spellcheck="false">
+      </div>
+      <div class="field">
+        <label for="f-client-id">Client ID</label>
+        <input id="f-client-id" type="text" spellcheck="false">
+      </div>
+      <div class="field">
+        <label for="f-client-secret">Client Secret 环境变量名 <span class="env-badge" id="env-client-secret"></span></label>
+        <input id="f-client-secret" type="text" placeholder="WEFT_AZURE_CLIENT_SECRET" spellcheck="false">
+      </div>
+    </div>
+  </section>
+
+  <!-- generation defaults -->
+  <section class="set-card">
+    <h2>生成参数</h2>
+    <div class="field-pair">
+      <div class="field">
+        <label for="f-temperature">Temperature</label>
+        <input id="f-temperature" type="number" min="0" max="2" step="0.1">
+        <p class="hint">0 = 稳定保守,2 = 发散。治理任务建议 0.1–0.3。</p>
+      </div>
+      <div class="field">
+        <label for="f-max-tokens">Max Tokens</label>
+        <input id="f-max-tokens" type="number" min="256" step="256">
+        <p class="hint">单次回答的最大长度。深研/综合任务建议 ≥ 4096。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- sticky save bar -->
+  <div class="save-bar" id="save-bar" hidden>
+    <span id="save-note">有未保存的修改</span>
+    <button id="btn-discard" class="sm">放弃</button>
+    <button id="btn-save" class="primary sm">保存 models.json</button>
   </div>
 
-  <article>
-    <header><strong>Prompts</strong></header>
-    <ul id="prompts-list"></ul>
-    <p class="dim">Prompts live in <code>.kb/config/prompts/</code>. Use <em>Init default prompts</em> to seed them, or edit them directly on disk.</p>
-  </article>
+  <!-- prompts -->
+  <section class="set-card">
+    <h2>Prompts</h2>
+    <p class="dim section-note">每个 LLM 任务的提示词模板,<code>{{变量}}</code> 会被任务数据替换。点击文件名展开编辑;缺文件时点下方"补全默认 prompts"。</p>
+    <div id="prompts-list" class="prompt-list"></div>
+  </section>
 
-  <article>
-    <header><strong>LLM Service Actions</strong></header>
-    <div class="grid">
-      <button id="btn-init-config">Init models.json (Azure)</button>
-      <button id="btn-init-config-openai">Init models.json (OpenAI-compatible)</button>
-      <button id="btn-check">Run llm.mjs check</button>
-      <button id="btn-init-prompts">Init default prompts</button>
-      <button id="btn-init-force">Init prompts (force overwrite)</button>
+  <!-- tools -->
+  <section class="set-card">
+    <h2>工具</h2>
+    <div class="tool-grid">
+      <div class="tool">
+        <button id="btn-check" class="sm">检查连通</button>
+        <p class="hint">用当前配置跑一次 <code>llm.mjs check</code>,验证 endpoint 与密钥可用。</p>
+      </div>
+      <div class="tool">
+        <button id="btn-init-prompts" class="sm">补全默认 prompts</button>
+        <p class="hint">把 <code>templates/prompts/</code> 里缺失的模板复制进来(已有文件不动)。</p>
+      </div>
+      <div class="tool">
+        <button id="btn-init-config" class="sm">重置 models.json 模板</button>
+        <p class="hint">按当前 provider 重新播种模板 — 会先备份现有文件为 <code>.bak</code>。</p>
+      </div>
     </div>
-    <pre id="action-log"><code></code></pre>
-  </article>
+    <pre id="action-log" class="action-log" hidden><code></code></pre>
+  </section>
 
-  <p><a href="/">← 回到门户</a></p>
 </div>
 
 <script type="module" src="../js/settings.mjs"></script>
