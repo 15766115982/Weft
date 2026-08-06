@@ -15,8 +15,11 @@ export function render(template, vars) {
 export function loadModelConfig(kbRoot) {
   const config = loadModelsConfig(kbRoot);
   if (!config) throw new Error('.kb/config/models.json not found; run llm.mjs init-prompts or create it');
-  if (!config.endpoint || !config.deployment) {
-    throw new Error('models.json requires endpoint and deployment');
+  if (!config.endpoint) throw new Error('models.json requires endpoint');
+  if ((config.provider || 'azure') === 'openai') {
+    if (!config.model) throw new Error('models.json with provider "openai" requires model');
+  } else if (!config.deployment) {
+    throw new Error('models.json with provider "azure" requires deployment');
   }
   return config;
 }

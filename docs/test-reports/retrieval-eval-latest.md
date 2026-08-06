@@ -1,6 +1,6 @@
 # Retrieval Evaluation Report
 
-Date: 2026-08-06T03:39:25.639Z · KB: fixture corpus (18 queries, 17 scored + 1 negative)
+Date: 2026-08-06T13:04:09.313Z · KB: fixture corpus (18 queries, 17 scored + 1 negative)
 
 **Hit@1 = 0.706 · Hit@5 = 1.000 (threshold 0.85) · MRR = 0.819**
 

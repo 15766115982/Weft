@@ -1,4 +1,5 @@
 {
+  "provider": "azure",
   "endpoint": "https://your-resource.openai.azure.com",
   "deployment": "gpt-5-4",
   "api_version": "2025-01-01-preview",

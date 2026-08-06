@@ -1,6 +1,7 @@
-// check — validate LLM config and SPN token acquisition (Phase 1 stub).
+// check — validate LLM config and credential availability.
 import { loadModelsConfig, resolveSecret } from '../config.mjs';
 import { fetchSpnToken } from '../auth.mjs';
+import { providerOf } from '../openai.mjs';
 
 export async function run({ kbRoot }) {
   const config = loadModelsConfig(kbRoot);
@@ -8,15 +9,24 @@ export async function run({ kbRoot }) {
     return { ok: false, error: '.kb/config/models.json not found' };
   }
 
+  const provider = providerOf(config);
   const checks = {
+    provider,
     endpoint: !!config.endpoint,
-    deployment: !!config.deployment,
-    api_version: config.api_version || 'default',
     auth_type: config.auth?.type,
   };
+  if (provider === 'openai') {
+    checks.model = config.model || null;
+  } else {
+    checks.deployment = !!config.deployment;
+    checks.api_version = config.api_version || 'default';
+  }
 
   try {
+    if (provider === 'openai' && !config.model) throw new Error('provider "openai" requires model');
+    if (provider === 'azure' && !config.deployment) throw new Error('provider "azure" requires deployment');
     if (config.auth?.type === 'spn') {
+      if (provider !== 'azure') throw new Error('spn auth is only valid for provider "azure"');
       const secret = resolveSecret(config.auth.client_secret);
       if (!secret) throw new Error(`SPN secret env var not set: ${config.auth.client_secret}`);
       await fetchSpnToken({
