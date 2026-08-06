@@ -25,7 +25,9 @@ async function loadSettings() {
     $('#config-display code').textContent = `Failed to load settings: ${data.error || 'unknown'}`;
     return;
   }
-  $('#config-display code').textContent = data.config ? JSON.stringify(data.config, null, 2) : 'No .kb/config/models.json found.';
+  $('#config-display code').textContent = data.config
+    ? JSON.stringify(data.config, null, 2)
+    : 'No .kb/config/models.json yet — click "Init models.json" below to seed a template, then edit endpoint/model/auth.';
 
   const envList = $('#env-list');
   envList.innerHTML = '';
@@ -86,6 +88,8 @@ async function pollJob(id) {
 }
 
 $('#btn-check').addEventListener('click', () => runJob('/settings/check'));
+$('#btn-init-config').addEventListener('click', () => runJob('/settings/init-config', { provider: 'azure' }));
+$('#btn-init-config-openai').addEventListener('click', () => runJob('/settings/init-config', { provider: 'openai' }));
 $('#btn-init-prompts').addEventListener('click', () => runJob('/settings/init-prompts'));
 $('#btn-init-force').addEventListener('click', () => runJob('/settings/init-prompts', { force: true }));
 

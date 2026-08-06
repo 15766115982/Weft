@@ -199,10 +199,27 @@ Start with ONE small project and ONE small space; widen after the smoke test pas
 The LLM service (`<repo>/llm/llm.mjs`) is not a skill; it is invoked internally by
 governance, the retrieval judge, and the UI portal. It needs two things in the KB:
 
-1. **Model config** at `.kb/config/models.json` (create it once per KB):
+1. **Model config** at `.kb/config/models.json` — one file per KB, used by **both**
+   provider types. Seed it from a template instead of writing it by hand:
+
+   ```bash
+   # Azure OpenAI (SPN or api_key)
+   node <repo>/llm/llm.mjs init-config --kb D:\kb\work
+
+   # Any OpenAI-compatible endpoint (Kimi, DeepSeek, vLLM, …)
+   node <repo>/llm/llm.mjs init-config --kb D:\kb\work --input-file '{"provider":"openai"}'
+   ```
+
+   The Settings page of the UI portal has the same two actions as buttons
+   ("Init models.json (Azure)" / "(OpenAI-compatible)"). Seeding never overwrites an
+   existing `models.json` unless forced. The templates live at
+   `<repo>/templates/models.example.json` and `models.example.openai.json`.
+
+   **Azure OpenAI** (`"provider": "azure"`, the default when `provider` is omitted):
 
    ```json
    {
+     "provider": "azure",
      "endpoint": "https://your-resource.openai.azure.com",
      "deployment": "gpt-5-4",
      "api_version": "2025-01-01-preview",
@@ -212,21 +229,33 @@ governance, the retrieval judge, and the UI portal. It needs two things in the K
        "client_id": "your-client-id",
        "client_secret": "WEFT_AZURE_CLIENT_SECRET"
      },
-     "defaults": {
-       "temperature": 0.2,
-       "max_tokens": 4096
-     }
+     "defaults": { "temperature": 0.2, "max_tokens": 4096 }
    }
    ```
 
-   Set the secret env var:
+   Azure auth alternatives: `"type": "spn"` (client credentials, shown above) or
+   `"type": "api_key"` with `"api_key": "AZURE_OPENAI_API_KEY"`. Set the referenced
+   env var (`setx WEFT_AZURE_CLIENT_SECRET "…"` / `setx AZURE_OPENAI_API_KEY "…"`).
 
-   ```cmd
-   setx WEFT_AZURE_CLIENT_SECRET "<your-spn-secret>"
+   **OpenAI-compatible** (`"provider": "openai"` — Kimi, DeepSeek, vLLM, any
+   `/chat/completions` endpoint):
+
+   ```json
+   {
+     "provider": "openai",
+     "endpoint": "https://api.moonshot.cn/v1",
+     "model": "kimi-k2-0711-preview",
+     "auth": { "type": "api_key", "api_key": "WEFT_LLM_API_KEY" },
+     "defaults": { "temperature": 0.2, "max_tokens": 4096 }
+   }
    ```
 
-   Alternative auth: replace `"type": "spn"` with `"type": "api_key"` and
-   `"api_key": "AZURE_OPENAI_API_KEY"`; set that env var instead.
+   `endpoint` is the base URL (`/chat/completions` is appended); requests use
+   `Authorization: Bearer <key>` and carry the `model` field. Set the key:
+   `setx WEFT_LLM_API_KEY "<your-key>"`.
+
+   Note: the `auth.api_key` / `auth.client_secret` values are **env var names**,
+   never the secrets themselves.
 
 2. **Prompt templates** under `.kb/config/prompts/`:
 
@@ -237,14 +266,14 @@ governance, the retrieval judge, and the UI portal. It needs two things in the K
    This copies the default templates from `<repo>/templates/prompts/` so you can edit
    them per KB. Re-run with `--force` to overwrite with defaults.
 
-Verify the LLM service can reach Azure:
+Verify the LLM service config and credentials:
 
 ```bash
 node <repo>/llm/llm.mjs check --kb D:\kb\work
 ```
 
 For fully offline / stubbed integration tests, set `WEFT_LLM_STUB=1` in the environment;
-the service returns deterministic canned output and does not call Azure.
+the service returns deterministic canned output and does not call the provider.
 
 ## 7. Smoke test
 

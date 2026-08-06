@@ -11,6 +11,7 @@ import { resolveKbRoot } from './lib/config.mjs';
 const TASKS = [
   'check',
   'init-prompts',
+  'init-config',
   'summarize-source',
   'classify-page',
   'extract-entity',

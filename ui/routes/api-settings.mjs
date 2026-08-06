@@ -67,6 +67,15 @@ export function settingsRoutes({ jobs, registry }) {
       return json(res, 202, { job });
     }
 
+    // POST /api/settings/init-config — seed .kb/config/models.json from a
+    // provider template ({ provider: 'azure'|'openai', force?: boolean }).
+    if (req.method === 'POST' && url.pathname === '/api/settings/init-config') {
+      const body = JSON.parse(await readBody(req) || '{}');
+      const spec = llmJobSpec(kb, 'init-config', { provider: body.provider, force: body.force === true });
+      const job = jobs.enqueue(kb, spec);
+      return json(res, 202, { job });
+    }
+
     return null;
   };
 }
