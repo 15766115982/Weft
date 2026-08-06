@@ -55,8 +55,11 @@ test('O4 palette lists all routes and pages unfiltered', async ({ page }) => {
   for (const name of ['评审队列', '采集控制台', '上游检测', '来源管理', '治理控制台']) {
     expect(labels.some((l) => l.includes(name)), `palette has ${name}`).toBe(true);
   }
-  // candidate pages are listed without filtering
-  expect(labels.some((l) => l.includes('Alpha Topic')), 'candidate pages visible').toBe(true);
+  // candidate pages are reachable via the palette (filter: earlier flow tests
+  // may have approved the fixture candidate, so don't rely on unfiltered caps)
+  await list.locator('input').fill('Alpha');
+  const filtered = await list.locator('.row').allTextContents();
+  expect(filtered.some((l) => l.includes('Alpha Topic')), 'candidate pages visible').toBe(true);
 });
 
 test('O5 g-sequences navigate to every console', async ({ page }) => {

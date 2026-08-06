@@ -117,15 +117,15 @@ const input = inputIdx >= 0 ? JSON.parse(fs.readFileSync(args[inputIdx + 1], 'ut
 const output = outputIdx >= 0 ? args[outputIdx + 1] : path.join(os.tmpdir(), 'out.ndjson');
 fs.mkdirSync(path.dirname(output), { recursive: true });
 const level = input.level || 'quick';
+// all levels retrieve now (2026-08): the stub mirrors the real frame shapes,
+// citing a page that EXISTS in the fixture KB so citation links are clickable
 const lines = [
   JSON.stringify({ type: 'meta', level }),
-  ...(level === 'deep' || level === 'deep-research' ? [
-    JSON.stringify({ type: 'search', query: input.question, round: 1 }),
-    JSON.stringify({ type: 'read', page: 'wiki/sources/x.md', round: 1 }),
-  ] : []),
+  JSON.stringify({ type: 'search', query: input.question, round: 1 }),
+  JSON.stringify({ type: 'read', page: 'wiki/sources/jira-proj-1.md', round: 1 }),
   JSON.stringify({ type: 'chunk', text: 'hello ' }),
   JSON.stringify({ type: 'chunk', text: 'world' }),
-  JSON.stringify({ type: 'done', citations: ['wiki/sources/x.md'] }),
+  JSON.stringify({ type: 'done', citations: ['wiki/sources/jira-proj-1.md'] }),
 ];
 fs.writeFileSync(output, lines.join('\\n') + '\\n', 'utf8');
 console.log(JSON.stringify({ task: 'chat', output }));

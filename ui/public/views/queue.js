@@ -410,7 +410,14 @@ export async function render(view, params) {
 
   const target = params.get('path') || queue[0]?.path;
   if (target) {
-    await renderReview(content, target, () => { location.hash = '#/queue'; }, conflictsData, planData?.suppressed);
+    // onDone must remount even when the hash is already '#/queue' (the
+    // auto-selected first item never changes the hash, so hashchange never
+    // fires and the approved/rejected page used to stay on screen — PW-03).
+    const onDone = () => {
+      if (location.hash === '#/queue') window.dispatchEvent(new CustomEvent('ui:remount'));
+      else location.hash = '#/queue';
+    };
+    await renderReview(content, target, onDone, conflictsData, planData?.suppressed);
   } else {
     html(content, `<div class="empty-state"><div class="big">队列已清空 🎉</div>
       所有候选都处理完了。下次治理产生新候选时,这里会出现它们。</div>`);
