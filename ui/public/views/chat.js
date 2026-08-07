@@ -1,8 +1,9 @@
 // views/chat.js — Phase 4: page-level Q&A with quick / deep / deep-research.
 // Streaming NDJSON from the LLM service is pushed as SSE and rendered live.
-import { apiPost, getKb } from '../lib/api.js';
+import { api, apiPost, getKb } from '../lib/api.js';
 import { html, esc, el } from '../lib/render.js';
 import { icon } from '../lib/icons.js';
+import { renderMarkdown, setKnownPages } from '../lib/md.js';
 
 const LEVELS = [
   { key: 'quick', label: '快速', hint: '轻量检索(top 3)后回答,最快' },
@@ -17,6 +18,8 @@ const store = {
 const historyKey = () => `ui.chat-history.${getKb() || 'default'}`;
 
 export async function render(view, params) {
+  // resolve [[wikilinks]] in answers (title/slug → page path)
+  api('/api/tree').then(({ pages }) => setKnownPages(pages)).catch(() => {});
   const wrap = el('div', { class: 'chat' });
   view.append(wrap);
 
@@ -117,7 +120,8 @@ export async function render(view, params) {
         bubble.append(details);
       }
       const body = el('div', { class: 'md' });
-      html(body, marked.parse(m.text || '(无回答)'));
+      // shared renderer: [[wikilinks]] in answers become clickable ref chips
+      html(body, renderMarkdown(m.text || '(无回答)'));
       bubble.append(body);
       if (m.citations?.length) {
         const cites = el('div', { class: 'chat-citations' });

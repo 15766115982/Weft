@@ -124,7 +124,7 @@ const lines = [
   JSON.stringify({ type: 'search', query: input.question, round: 1 }),
   JSON.stringify({ type: 'read', page: 'wiki/sources/jira-proj-1.md', round: 1 }),
   JSON.stringify({ type: 'chunk', text: 'hello ' }),
-  JSON.stringify({ type: 'chunk', text: 'world' }),
+  JSON.stringify({ type: 'chunk', text: 'world — see [[Payment Gateway Requirements]]' }),
   JSON.stringify({ type: 'done', citations: ['wiki/sources/jira-proj-1.md'] }),
 ];
 fs.writeFileSync(output, lines.join('\\n') + '\\n', 'utf8');

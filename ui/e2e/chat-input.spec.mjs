@@ -22,6 +22,9 @@ test('P11 Enter sends: one POST, bubbles stream, citation link, input cleared + 
   await expect(page.locator('.chat-msg.user .bubble')).toHaveText('hello');
   const assistant = page.locator('.chat-msg.assistant').last();
   await expect(assistant).toContainText('hello world', { timeout: 10_000 });
+  // in-answer [[wikilinks]] resolve to clickable ref chips (title-indexed)
+  const ref = assistant.locator('.md a.ref');
+  await expect(ref).toContainText('Payment Gateway Requirements');
   const cite = assistant.locator('.chat-citations a');
   await expect(cite).toHaveCount(1);
   await expect(cite).toContainText('sources/jira-proj-1.md');

@@ -14,6 +14,12 @@ export function setKnownPages(pages) {
     knownByBase.set(base.toLowerCase(), p.path);
     const short = base.split('/').pop().toLowerCase();
     if (!knownByBase.has(short)) knownByBase.set(short, p.path);
+    // chat answers cite by page TITLE ([[Payment Gateway Timeout and Retry Policy]])
+    // — index titles too or those wikilinks render as dead chips (2026-08-07)
+    if (p.title) {
+      const t = String(p.title).toLowerCase();
+      if (!knownByBase.has(t)) knownByBase.set(t, p.path);
+    }
   }
 }
 
