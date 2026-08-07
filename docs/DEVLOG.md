@@ -1,5 +1,28 @@
 # Development Log
 
+## Settings SPA-ization + DOMPurify icon strip root cause (2026-08-08)
+
+Two user-visible defects, one surprising shared root:
+
+- **Icons rendered as bare dots.** Every `<path>`-based lucide icon (settings
+  gear, rail buttons, nav icons) lost its `d` attribute; only circles/rects/
+  polylines survived. Root cause: render.js's custom `ALLOWED_URI_REGEXP` was
+  missing the escaped dash — `[^a-z+.-:]` parses `.-:` as the range
+  U+002E–U+003A which **includes digits**, and DOMPurify 3.x URI-checks SVG
+  `d` attributes (values always start `M<digit>`), so the sanitizer stripped
+  them all. One-character fix (`\-`), PW-06 pins it in a real browser.
+- **Settings moved into the SPA** (`#/settings?sec=…`, deep-linkable) with a
+  left section rail: 模型 (provider/connection/auth/generation + connectivity
+  check), Prompts (master-detail list + inline editor), 知识库 (registered
+  KBs + switch), 外观 (light/dark/follow-system via a `ui:theme-pref` window
+  event; OS changes tracked live in auto mode), 关于 (portal info + shortcuts).
+  The standalone `views/settings.html` is now a redirect shim; `js/settings.mjs`
+  deleted. PW-04/O3 rewritten against the SPA route.
+
+Tests: UI node 100/101 (1 platform skip), Playwright 21/21.
+
+---
+
 ## Upstream detect perf round: light fields + multi-connector reports (2026-08-08)
 
 Portal upstream page analysis surfaced that detect was far heavier than its job:

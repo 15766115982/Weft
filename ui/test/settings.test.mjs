@@ -119,10 +119,9 @@ test('legacy admin routes are gone (open portal)', async () => {
   assert.equal((await get('/api/session')).status, 404);
 });
 
-test('settings page static asset is served with injected token', async () => {
+test('legacy settings.html shim redirects into the SPA route', async () => {
   const res = await get('/views/settings.html');
   assert.equal(res.status, 200);
   const html = await res.text();
-  assert.match(html, /设置|Settings/);
-  assert.match(html, /name="ui-token" content="[^%]/);
+  assert.match(html, /\/#\/settings/, 'shim points at the SPA settings route');
 });

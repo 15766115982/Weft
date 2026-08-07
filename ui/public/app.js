@@ -16,11 +16,13 @@ import { render as upstreamView } from './views/upstream.js';
 import { render as rawView } from './views/raw.js';
 
 import { render as chatView } from './views/chat.js';
+import { render as settingsView } from './views/settings.js';
 
 const ROUTES = {
   dashboard: dashboardView, browse: browseView, page: browseView,
   search: searchView, queue: queueView, inbox: queueView, acquire: acquireView, govern: governView,
   graph: graphView, upstream: upstreamView, raw: rawView, chat: chatView,
+  settings: settingsView,
 };
 let pageCache = { kb: null, pages: [] };
 let currentRoute = 'dashboard';
@@ -145,18 +147,30 @@ async function initHeader() {
   document.getElementById('sb-help').addEventListener('click', (e) => { e.preventDefault(); showShortcuts(); });
 }
 
-// Settings is a standalone page (not an SPA route) — carry the current KB over.
+// Settings lives in the SPA router (2026-08-08) — no page reload, KB context
+// is already in lib/api.js.
 function openSettings() {
-  const qs = getKb() ? `?kb=${encodeURIComponent(getKb())}` : '';
-  location.href = '/views/settings.html' + qs;
+  location.hash = '#/settings';
 }
 
-function applyTheme(dark) {
+function applyTheme(dark, pref) {
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-  localStorage.setItem('ui.theme', dark ? 'dark' : 'light');
+  if (pref === 'auto') localStorage.removeItem('ui.theme');
+  else localStorage.setItem('ui.theme', pref || (dark ? 'dark' : 'light'));
   html(document.getElementById('theme-toggle'), icon(dark ? 'sun' : 'moon', 16));
 }
 function toggleTheme() { applyTheme(document.documentElement.dataset.theme !== 'dark'); }
+
+// Settings view → frame events (decoupled via window events, kernel discipline):
+// theme preference (auto/light/dark) and the shortcuts overlay.
+window.addEventListener('ui:theme-pref', (e) => {
+  const pref = e.detail;
+  applyTheme(pref === 'auto' ? matchMedia('(prefers-color-scheme: dark)').matches : pref === 'dark', pref);
+});
+window.addEventListener('ui:shortcuts', () => showShortcuts());
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (mq) => {
+  if (!localStorage.getItem('ui.theme')) applyTheme(mq.matches, 'auto'); // follow-system mode
+});
 
 async function refreshHeader() {
   try {

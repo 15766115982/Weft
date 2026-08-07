@@ -24,10 +24,11 @@ for (const route of ['queue', 'govern', 'raw', 'upstream', 'acquire']) {
 }
 
 test('O3 settings is an editable form: provider cards, field hints, prompts editor', async ({ page }) => {
-  await page.goto('/views/settings.html');
+  await page.goto('/#/settings');
   await expect(page.locator('#login-section')).toHaveCount(0);
-  // back link at the top, not the bottom
-  await expect(page.locator('.settings-back')).toBeVisible();
+  // section rail: five sections, LLM active by default
+  await expect(page.locator('.settings-nav-item')).toHaveCount(5);
+  await expect(page.locator('.settings-nav-item.on .t')).toHaveText('模型');
   // provider cards: pick OpenAI-compatible → model field appears, deployment hides
   await page.locator('.provider-card[data-provider="openai"]').click();
   await expect(page.locator('#wrap-model')).toBeVisible();
@@ -41,9 +42,12 @@ test('O3 settings is an editable form: provider cards, field hints, prompts edit
   await expect(page.locator('#save-bar')).toBeVisible();
   await page.locator('#btn-save').click();
   await expect(page.locator('#save-note')).toContainText('已保存');
-  // prompts accordion expands into an inline editor
-  await page.locator('.prompt-item summary').first().click();
+  // prompts master-detail opens an inline editor
+  await page.goto('/#/settings?sec=prompts');
   await expect(page.locator('.prompt-editor').first()).toBeVisible();
+  // legacy standalone page redirects into the SPA route
+  await page.goto('/views/settings.html');
+  await expect(page).toHaveURL(/#\/settings/);
 });
 
 test('O4 palette lists all routes and pages unfiltered', async ({ page }) => {
