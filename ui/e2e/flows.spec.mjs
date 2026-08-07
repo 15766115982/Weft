@@ -44,8 +44,8 @@ test('PW-03 review flow: approve with reason drains the queue', async ({ page })
   await expect(page.locator('#view')).toContainText('approved');
 });
 
-test('PW-04 settings: edit → save → persists across reload', async ({ page }) => {
-  await page.goto('/views/settings.html');
+test('PW-04 settings: edit → save → persists across reload (SPA route)', async ({ page }) => {
+  await page.goto('/#/settings');
   await page.locator('.provider-card[data-provider="openai"]').click();
   await page.locator('#f-model').fill('kimi-k2-pw04');
   await expect(page.locator('#save-bar')).toBeVisible();
@@ -53,10 +53,30 @@ test('PW-04 settings: edit → save → persists across reload', async ({ page }
   await expect(page.locator('#save-note')).toContainText('已保存');
   await page.reload();
   await expect(page.locator('#f-model')).toHaveValue('kimi-k2-pw04');
+  // settings nav deep-links into sections
+  await page.goto('/#/settings?sec=prompts');
+  await expect(page.locator('.settings-nav-item.on .t')).toHaveText('Prompts');
   // restore the fixture value so later tests are unaffected
+  await page.goto('/#/settings');
   await page.locator('#f-model').fill('kimi-k2-0711-preview');
   await page.locator('#btn-save').click();
   await expect(page.locator('#save-note')).toContainText('已保存');
+});
+
+test('PW-06 icons render: sanitizer keeps SVG path d (settings gear + rail + nav)', async ({ page }) => {
+  await page.goto('/#/browse');
+  // 2026-08-08 regression: a malformed ALLOWED_URI_REGEXP in render.js made
+  // DOMPurify strip every <path> d (values always start "M<digit>"), so
+  // icon-only buttons rendered as bare dots.
+  const gear = page.locator('#settings-btn svg path').first();
+  await expect(gear).toHaveAttribute('d', /./);
+  await expect(page.locator('#settings-btn svg')).toBeVisible();
+  // nav icons are path-based too (library, search, messageCircle...)
+  const navPathCount = await page.locator('#top nav svg path[d]').count();
+  expect(navPathCount).toBeGreaterThan(3);
+  // rail buttons (collapse / wiki / raw) keep their shapes
+  const railPaths = await page.locator('.rail-nav .icon-btn svg path[d], .rail-nav .icon-btn svg polyline[points], .rail-nav .icon-btn svg rect').count();
+  expect(railPaths).toBeGreaterThanOrEqual(3);
 });
 
 test('PW-05 upload flow: file lands in inbox and acquires into raw/', async ({ page }) => {

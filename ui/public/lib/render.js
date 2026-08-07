@@ -4,7 +4,11 @@
 // <a href="#/..."> — the sanitizer config keeps hash routing intact.
 
 const CONFIG = {
-  ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i,
+  // Canonical DOMPurify URI regexp — the dash in the negated class MUST stay
+  // escaped: `[^a-z+.-:]` parses `.-:` as the range U+002E–U+003A which
+  // swallows digits, and DOMPurify 3.x URI-checks SVG `d` attributes (always
+  // "M<digit>…"), so every <path> icon was silently stripped (2026-08-08).
+  ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
   ADD_ATTR: ['target'],
 };
 
