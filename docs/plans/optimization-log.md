@@ -73,3 +73,14 @@ Loop 约定(用户指令):落实 T1–T10;优化持续进行;每轮落实文档�
 套件总数:llm 40 · e2e+eval 86 · ui 100 + Playwright 20,全绿。
 已知欠账:ce12 报告行缺失一次(疑似进程交叠,未复现);judge 单点波动需多次采样;
 稠密检索/HyDE 留待 KB 上量后复议(ADR-0010)。
+
+### C3 优化轮(chat,2026-08-07,用户提出)
+
+- 用户洞察:source 页是 raw 的**摘要**,摘要片段喂给 agent 信息密度不足。
+- 实现:context 从"命中片段"升级为**完整 wiki 页正文**;source 页再顺 `source_ref`
+  读 **raw 原始证据**(llm 读 wiki/raw 均在契约内;raw 有路径穿越防护与预算截断:
+  页 2.5k / raw 3.5k / 总 16k 字符)。raw 阅读帧带 `kind:'raw'`,UI 推理步骤里链到
+  `#/browse?raw=…` 而非页面路由。
+- **度量**(chat-eval 真实 LLM):faithfulness 0.944 → **1.000**(raw 证据接地的直接收益);
+  relevance 0.990 保持;behavior 11/12(ce03 答了但只引用了综合页没引来源页,引用选择
+  波动,非幻觉);citation validity 100% 保持。

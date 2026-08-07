@@ -119,7 +119,7 @@ test('CM-06 retrieval limits per level (golden): quick=3, deep=5, deep-research=
     const counts = {};
     for (const level of ['quick', 'deep', 'deep-research']) {
       const frames = chat('retry payment order settlement reconciliation rate', level);
-      counts[level] = T(frames, 'read').length;
+      counts[level] = T(frames, 'read').filter((f) => f.kind !== 'raw').length;
     }
     assert.ok(counts.quick <= 3, `quick ≤3 (got ${counts.quick})`);
     assert.ok(counts.deep <= 5, `deep ≤5 (got ${counts.deep})`);

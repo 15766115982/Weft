@@ -111,6 +111,7 @@ export async function render(view, params) {
         for (const s of m.steps) {
           const line = el('div', { class: 'step' });
           if (s.type === 'search') line.textContent = `🔍 检索: ${s.query}`;
+          else if (s.type === 'read' && s.kind === 'raw') html(line, `📄 原始证据: <a href="#/browse?raw=${encodeURIComponent(s.page)}">${esc(s.page)}</a>`);
           else if (s.type === 'read') html(line, `📄 阅读: <a href="#/page?path=${encodeURIComponent(s.page)}">${esc(s.page)}</a>`);
           else if (s.type === 'error') line.textContent = `⚠ ${s.message}`;
           else line.textContent = `${s.type}: ${JSON.stringify(s)}`;
