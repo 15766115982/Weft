@@ -25,6 +25,10 @@ const ISSUE_FIELDS = [
   'components', 'assignee', 'reporter', 'created', 'updated', 'comment',
   'fixVersions',
 ];
+// detect() only classifies by key/summary/updated — pulling the full field
+// list (description + comments) per page is an order of magnitude more
+// payload for zero use.
+const DETECT_FIELDS = ['summary', 'updated'];
 const PAGE_SIZE = 50;
 const MAX_COMMENTS = 10; // most recent N, guards against oversized bodies
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -302,7 +306,7 @@ export async function getIssue(kbConfig, key, { fetchImpl } = {}) {
 /** JQL search with startAt/maxResults pagination (per-JQL cap = cfg.max).
  *  @returns {issues, total} — total is the server-reported hit count, so the
  *  caller can surface truncation instead of letting it look complete. */
-async function searchAll(cfg, jql, fetchImpl) {
+async function searchAll(cfg, jql, fetchImpl, { fields = ISSUE_FIELDS } = {}) {
   const issues = [];
   let startAt = 0;
   let total = null;
@@ -310,7 +314,7 @@ async function searchAll(cfg, jql, fetchImpl) {
     const want = Math.min(PAGE_SIZE, cfg.max - issues.length);
     if (want <= 0) break;
     const q = new URLSearchParams({
-      jql, startAt: String(startAt), maxResults: String(want), fields: ISSUE_FIELDS.join(','),
+      jql, startAt: String(startAt), maxResults: String(want), fields: fields.join(','),
     });
     const data = await jiraGet(cfg, `/rest/api/2/search?${q}`, fetchImpl);
     const batch = data.issues || [];
@@ -335,7 +339,7 @@ export async function detect(kbRoot, { kbConfig, jql, maxResults, fetchImpl } = 
   for (const scope of cfg.jqlList) {
     let res;
     try {
-      res = await searchAll(cfg, scope, fetchImpl);
+      res = await searchAll(cfg, scope, fetchImpl, { fields: DETECT_FIELDS });
     } catch (err) {
       if (err.authFailed) throw err;
       result.errors.push({ jql: scope, error: err.message });

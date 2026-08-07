@@ -119,6 +119,30 @@ test('detect: classifies inbox files as new/changed/unchanged and raw-only as re
   fs.rmSync(kbRoot, { recursive: true, force: true });
 });
 
+test('detect: mtime-only touch is unchanged (content-hash second check); legacy doc without hash falls back to changed', () => {
+  const { kbRoot, inbox } = makeKb();
+  fs.writeFileSync(path.join(inbox, 'pay.md'), '# Pay\n\nv1\n', 'utf8');
+  run(kbRoot, { inbox });
+
+  // touch: bump mtime, keep content → hash matches → unchanged (not a govern wave)
+  const f = path.join(inbox, 'pay.md');
+  const future = new Date(Date.now() + 60_000);
+  fs.utimesSync(f, future, future);
+  let d = detect(kbRoot, { inbox });
+  assert.equal(d.changed.length, 0, 'touch must not report changed');
+  assert.equal(d.unchanged.length, 1);
+
+  // legacy raw doc without content_hash: mtime differs → conservative changed
+  const rawDir = path.join(kbRoot, 'raw', 'local');
+  const rawFile = path.join(rawDir, fs.readdirSync(rawDir)[0]);
+  const noHash = fs.readFileSync(rawFile, 'utf8').replace(/^content_hash:.*\n/m, '');
+  fs.writeFileSync(rawFile, noHash, 'utf8');
+  d = detect(kbRoot, { inbox });
+  assert.equal(d.changed.length, 1, 'no stored hash → conservative changed');
+
+  fs.rmSync(kbRoot, { recursive: true, force: true });
+});
+
 test('CJK regression: CJK filename persists correctly (slugify keeps CJK)', () => {
   const { kbRoot, inbox } = makeKb();
   fs.writeFileSync(path.join(inbox, '支付需求.md'), '# 支付网关需求\n\n支持超时重试。\n', 'utf8');

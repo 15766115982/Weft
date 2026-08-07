@@ -34,21 +34,28 @@ export async function render(view) {
   async function loadReport() {
     try {
       const data = await api('/api/detect');
-      renderReport(data);
+      renderReports(data.reports || []);
     } catch (err) {
       status.textContent = `读取 detect 报告失败:${err.message}`;
     }
   }
 
-  function renderReport(data) {
+  function renderReports(reports) {
     reportBox.textContent = '';
-    if (!data || !data.detect) {
+    if (!reports.length) {
       reportBox.append(el('p', { class: 'dim' }, '还没有 detect 报告 — 点击下方按钮运行一次。'));
       return;
     }
+    const order = CONNECTORS.map((c) => c.id);
+    reports.sort((a, b) => order.indexOf(a.connector) - order.indexOf(b.connector));
+    for (const r of reports) reportBox.append(renderReport(r));
+  }
+
+  function renderReport(data) {
+    const box = el('div', { style: 'margin-bottom:16px' });
     const head = el('p', { class: 'dim', style: 'font-size:12px;margin:0 0 8px' });
     head.textContent = `报告来源:${esc(data.connector)} · 生成于 ${data.generated_at ? data.generated_at.slice(0, 19).replace('T', ' ') : '—'}`;
-    reportBox.append(head);
+    box.append(head);
 
     const grid = el('div', { class: 'pull-grid' });
     for (const b of BUCKETS) {
@@ -75,7 +82,7 @@ export async function render(view) {
       card.append(list);
       grid.append(card);
     }
-    reportBox.append(grid);
+    box.append(grid);
 
     const pullRow = el('div', { class: 'pull-actions', style: 'margin-top:10px' });
     const pullBtn = el('button', { class: 'primary' });
@@ -89,7 +96,8 @@ export async function render(view) {
       } catch (err) { pullNote.textContent = `失败:${err.message}`; }
     });
     pullRow.append(pullBtn, pullNote);
-    reportBox.append(pullRow);
+    box.append(pullRow);
+    return box;
   }
 
   function connectorCard(c) {
@@ -108,11 +116,10 @@ export async function render(view) {
       try {
         const { job } = await apiPost('/api/detect', { connector: c.id });
         note.textContent = `作业 ${job.id} 运行中…`;
-        const finished = await waitJob(job.id, { timeout: 120000 });
+        await waitJob(job.id, { timeout: 120000 });
         note.textContent = '完成,刷新报告…';
-        const summary = finished.result?.report ? JSON.parse(finished.result.report) : {};
         activeBox.textContent = '';
-        renderReport({ connector: c.id, generated_at: summary.generated_at, detect: summary.detect });
+        await loadReport(); // the CLI wrote the report — re-read the merged state
       } catch (err) {
         note.textContent = `失败:${err.message}`;
         activeBox.textContent = '';

@@ -900,7 +900,7 @@ export async function check(kbConfig, { fetchImpl } = {}) {
 /** CQL search with start/limit pagination (per-CQL cap = cfg.max).
  *  @returns {pages, total} — total is the server-reported hit count, so the
  *  caller can surface truncation instead of letting it look complete. */
-async function searchAll(cfg, cql, fetchImpl) {
+async function searchAll(cfg, cql, fetchImpl, { expand = EXPAND } = {}) {
   const pages = [];
   let start = 0;
   let total = null;
@@ -908,7 +908,7 @@ async function searchAll(cfg, cql, fetchImpl) {
     const want = Math.min(PAGE_SIZE, cfg.max - pages.length);
     if (want <= 0) break;
     const q = new URLSearchParams({
-      cql, start: String(start), limit: String(want), expand: EXPAND,
+      cql, start: String(start), limit: String(want), expand,
     });
     const data = await confGet(cfg, `/rest/api/content/search?${q}`, fetchImpl);
     const batch = data.results || [];
@@ -933,7 +933,9 @@ export async function detect(kbRoot, { kbConfig, cql, maxResults, fetchImpl } = 
   for (const scope of cfg.cqlList) {
     let res;
     try {
-      res = await searchAll(cfg, scope, fetchImpl);
+      // detect only needs id + version.when + title — body.storage (the full
+      // XHTML payload in EXPAND) would ride along for nothing.
+      res = await searchAll(cfg, scope, fetchImpl, { expand: 'version' });
     } catch (err) {
       if (err.authFailed) throw err;
       result.errors.push({ cql: scope, error: err.message });

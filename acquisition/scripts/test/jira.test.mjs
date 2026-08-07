@@ -277,6 +277,18 @@ test('detect: classifies issues as new/changed/unchanged/removed_upstream withou
   assert.equal(d.removed_upstream[0].source_id, 'PROJ-51');
 });
 
+test('detect: asks Jira for light fields only; pull keeps the full list', async (t) => {
+  const dkb = fs.mkdtempSync(path.join(os.tmpdir(), 'kb-jira-detect-fields-'));
+  t.after(() => fs.rmSync(dkb, { recursive: true, force: true }));
+  const { baseUrl, requests } = await mockJira(t, { 'project = PROJ': [makeIssue('PROJ-60')] });
+  await run(dkb, { kbConfig: kbConf(baseUrl) });
+  await detect(dkb, { kbConfig: kbConf(baseUrl) });
+  const searches = requests.filter((r) => r.path === '/rest/api/2/search');
+  assert.equal(searches.length, 2, 'one search per pull/detect');
+  assert.ok(searches[0].query.fields.includes('description'), 'pull keeps the full field list');
+  assert.equal(searches[1].query.fields, 'summary,updated', 'detect carries no description/comment payload');
+});
+
 test('unit: normalizeJiraDate / adfToText / issueToMarkdown edge cases', () => {
   assert.equal(normalizeJiraDate('2026-07-28T10:30:00.000+0800'), '2026-07-28T02:30:00.000Z');
   assert.equal(normalizeJiraDate('not a date'), 'not a date');

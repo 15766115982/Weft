@@ -1,5 +1,35 @@
 # Development Log
 
+## Upstream detect perf round: light fields + multi-connector reports (2026-08-08)
+
+Portal upstream page analysis surfaced that detect was far heavier than its job:
+
+- **Light detect queries.** Jira detect searched with the full pull field list
+  (`description`, `comment` and all); Confluence detect expanded `body.storage`
+  (whole XHTML pages) — detect only needs id + version timestamp + title.
+  `searchAll` in both connectors now takes a fields/expand override; detect
+  passes `summary,updated` / `expand=version`. Pull paths unchanged.
+- **Multi-connector detect reports (schema v2).** `upstream-detect.json` held a
+  single connector's report — a jira detect silently erased confluence's. The
+  same artifact path now stores `{ reports: { <connector>: report } }`;
+  `readDetectReports` upgrades legacy flat files on read and the next write
+  migrates them. Portal `GET /api/detect` returns a `reports` array and the
+  upstream view renders every connector side by side (contract §1 artifact path
+  unchanged — no contract/ADR impact).
+- **local detect accuracy.** Version was inbox mtime, so a `touch` read as
+  "changed" and would trigger a pointless govern wave. mtime mismatch now falls
+  to a content-hash second check against the stored `content_hash` (touch →
+  unchanged; missing legacy hash → conservative changed). mtime-equal files take
+  a fast path with no read at all.
+- **Head-read frontmatter.** `loadLocalBySource` parsed frontmatter from
+  full-file reads; it now reads the first 16 KB only.
+
+Tests: acquisition 75/75 (new: detect field/expand assertions, touch-vs-edit,
+schema v2 merge + legacy upgrade, head-read with huge body), UI 100/101
+(1 pre-existing platform skip), e2e 41/41.
+
+---
+
 ## Chat pipeline live-debug + quick-level retrieval (2026-08-07)
 
 First real LLM (Kimi coding endpoint) surfaced a chain of latent bugs; all fixed

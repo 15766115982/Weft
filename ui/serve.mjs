@@ -341,18 +341,23 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
           return json(res, 200, { decisions: readDecisions(kb, filters) });
         }
         // Phase 3: upstream detect report (read-only — .kb/acquire artifact).
+        // Schema v2 (2026-08-08): { reports: { <connector>: report } } — every
+        // connector's latest report coexists; legacy flat files upgrade on read.
         if (url.pathname === '/api/detect') {
           const reportPath = path.join(kb, '.kb', 'acquire', 'upstream-detect.json');
-          if (!fs.existsSync(reportPath)) return json(res, 200, { connector: null, generated_at: null, detect: null });
+          if (!fs.existsSync(reportPath)) return json(res, 200, { reports: [] });
           const stored = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
-          // The stored file is flat (new/changed/...); expose the same shape the
-          // acquisition CLI prints: { connector, generated_at, detect: {...} }.
-          const { ts, new: n, changed, unchanged, removed_upstream, errors } = stored;
-          return json(res, 200, {
-            connector: stored.connector,
-            generated_at: ts,
-            detect: { new: n, changed, unchanged, removed_upstream, error: errors },
-          });
+          const byConnector = stored && stored.reports && typeof stored.reports === 'object'
+            ? stored.reports
+            : (stored && stored.connector ? { [stored.connector]: stored } : {});
+          // Each stored report is flat (new/changed/...); expose the same shape
+          // the acquisition CLI prints: { connector, generated_at, detect: {...} }.
+          const reports = Object.values(byConnector).map((r) => ({
+            connector: r.connector,
+            generated_at: r.ts,
+            detect: { new: r.new || [], changed: r.changed || [], unchanged: r.unchanged || [], removed_upstream: r.removed_upstream || [], error: r.errors || [] },
+          }));
+          return json(res, 200, { reports });
         }
 
         // J9: recent feedback votes (the 👎 panel in search)

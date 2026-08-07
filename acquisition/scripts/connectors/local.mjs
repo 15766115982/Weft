@@ -85,6 +85,7 @@ export function detect(kbRoot, { inbox }) {
             version: String(fields.source_version || ''),
             title: String(fields.title || ''),
             source_id: String(fields.source_id || ''),
+            content_hash: String(fields.content_hash || ''),
           });
         }
       } catch { /* skip malformed */ }
@@ -102,18 +103,27 @@ export function detect(kbRoot, { inbox }) {
       const stem = path.basename(absPath, ext);
       const sourceId = sha256(relInbox).slice(0, 8);
       const existing = byInbox.get(relInbox);
+      // Fast path: mtime matches the stored version — no read, no hash.
+      if (existing && existing.version === version) {
+        result.unchanged.push({ id: sourceId, upstream_id: relInbox, version, title: existing.title, path: existing.path });
+        seen.add(relInbox);
+        continue;
+      }
+      const body = normalizeBody(converters[ext](fs.readFileSync(absPath, 'utf8'), { title: stem }));
       const item = {
         id: sourceId,
         upstream_id: relInbox,
         version,
-        title: extractTitle(normalizeBody(converters[ext](fs.readFileSync(absPath, 'utf8'), { title: stem })), stem),
+        title: extractTitle(body, stem),
       };
       if (!existing) {
         result.new.push(item);
-      } else if (existing.version !== version) {
-        result.changed.push({ ...item, path: existing.path, local_version: existing.version });
-      } else {
+      } else if (existing.content_hash && existing.content_hash === `sha256:${sha256(body)}`) {
+        // mtime moved but the normalized body is identical — a touch, not an
+        // edit. Reporting it changed would trigger a pointless govern wave.
         result.unchanged.push({ ...item, path: existing.path });
+      } else {
+        result.changed.push({ ...item, path: existing.path, local_version: existing.version });
       }
       seen.add(relInbox);
     } catch (err) {

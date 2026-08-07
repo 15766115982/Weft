@@ -277,18 +277,22 @@ test('detect endpoint: queued detect job writes .kb/acquire/upstream-detect.json
   const reportPath = path.join(kb, '.kb', 'acquire', 'upstream-detect.json');
   assert.ok(fs.existsSync(reportPath), 'detect wrote upstream-detect.json');
   const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
-  assert.equal(report.connector, 'local');
-  assert.ok(report.new || report.changed || report.unchanged || report.removed_upstream, 'report has at least one bucket');
-  assert.ok(report.unchanged.length >= 1, 'matching inbox file is unchanged');
-  assert.ok(report.removed_upstream.some((d) => d.source_id === 'orphan'), 'raw-only doc is removed_upstream');
+  const local = report.reports?.local;
+  assert.ok(local, 'schema v2: per-connector report under reports.local');
+  assert.equal(local.connector, 'local');
+  assert.ok(local.new || local.changed || local.unchanged || local.removed_upstream, 'report has at least one bucket');
+  assert.ok(local.unchanged.length >= 1, 'matching inbox file is unchanged');
+  assert.ok(local.removed_upstream.some((d) => d.source_id === 'orphan'), 'raw-only doc is removed_upstream');
   assert.ok(!fs.existsSync(path.join(kb, '.kb', 'acquire_runs.jsonl')), 'detect must not append to acquire_runs.jsonl');
 
   const getR = await get('/api/detect');
   assert.equal(getR.status, 200);
   const getData = await getR.json();
-  assert.equal(getData.connector, 'local');
-  assert.ok(getData.detect, 'GET /api/detect wraps buckets under detect');
-  assert.ok(getData.detect.unchanged.length >= 1, 'wrapped unchanged bucket present');
+  assert.ok(Array.isArray(getData.reports), 'GET /api/detect returns a reports array');
+  const getLocal = getData.reports.find((r) => r.connector === 'local');
+  assert.ok(getLocal, 'local report present in reports array');
+  assert.ok(getLocal.detect, 'GET /api/detect wraps buckets under detect');
+  assert.ok(getLocal.detect.unchanged.length >= 1, 'wrapped unchanged bucket present');
 });
 
 // Phase 1: /api/raw-asset (Gliffy sidecars) + /api/probe (shape probe)

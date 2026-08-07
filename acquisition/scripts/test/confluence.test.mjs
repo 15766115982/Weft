@@ -290,6 +290,18 @@ test('detect: classifies pages as new/changed/unchanged/removed_upstream without
   assert.equal(d.removed_upstream[0].source_id, '100002');
 });
 
+test('detect: asks Confluence for expand=version only; pull keeps full EXPAND', async (t) => {
+  const dkb = fs.mkdtempSync(path.join(os.tmpdir(), 'kb-conf-detect-expand-'));
+  t.after(() => fs.rmSync(dkb, { recursive: true, force: true }));
+  const { baseUrl, requests } = await mockConfluence(t, { [SPACE_CQL]: [makePage('100010')] });
+  await run(dkb, { kbConfig: kbConf(baseUrl) });
+  await detect(dkb, { kbConfig: kbConf(baseUrl) });
+  const searches = requests.filter((r) => r.path === '/rest/api/content/search');
+  assert.equal(searches.length, 2, 'one search per pull/detect');
+  assert.ok(searches[0].query.expand.includes('body.storage'), 'pull keeps the full expand list');
+  assert.equal(searches[1].query.expand, 'version', 'detect carries no body.storage payload');
+});
+
 test('unit: normalizeConfluenceDate / storageToMarkdown / pageToMarkdown edge cases', () => {
   assert.equal(normalizeConfluenceDate('2026-07-28T10:30:00.000+08:00'), '2026-07-28T02:30:00.000Z');
   assert.equal(normalizeConfluenceDate('2026-07-28T10:30:00.000+0800'), '2026-07-28T02:30:00.000Z');
