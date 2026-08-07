@@ -171,7 +171,9 @@ test('chat writes NDJSON stream (quick: light retrieval + answer)', async () => 
   await withMock(mockFetchStream(sseChunks('hello world')), () => runTask('chat', { kbRoot: kb, input: { question: 'hello', level: 'quick' }, outputPath: out }));
   const lines = slurpLines(out);
   assert.strictEqual(lines[0].type, 'meta');
-  assert.ok(lines.some((l) => l.type === 'chunk' && l.text === 'h'));
+  // R3 zero-hit gate: a KB with no index produces the fixed grounded refusal
+  // instead of an LLM call — the stream still terminates with done.
+  assert.ok(lines.some((l) => l.type === 'chunk' && l.text.length > 0));
   assert.strictEqual(lines.at(-1).type, 'done');
   delete process.env.WEFT_TEST_KEY;
 });

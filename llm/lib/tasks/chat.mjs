@@ -42,6 +42,17 @@ export async function run({ kbRoot, input, outputPath }) {
   }
 
   let answer = '';
+  // R3 (CRAG-style quality gate): zero hits means no LLM call at all — a fixed,
+  // honest refusal costs nothing and can never hallucinate.
+  if (!hits.length) {
+    answer = '这座知识库里没有与该问题相关的内容。可以换个问法,或先采集/治理相关文档。';
+    writer.write({ type: 'chunk', text: answer });
+    writer.write({ type: 'done', citations: [] });
+    writer.end();
+    await writer.finish();
+    return { level, tokens_in: 0, tokens_out: 0, refused: true };
+  }
+
   try {
     const res = await runPrompt(kbRoot, 'chat', { question, context }, {
       stream: true,
