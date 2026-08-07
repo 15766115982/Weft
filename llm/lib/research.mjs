@@ -9,7 +9,6 @@ const KB_SEARCH = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '..', '..', 'retrieval', 'scripts', 'kb_search.mjs',
 );
-
 function runKbSearch(kbRoot, args) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [KB_SEARCH, ...args, '--kb', kbRoot], { shell: false });
@@ -76,18 +75,53 @@ export async function searchWithFallback(kbRoot, query, { limit = 10 } = {}) {
 
   const ts = terms(stripped || query);
   if (!ts.length) return first;
-  const hits = new Map(); // page -> { page, title, snippet, n }
-  for (const t of ts) {
-    const r = await searchPages(kbRoot, t, { limit });
-    for (const h of r?.preview || []) {
-      const e = hits.get(h.page) || { ...h, n: 0 };
-      e.n += 1;
-      hits.set(h.page, e);
-    }
-  }
-  const merged = [...hits.values()].sort((a, b) => b.n - a.n).slice(0, limit);
+  const lanes = [];
+  for (const t of ts) lanes.push((await searchPages(kbRoot, t, { limit }))?.preview || []);
+  const merged = rrfMerge(lanes, limit);
   if (!merged.length) return first;
   return { query, total: merged.length, preview: merged, relaxed: true, relaxed_terms: ts };
+}
+
+/** Reciprocal Rank Fusion over multiple ranked lists (ADR-0010). */
+export function rrfMerge(lists, limit = 10, k = 60) {
+  const scores = new Map(); // page -> { hit, score }
+  for (const list of lists) {
+    (list || []).forEach((hit, rank) => {
+      const e = scores.get(hit.page) || { hit, score: 0 };
+      e.score += 1 / (k + rank + 1);
+      scores.set(hit.page, e);
+    });
+  }
+  return [...scores.values()].sort((a, b) => b.score - a.score).slice(0, limit).map((e) => e.hit);
+}
+
+/**
+ * searchSmart (ADR-0010 R1): fallback first; when hits are scarce, one LLM call
+ * rewrites the question into 2-3 keyword queries (bilingual synonyms), each is
+ * searched, and every lane — direct, stripped, per-term, rewrite variants — is
+ * fused with RRF. Degrades gracefully to the fallback result when no model
+ * config exists or the rewrite fails.
+ */
+export async function searchSmart(kbRoot, question, { limit = 10, minHits = 2, rewrite } = {}) {
+  const direct = await searchWithFallback(kbRoot, question, { limit });
+  if ((direct?.total ?? 0) >= minHits) return { ...direct, via: direct.relaxed ? 'fallback' : 'direct' };
+
+  let variants = [];
+  if (rewrite) {
+    try {
+      const { data } = await rewrite(question);
+      variants = (data?.queries || []).map((q) => String(q).trim()).filter((q) => q && q !== question).slice(0, 3);
+    } catch { variants = []; }
+  }
+  if (!variants.length) return { ...direct, via: direct.relaxed ? 'fallback' : 'direct' };
+
+  const lanes = [direct?.preview || []];
+  for (const v of variants) {
+    lanes.push((await searchWithFallback(kbRoot, v, { limit }))?.preview || []);
+  }
+  const merged = rrfMerge(lanes, limit);
+  if (!merged.length) return { ...direct, via: 'rewrite-empty' };
+  return { query: question, total: merged.length, preview: merged, relaxed: true, via: 'rewrite', variants };
 }
 
 export async function readPage(kbRoot, pagePath) {

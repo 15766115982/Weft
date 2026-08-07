@@ -11,7 +11,13 @@ import path from 'node:path';
 import {
   SCRIPTS, REPO, FIXTURES, sourcePageFor, runCli, copyInbox, makeScratchKb, acquire, govern, applyAllSources, rawRelFor,
 } from '../helpers/kb.mjs';
-import { searchWithFallback } from '../../llm/lib/research.mjs';
+import { searchSmart } from '../../llm/lib/research.mjs';
+import { runJsonPrompt } from '../../llm/lib/runner.mjs';
+
+// Optional donor config enables the LLM query-rewrite lane (ADR-0010) so the
+// conversational category measures the full product path, not just fallback.
+const DONOR = process.env.WEFT_EVAL_CONFIG_KB;
+const HAS_DONOR_CONFIG = !!(DONOR && fs.existsSync(path.join(DONOR, '.kb', 'config', 'models.json')));
 
 const QUERIES = JSON.parse(fs.readFileSync(path.join(REPO, 'tests', 'eval', 'golden', 'queries.json'), 'utf8'));
 const HIT5_THRESHOLD = 0.85;
@@ -48,6 +54,10 @@ before(() => {
     '--sources', [rawRelFor('reconciliation.md'), rawRelFor('支付对账流程.md')].join(','), '--tags', 'reconciliation,operations'],
     'Daily reconciliation compares settlement files with the ledger; discrepancies follow a two-business-day SLA.\n');
   govern(kb, ['rebuild-index']);
+  if (DONOR && fs.existsSync(path.join(DONOR, '.kb', 'config', 'models.json'))) {
+    fs.mkdirSync(path.join(kb, '.kb', 'config'), { recursive: true });
+    fs.copyFileSync(path.join(DONOR, '.kb', 'config', 'models.json'), path.join(kb, '.kb', 'config', 'models.json'));
+  }
 });
 
 after(() => {
@@ -106,9 +116,13 @@ test('retrieval effectiveness: golden query set', async (t) => {
       const expectPages = (q.expect || []).map(pageOf);
       let preview, routed, candidatesFile;
       if (q.via === 'fallback') {
-        const res = await searchWithFallback(kb, q.q, { limit: 10 });
+        const res = await searchSmart(kb, q.q, {
+          limit: 10,
+          rewrite: (question) => runJsonPrompt(kb, 'query-rewrite', { question }),
+        });
         preview = (res.preview || []).map((c) => c.page);
-        routed = res.relaxed ? `fallback(${res.relaxed_query || (res.relaxed_terms || []).join('|')})` : 'direct';
+        routed = res.via === 'rewrite' ? `rewrite(${(res.variants || []).join('|')})`
+          : res.relaxed ? `fallback(${res.relaxed_query || (res.relaxed_terms || []).join('|')})` : 'direct';
         candidatesFile = null;
       } else {
         const res = runCli(SCRIPTS.search, ['search', q.q, '--kb', kb]);
@@ -128,7 +142,7 @@ test('retrieval effectiveness: golden query set', async (t) => {
           assert.equal(preview.length, 0, `negative query must return nothing, got ${JSON.stringify(preview)}`);
           return;
         }
-        if (q.knownMiss) {
+        if (q.knownMiss || (q.knownMissWithoutRewrite && !HAS_DONOR_CONFIG)) {
           // Documented baseline: misses today, and the test FAILS LOUDLY the day
           // query rewriting makes it hit — so the dataset gets re-annotated.
           assert.ok(firstRank < 0,

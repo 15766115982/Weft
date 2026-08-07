@@ -4,8 +4,8 @@
 //   deep          top-5 snippet grounding, single LLM call
 //   deep-research multi-round search→read loop with full reasoning trace
 import { createNdjsonWriter } from '../stream.mjs';
-import { runPrompt } from '../runner.mjs';
-import { searchWithFallback } from '../research.mjs';
+import { runPrompt, runJsonPrompt } from '../runner.mjs';
+import { searchSmart } from '../research.mjs';
 
 const LEVEL_LIMIT = { quick: 3, deep: 5, 'deep-research': 8 };
 
@@ -21,7 +21,10 @@ export async function run({ kbRoot, input, outputPath }) {
   try {
     const limit = LEVEL_LIMIT[level] || LEVEL_LIMIT.quick;
     writer.write({ type: 'search', query: question, round: 1 });
-    const result = await searchWithFallback(kbRoot, question, { limit });
+    const result = await searchSmart(kbRoot, question, {
+      limit,
+      rewrite: (q) => runJsonPrompt(kbRoot, 'query-rewrite', { question: q }),
+    });
     const previews = Array.isArray(result?.preview) ? result.preview : [];
     const parts = [];
     for (const hit of previews.slice(0, limit)) {

@@ -211,6 +211,11 @@ function stubFor(promptName, vars) {
         reasoning: 'Stub mode reports no conflict.',
         contradicting_pages: [],
       });
+    case 'query-rewrite': {
+      // deterministic variants: the question itself plus a term-split variant
+      const words = String(vars?.question || '').split(/\s+/).filter(Boolean);
+      return JSON.stringify({ queries: [vars?.question || '', words.slice(0, 3).join(' ')].filter(Boolean) });
+    }
     case 'chat': {
       // cite the first context page so citation-resolution tests have a target
       const first = String(vars?.context || '').match(/^## (.+)$/m)?.[1];

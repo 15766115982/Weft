@@ -30,7 +30,7 @@
   { "id": "q28", "q": "saga compensation", "category": "exact", "expect": ["payment-compensation.md", "topic:payment-safety"] },
 
   { "id": "q30", "q": "重试几次之后不行怎么办?", "category": "conversational", "via": "fallback", "expect": ["faq-retry.md"], "nice": ["订单超时关闭.md"], "note": "stopword-heavy CJK question" },
-  { "id": "q31", "q": "钱会被扣两次吗?", "category": "conversational", "via": "fallback", "expect": ["faq-retry.md", "idempotency-design.md"], "nice": ["topic:payment-safety"], "knownMiss": true, "note": "BASELINE: no keyword anchor (钱/扣两次 absent from summaries) — the query-rewriting target; must flip to a hit when T8 lands" },
+  { "id": "q31", "q": "钱会被扣两次吗?", "category": "conversational", "via": "fallback", "expect": ["faq-retry.md", "idempotency-design.md"], "nice": ["topic:payment-safety"], "knownMissWithoutRewrite": true, "note": "no keyword anchor: hits only via the LLM rewrite lane (ADR-0010); baseline miss when no donor config" },
   { "id": "q32", "q": "对账超时是什么原因?", "category": "conversational", "via": "fallback", "expect": ["incident-settlement-delay.md"] },
   { "id": "q33", "q": "retry 策略是怎么设计的?", "category": "conversational", "via": "fallback", "expect": ["payment-timeout-retry.md"], "nice": ["topic:retry-resilience"] },
   { "id": "q34", "q": "幂等键有什么用?", "category": "conversational", "via": "fallback", "expect": ["faq-retry.md"], "nice": ["idempotency-design.md"], "note": "幂等 as CJK exists only in the CJK doc" },
