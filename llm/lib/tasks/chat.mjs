@@ -21,9 +21,13 @@ export async function run({ kbRoot, input, outputPath }) {
   try {
     const limit = LEVEL_LIMIT[level] || LEVEL_LIMIT.quick;
     writer.write({ type: 'search', query: question, round: 1 });
+    // quick stays single-call cheap; deep / deep-research add a listwise
+    // rerank over the fused pool (ADR-0010 R2)
+    const isDeep = level !== 'quick';
     const result = await searchSmart(kbRoot, question, {
       limit,
       rewrite: (q) => runJsonPrompt(kbRoot, 'query-rewrite', { question: q }),
+      rerank: isDeep ? (q, candidates) => runJsonPrompt(kbRoot, 'rerank', { question: q, candidates }) : undefined,
     });
     const previews = Array.isArray(result?.preview) ? result.preview : [];
     const parts = [];

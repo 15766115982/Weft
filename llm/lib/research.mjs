@@ -102,26 +102,49 @@ export function rrfMerge(lists, limit = 10, k = 60) {
  * fused with RRF. Degrades gracefully to the fallback result when no model
  * config exists or the rewrite fails.
  */
-export async function searchSmart(kbRoot, question, { limit = 10, minHits = 2, rewrite } = {}) {
-  const direct = await searchWithFallback(kbRoot, question, { limit });
-  if ((direct?.total ?? 0) >= minHits) return { ...direct, via: direct.relaxed ? 'fallback' : 'direct' };
+export async function searchSmart(kbRoot, question, { limit = 10, minHits = 2, rewrite, rerank, rerankPool = 20 } = {}) {
+  const direct = await searchWithFallback(kbRoot, question, { limit: rerank ? rerankPool : limit });
+  let result;
+  if ((direct?.total ?? 0) >= minHits) {
+    result = { ...direct, via: direct.relaxed ? 'fallback' : 'direct' };
+  } else {
+    let variants = [];
+    if (rewrite) {
+      try {
+        const { data } = await rewrite(question);
+        variants = (data?.queries || []).map((q) => String(q).trim()).filter((q) => q && q !== question).slice(0, 3);
+      } catch { variants = []; }
+    }
+    if (!variants.length) {
+      result = { ...direct, via: direct.relaxed ? 'fallback' : 'direct' };
+    } else {
+      const lanes = [direct?.preview || []];
+      for (const v of variants) {
+        lanes.push((await searchWithFallback(kbRoot, v, { limit: rerank ? rerankPool : limit }))?.preview || []);
+      }
+      const merged = rrfMerge(lanes, rerank ? rerankPool : limit);
+      result = merged.length
+        ? { query: question, total: merged.length, preview: merged, relaxed: true, via: 'rewrite', variants }
+        : { ...direct, via: 'rewrite-empty' };
+    }
+  }
 
-  let variants = [];
-  if (rewrite) {
+  // R2: optional listwise LLM rerank over the fused pool → final top-k.
+  if (rerank && (result.preview || []).length > limit) {
+    const pool = result.preview.slice(0, rerankPool);
     try {
-      const { data } = await rewrite(question);
-      variants = (data?.queries || []).map((q) => String(q).trim()).filter((q) => q && q !== question).slice(0, 3);
-    } catch { variants = []; }
+      const candidates = pool.map((h, i) => `[${i}] ${h.title || h.page}\n${(h.snippet || '').slice(0, 400)}`).join('\n\n');
+      const { data } = await rerank(question, candidates);
+      const order = (data?.ranking || []).filter((i) => Number.isInteger(i) && i >= 0 && i < pool.length);
+      if (order.length) {
+        const seen = new Set(order);
+        const reranked = [...order.map((i) => pool[i]), ...pool.filter((_, i) => !seen.has(i))];
+        result = { ...result, preview: reranked.slice(0, limit), reranked: true };
+      }
+    } catch { /* rerank failure keeps the fused order */ }
   }
-  if (!variants.length) return { ...direct, via: direct.relaxed ? 'fallback' : 'direct' };
-
-  const lanes = [direct?.preview || []];
-  for (const v of variants) {
-    lanes.push((await searchWithFallback(kbRoot, v, { limit }))?.preview || []);
-  }
-  const merged = rrfMerge(lanes, limit);
-  if (!merged.length) return { ...direct, via: 'rewrite-empty' };
-  return { query: question, total: merged.length, preview: merged, relaxed: true, via: 'rewrite', variants };
+  if ((result.preview || []).length > limit) result = { ...result, preview: result.preview.slice(0, limit), total: limit };
+  return result;
 }
 
 export async function readPage(kbRoot, pagePath) {

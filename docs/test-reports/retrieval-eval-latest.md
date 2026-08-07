@@ -1,9 +1,9 @@
 # Retrieval Evaluation Report
 
-Date: 2026-08-07T01:47:06.597Z · golden set: 44 queries (41 scored + 3 negative)
+Date: 2026-08-07T01:49:21.611Z · golden set: 44 queries (41 scored + 3 negative)
 
-**Hit@1 = 0.707 · Hit@5 = 1.000 (gate ≥0.85, non-conversational 1.000) · MRR = 0.848**
-**conversational (fallback path, tracked, not gated): Hit@5 = 1.000 (10 queries)**
+**Hit@1 = 0.683 · Hit@5 = 0.976 (gate ≥0.85, non-conversational 1.000) · MRR = 0.823**
+**conversational (fallback path, tracked, not gated): Hit@5 = 0.900 (10 queries)**
 
 ## per-category
 
@@ -16,7 +16,7 @@ Date: 2026-08-07T01:47:06.597Z · golden set: 44 queries (41 scored + 3 negative
 | cjk-trigram | 4 | 4 | 1.00 |
 | filter | 7 | 5 | 1.00 |
 | mixed-locale | 2 | 2 | 1.00 |
-| conversational | 10 | 8 | 1.00 |
+| conversational | 10 | 7 | 0.90 |
 
 candidate dilution: expansion per query: avg 1.5 candidates · max 3
 
@@ -51,11 +51,11 @@ candidate dilution: expansion per query: avg 1.5 candidates · max 3
 | q27 | exact | `jitter` | wiki/sources/local-96ea8dc3.md | 2 | sources/local-5570aff6.md<br>sources/local-96ea8dc3.md | latin:jitter | ✅ |
 | q28 | exact | `saga compensation` | wiki/sources/local-495e26f9.md<br>wiki/syntheses/payment-safety.md | 1 | syntheses/payment-safety.md<br>sources/local-495e26f9.md<br>syntheses/retry-resilience.md<br>sources/local-8f920c4c.md | latin:saga/compensation | ✅ |
 | q30 | conversational | `重试几次之后不行怎么办?` | wiki/sources/local-746b5bcf.md | 1 | sources/local-746b5bcf.md<br>sources/local-1e7c8215.md<br>syntheses/retry-resilience.md | fallback(重试|试几|几次|次之|之后|后不|不行) | ✅ |
-| q31 | conversational | `钱会被扣两次吗?` | wiki/sources/local-746b5bcf.md<br>wiki/sources/local-8f920c4c.md | 1 | sources/local-746b5bcf.md<br>syntheses/retry-resilience.md<br>sources/local-1e7c8215.md<br>syntheses/payment-safety.md<br>sources/local-8f920c4c.md | rewrite(钱扣两次 double charge|重复扣款 duplicate deduction|支付重复扣费 双重扣款) | ✅ |
+| q31 | conversational | `钱会被扣两次吗?` | wiki/sources/local-746b5bcf.md<br>wiki/sources/local-8f920c4c.md | MISS |  | direct (knownMiss baseline) | ✅ |
 | q32 | conversational | `对账超时是什么原因?` | wiki/sources/local-00f3e81b.md | 1 | sources/local-00f3e81b.md<br>sources/local-28247f39.md<br>sources/local-1e7c8215.md<br>syntheses/recon-ops.md<br>syntheses/retry-resilience.md | fallback(对账|账超|超时|原因) | ✅ |
 | q33 | conversational | `retry 策略是怎么设计的?` | wiki/sources/local-5a64d5fb.md | 2 | sources/local-5570aff6.md<br>sources/local-5a64d5fb.md<br>sources/local-96ea8dc3.md<br>sources/local-e39538e7.md<br>sources/local-1e7c8215.md | fallback(retry|策略) | ✅ |
-| q34 | conversational | `幂等键有什么用?` | wiki/sources/local-746b5bcf.md | 1 | sources/local-746b5bcf.md<br>sources/local-8f920c4c.md<br>syntheses/payment-safety.md<br>syntheses/retry-resilience.md<br>sources/local-1e7c8215.md | rewrite(幂等键 作用 idempotency key|idempotency key 用途|幂等键 使用场景) | ✅ |
-| q35 | conversational | `重试预算是什么意思?` | wiki/sources/local-746b5bcf.md | 1 | sources/local-746b5bcf.md<br>sources/local-1e7c8215.md<br>syntheses/retry-resilience.md<br>sources/local-5570aff6.md<br>sources/local-5a64d5fb.md | rewrite(重试预算 retry budget|重试预算 含义|retry budget 机制) | ✅ |
+| q34 | conversational | `幂等键有什么用?` | wiki/sources/local-746b5bcf.md | 1 | sources/local-746b5bcf.md | fallback(幂等|等键|键有|有什) | ✅ |
+| q35 | conversational | `重试预算是什么意思?` | wiki/sources/local-746b5bcf.md | 1 | sources/local-746b5bcf.md | fallback(重试预算) | ✅ |
 | q36 | conversational | `settlement 延迟了会影响什么?` | wiki/sources/local-00f3e81b.md | 1 | sources/local-00f3e81b.md<br>sources/local-63e14b9e.md<br>syntheses/recon-ops.md<br>sources/local-e39538e7.md<br>sources/local-28247f39.md | fallback(settlement|延迟|会影|影响|响什) | ✅ |
 | q37 | conversational | `什么时候会触发 RETRY_BUDGET_EXHAUSTED?` | wiki/sources/local-5a64d5fb.md<br>wiki/sources/local-746b5bcf.md | 1 | sources/local-746b5bcf.md<br>sources/local-e39538e7.md<br>sources/local-5570aff6.md<br>sources/local-5a64d5fb.md<br>syntheses/retry-resilience.md | fallback(时候|候会|会触|触发|RETRY_BUDGET_EXHAUSTED) | ✅ |
 | q38 | conversational | `对账窗口有多长?` | wiki/sources/local-00f3e81b.md | 1 | sources/local-00f3e81b.md<br>sources/local-28247f39.md<br>syntheses/recon-ops.md | fallback(对账|账窗|窗口|口有|有多|多长) | ✅ |

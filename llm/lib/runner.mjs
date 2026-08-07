@@ -216,6 +216,11 @@ function stubFor(promptName, vars) {
       const words = String(vars?.question || '').split(/\s+/).filter(Boolean);
       return JSON.stringify({ queries: [vars?.question || '', words.slice(0, 3).join(' ')].filter(Boolean) });
     }
+    case 'rerank': {
+      // identity ranking over however many [i] candidates the prompt carries
+      const n = (String(vars?.candidates || '').match(/^\[\d+\]/gm) || []).length;
+      return JSON.stringify({ ranking: Array.from({ length: n }, (_, i) => i) });
+    }
     case 'chat': {
       // cite the first context page so citation-resolution tests have a target
       const first = String(vars?.context || '').match(/^## (.+)$/m)?.[1];
