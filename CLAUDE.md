@@ -92,7 +92,7 @@ lives in no layer's code.
 | Service | Skill | CLI entry | Writes |
 |---|---|---|---|
 | acquisition | `kb-acquire` | `acquisition/scripts/acquire.mjs <local\|jira\|confluence>` | `raw/` (exclusive) |
-| governance | `kb-govern` | `governance/scripts/govern.mjs <plan\|apply-source\|apply-topic\|approve\|reject\|archive\|dismiss-conflict\|sweep\|merge-topic\|rebuild-index>` | `wiki/` (exclusive) |
+| governance | `kb-govern` | `governance/scripts/govern.mjs <plan\|apply-source\|apply-entity\|apply-concept\|apply-synthesis\|approve\|reject\|archive\|dismiss-conflict\|sweep\|merge-page\|rebuild-index\|decisions>` (`apply-topic`/`merge-topic` = legacy synthesis aliases) | `wiki/` (exclusive) |
 | retrieval | `kb-search` | `retrieval/scripts/kb_search.mjs <search\|read\|reindex>` | `.kb/index.sqlite` only |
 | UI portal | — | `ui/serve.mjs` (port 8322) | per contract §1 whitelist |
 | thin viewer | — | `governance/viewer/serve.mjs` (port 8321) | frontmatter `status` only |
@@ -105,14 +105,15 @@ no value (`--flag` / `--flag true` / `--flag false` only) and fail loudly otherw
 
 ```
 acquisition → raw/  (normalized markdown, 1:1 per source doc, identity quintuple in frontmatter)
-governance  → wiki/ (sources/ 1:1 summaries, topics/ 1:N synthesis, index.md, archive/)
+governance  → wiki/ (sources/ 1:1 summaries, entities|concepts|syntheses/ per ADR-0009 four page types, index.md, archive/)
 retrieval   → reads ONLY wiki/ pages with status: approved — candidate/archived are structurally invisible
 ```
 
 - **`raw/`**: exclusive write by acquisition; keeps only the latest pull (history is the KB's git).
 - **`wiki/`**: exclusive write by governance. `wiki/sources/` is 1:1 with `raw/` unless
-  adjudicated away (auto-dedup / loser-archive); `wiki/topics/` is cross-source fusion; `wiki/index.md`
-  is the retrieval entry contract and must be rebuilt after every governance run.
+  adjudicated away (auto-dedup / loser-archive); `wiki/syntheses/` (plus `entities/`, `concepts/`)
+  holds the cross-source fusion pages (the pre-ADR-0009 `wiki/topics/` layout is migrated away);
+  `wiki/index.md` is the retrieval entry contract and must be rebuilt after every governance run.
 - **`.kb/`**: derived artifacts (index, adjudication memory `.kb/govern/`, run logs). Fully
   rebuildable; gitignored.
 - **Secrets** go through env vars only (`JIRA_PAT`, `CONFLUENCE_PAT`, `KB_PATH`); `kb.json`
@@ -132,10 +133,10 @@ pages. Never flip a status by hand-editing a page; use the viewer/portal or the 
   source language. See `schema/governance.md` §1.
 - Conflict detection (ADR-0008) is structural over the whole KB: exact duplicate (hash) →
   auto-dedup; similar version → forced candidate; factual conflict → semantic check. Adjudication
-  is remembered in `.kb/govern/` (tombstones, dismissals). `apply-topic` force-candidates any
-  topic touching a flagged group.
-- Topic slug is the identity; re-applying a slug = update (union-merge `sources`, never silently
-  drop provenance). Merging topics is human-adjudicated and requires both pages approved.
+  is remembered in `.kb/govern/` (tombstones, dismissals). `apply-synthesis` force-candidates any
+  synthesis touching a flagged group.
+- Page slug is the identity; re-applying a slug = update (union-merge `sources`, never silently
+  drop provenance). Merging pages is human-adjudicated and requires both pages approved.
 
 ## Working conventions / gotchas
 
