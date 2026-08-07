@@ -107,7 +107,7 @@ function writeReport() {
 }
 const fmt = (v) => (typeof v === 'number' ? v.toFixed(2) : '—');
 
-test('chat quality: dataset through real LLM + judge', { timeout: 900_000 }, async (t) => {
+test('chat quality: dataset through real LLM + judge', { timeout: 1_800_000 }, async (t) => {
   if (!kb) {
     t.skip('no WEFT_EVAL_CONFIG_KB donor with .kb/config/models.json — L3 eval is opt-in');
     return;

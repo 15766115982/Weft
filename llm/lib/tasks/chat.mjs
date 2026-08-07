@@ -52,16 +52,38 @@ export async function run({ kbRoot, input, outputPath }) {
     writer.write({ type: 'error', message: err.message });
   }
 
-  // Citations = pages the ANSWER actually references (wikilink, title, or slug),
-  // not every page retrieval happened to read. A grounded refusal therefore
-  // yields [] even when the fallback surfaced weak pages.
-  const citations = hits.filter((h) => {
+  const cited = (text) => hits.filter((h) => {
     const slug = h.page.split('/').pop().replace(/\.md$/, '');
-    return answer.includes(`[[${h.title}]]`) || answer.includes(`[[${slug}]]`)
-      || (h.title && answer.includes(h.title)) || answer.includes(slug);
+    return text.includes(`[[${h.title}]]`) || text.includes(`[[${slug}]]`)
+      || (h.title && text.includes(h.title)) || text.includes(slug);
   }).map((h) => h.page);
 
-  writer.write({ type: 'done', citations });
+  let citations = cited(answer);
+
+  // C1 (ADR-0011): faithfulness guard for deep levels — when the answer drifts
+  // from the context (judge score < 0.8), regenerate once with a stricter
+  // instruction. quick keeps its single call.
+  if (level !== 'quick' && answer && hits.length) {
+    try {
+      const { data } = await runJsonPrompt(kbRoot, 'judge-faithfulness', {
+        context: context.slice(0, 6000), answer,
+      });
+      if (typeof data?.score === 'number' && data.score < 0.8) {
+        writer.write({ type: 'regenerate', reason: `faithfulness ${data.score}` });
+        const retry = await runPrompt(kbRoot, 'chat', {
+          question: `${question}\n\n(只使用上下文中明确支持的陈述回答;上下文没有就说明知识库未涵盖。)`,
+          context,
+        }, {
+          stream: true,
+          onDelta: (delta) => writer.write({ type: 'chunk', text: delta }),
+        });
+        answer = retry.content || answer;
+        citations = cited(answer);
+      }
+    } catch { /* guard failure keeps the first answer */ }
+  }
+
+  writer.write({ type: 'done', citations, ...(citations.length === 0 && answer && hits.length ? { uncited_reads: hits.map((h) => h.page) } : {}) });
   writer.end();
   await writer.finish();
 

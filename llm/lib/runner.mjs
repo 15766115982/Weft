@@ -221,6 +221,12 @@ function stubFor(promptName, vars) {
       const n = (String(vars?.candidates || '').match(/^\[\d+\]/gm) || []).length;
       return JSON.stringify({ ranking: Array.from({ length: n }, (_, i) => i) });
     }
+    case 'judge-faithfulness':
+      return JSON.stringify({ claims: [], score: 1 });
+    case 'judge-relevance':
+      return JSON.stringify({ score: 1, rationale: 'stub' });
+    case 'judge-context-precision':
+      return JSON.stringify({ per_page: [], score: 1, rationale: 'stub' });
     case 'chat': {
       // cite the first context page so citation-resolution tests have a target
       const first = String(vars?.context || '').match(/^## (.+)$/m)?.[1];
