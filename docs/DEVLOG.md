@@ -1,5 +1,28 @@
 # Development Log
 
+## ADR-0012 Phase 1+2 落地:agent/ 服务全量接替 llm/,治理图 agent 上线(2026-08-09)
+
+Phase 1(LLM 层移植,5 提交):agent/(Python)逐字继承 llm/ CLI 契约,12 任务 +
+complete + govern-run;传输用裸 httpx(Azure api-key/deployment URL 与 OpenAI
+Bearer/model 双通道自控);portal/jobrunner/judge/e2e 全部改道
+`python -m weft_agent`(解析链 WEFT_AGENT_PYTHON > agent/.venv > PATH;
+WEFT_LLM_CLI 保留为 UI 测试桩钩子)。踩坑:流式 httpx client 被 with 提前关闭
+(单测绿、真流式必挂,已修);Windows GBK 解码 kb_search UTF-8 输出(subprocess
+须显式 encoding='utf-8')。
+
+Phase 2(治理图 agent,3 提交):LangGraph 骨架 sweep → plan → 逐文档 →
+synthesize → rebuild-index;节点 subprocess 调 govern.mjs(写盘咽喉唯一),
+LLM 只做 govern-source-page/govern-synthesis/semantic-check 结构化判断;
+human-owned 清单(anomalies/errors/orphans/review_queue/dangling/conflicts)
+只报告不裁决(红线 6)。断点续跑用自研 JsonFileSaver(langgraph-checkpoint-sqlite
+依赖 sqlite-vec,无 win32-32bit 轮且属原生包,内网拦截风险)——interrupt_before
+跨进程 resume 实测通过。门户 executor 注册 langgraph(tail NDJSON → 事件契约),
+C 层 git 边界检查/F4 校验/自动提交全部沿用;governRunJob 默认执行器已切换。
+真实模型 live 冒烟(2 篇 fixture):摘要结构/tags/跨源合成(wikilink + 逐源引用)
+质量达标。回归:e2e+eval 90 绿,agent pytest 68 绿,UI 100 绿,三服务 204 绿。
+
+剩余 Phase 3:删除 claude executor/claudecli/llm//三个 SKILL.md,文档收官。
+
 ## ADR-0012 Phase 0 spike: Kimi 网关 + LangGraph 可行性验证通过(2026-08-08)
 
 Spike 脚本在 `D:\claude\tmp\agent-spike\`(venv, py3.11),配置复用
