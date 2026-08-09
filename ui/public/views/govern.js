@@ -93,8 +93,8 @@ export async function render(view) {
   const runPanel = el('div', { class: 'run-panel', hidden: '' });
   let currentRunId = null;
 
-  let repoRoot = null, graphFlow = '';
-  api('/api/govern-context').then((c) => { repoRoot = c.repoRoot; graphFlow = c.flow || ''; }).catch(() => {});
+  let graphFlow = '';
+  api('/api/govern-context').then((c) => { graphFlow = c.flow || ''; }).catch(() => {});
 
   // ADR-0012: the LangGraph agent owns the workflow (fixed skeleton); the
   // prompt box is the operator's BRIEF — injected into every LLM judgment

@@ -1,13 +1,10 @@
 // K evaluation service (block K): lightweight self-built judge — a single LLM
-// chat call, pointwise 0-3 with a fixed rubric, zero Python in the UI layer.
-// The judge registry mirrors executor.mjs (registerExecutor / startRun).
-// Backend (ADR-0012): the Python agent service's `complete` task (the retired
-// claude -p adapter was removed with the claude CLI dependency).
+// chat call, pointwise 0-3 with a fixed rubric. The judge registry mirrors
+// executor.mjs (registerExecutor / startRun). Backend (ADR-0012): the Python
+// agent service's `complete` task via agentTaskIO plumbing.
 import fs from 'node:fs';
-import path from 'node:path';
-import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { agentTaskSpawn } from './agentcli.mjs';
+import { agentTaskIO, agentTaskSpawn } from './agentcli.mjs';
 
 const registry = new Map();
 
@@ -26,31 +23,22 @@ export function judgeNames() {
 function agentChat(prompt, { kb, timeoutMs = 120000 } = {}) {
   return new Promise((resolve, reject) => {
     if (!kb) return reject(new Error('judge agent backend requires kb'));
-    const dir = path.join(kb, '.kb', 'ui', 'judge');
-    fs.mkdirSync(dir, { recursive: true });
-    const id = crypto.randomBytes(6).toString('hex');
-    const inputFile = path.join(dir, `in-${id}.json`);
-    const outputFile = path.join(dir, `out-${id}.json`);
-    fs.writeFileSync(inputFile, JSON.stringify({ prompt }), 'utf8');
+    const io = agentTaskIO(kb, 'judge', { prompt });
 
     const agent = agentTaskSpawn();
     const child = spawn(agent.command, [...agent.baseArgs, 'complete', '--kb', kb,
-      '--input-file', inputFile, '--output-file', outputFile],
+      '--input-file', io.inputFile, '--output-file', io.outputFile],
       { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
 
-    const cleanup = () => {
-      try { fs.unlinkSync(inputFile); } catch { /* ignore */ }
-      try { fs.unlinkSync(outputFile); } catch { /* ignore */ }
-    };
     let err = '';
-    const timer = setTimeout(() => { child.kill(); cleanup(); reject(new Error('judge timeout')); }, timeoutMs);
+    const timer = setTimeout(() => { child.kill(); io.cleanup(); reject(new Error('judge timeout')); }, timeoutMs);
     child.stderr.on('data', (c) => { err += c; });
-    child.on('error', (e) => { clearTimeout(timer); cleanup(); reject(e); });
+    child.on('error', (e) => { clearTimeout(timer); io.cleanup(); reject(e); });
     child.on('close', (code) => {
       clearTimeout(timer);
       let text = '';
-      try { text = JSON.parse(fs.readFileSync(outputFile, 'utf8')).text || ''; } catch { /* missing/malformed */ }
-      cleanup();
+      try { text = JSON.parse(fs.readFileSync(io.outputFile, 'utf8')).text || ''; } catch { /* missing/malformed */ }
+      io.cleanup();
       if (code !== 0 && !text.trim()) reject(new Error(`judge exited ${code}: ${err.slice(-300)}`));
       else resolve(text.trim());
     });

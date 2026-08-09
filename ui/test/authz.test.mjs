@@ -49,7 +49,7 @@ let kb, server, base, token, llmStubDir;
 before(async () => {
   kb = buildFixtureKb();
   llmStubDir = fs.mkdtempSync(path.join(os.tmpdir(), 'llm-stub-'));
-  process.env.WEFT_LLM_CLI = writeLlmStub(llmStubDir);
+  process.env.WEFT_AGENT_STUB = writeLlmStub(llmStubDir);
   server = createPortal({ kb, port: 0 });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
@@ -59,7 +59,7 @@ before(async () => {
 
 after(() => {
   server.close();
-  delete process.env.WEFT_LLM_CLI;
+  delete process.env.WEFT_AGENT_STUB;
   rmFixtureKb(kb);
   fs.rmSync(llmStubDir, { recursive: true, force: true });
 });

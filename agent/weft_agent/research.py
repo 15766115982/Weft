@@ -2,33 +2,17 @@
 The agent service must not import retrieval code directly (service decoupling);
 it spawns `kb_search.mjs` (plain node CLI) through the CLI contract.
 """
-import json
 import re
-import shutil
-import subprocess
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+from .nodecli import run_node_cli
+from .textutil import REPO_ROOT
+
 KB_SEARCH = REPO_ROOT / "retrieval" / "scripts" / "kb_search.mjs"
 
 
 def run_kb_search(kb_root: Path, args: list[str]) -> dict:
-    node = shutil.which("node")
-    if not node:
-        raise RuntimeError("node executable not found on PATH (retrieval CLI is plain node)")
-    proc = subprocess.run(
-        [node, str(KB_SEARCH), *args, "--kb", str(kb_root)],
-        capture_output=True, shell=False,
-        # kb_search prints UTF-8 JSON (CJK content) — never let the Windows
-        # locale codec (GBK) decode it.
-        encoding="utf-8", errors="replace",
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(f"kb_search failed (code {proc.returncode}): {proc.stderr or proc.stdout[:500]}")
-    try:
-        return json.loads(proc.stdout)
-    except json.JSONDecodeError:
-        return {"raw": proc.stdout}
+    return run_node_cli(KB_SEARCH, args, kb_root)
 
 
 def search_pages(kb_root: Path, query: str, limit: int = 10) -> dict:

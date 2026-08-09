@@ -5,7 +5,7 @@ Not a template prompt: the caller owns the full prompt text.
 import os
 
 from ..client import chat_completion
-from ..runner import load_model_config
+from ..runner import SYSTEM_MESSAGE, load_model_config
 
 
 def run(kb_root, input=None, output_path=None):
@@ -13,7 +13,7 @@ def run(kb_root, input=None, output_path=None):
     prompt = input.get("prompt") or ""
     if not prompt.strip():
         raise ValueError("complete requires input.prompt")
-    system = input.get("system") or "You are a helpful knowledge-base assistant. Follow the output format exactly."
+    system = input.get("system") or SYSTEM_MESSAGE
 
     if os.environ.get("WEFT_LLM_STUB"):
         return {"task": "complete", "text": "[]"}  # judge-shaped callers parse a JSON array

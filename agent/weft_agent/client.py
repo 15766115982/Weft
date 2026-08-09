@@ -25,6 +25,18 @@ DEFAULT_RATE_LIMIT_S = 0.2
 
 _last_call = 0.0
 
+# Shared client: a govern run makes ~200-300 sequential calls; per-call clients
+# would pay a fresh TCP+TLS handshake to the gateway each time. The graph is
+# sequential, so one pooled sync client per process is safe.
+_shared: httpx.Client | None = None
+
+
+def _shared_client() -> httpx.Client:
+    global _shared
+    if _shared is None or _shared.is_closed:
+        _shared = httpx.Client(timeout=httpx.Timeout(120.0, connect=30.0))
+    return _shared
+
 
 def rate_limit_sleep(seconds: float = DEFAULT_RATE_LIMIT_S) -> None:
     global _last_call
@@ -91,11 +103,10 @@ def chat_completion(config: dict, messages: list[dict], *, stream: bool = False,
                     temperature=None, max_tokens=None,
                     http: httpx.Client | None = None):
     """Non-stream: returns the parsed response JSON.
-    Stream: returns an iterator of delta-content strings (SSE parsed). The
-    iterator owns its client — it opens on first next() and closes at the end;
-    request errors surface on first iteration (the NDJSON tasks turn them into
-    error frames), unlike non-stream where they are retried here.
-    `http` is a test injection point; a fresh client is created otherwise.
+    Stream: returns an iterator of delta-content strings (SSE parsed) over the
+    shared client; request errors surface on first iteration (the NDJSON tasks
+    turn them into error frames), unlike non-stream where they are retried here.
+    `http` is a test injection point; the shared pooled client is used otherwise.
     """
     endpoint = build_endpoint(config)
     headers = {"Content-Type": "application/json", **get_auth_header(config)}
@@ -104,14 +115,13 @@ def chat_completion(config: dict, messages: list[dict], *, stream: bool = False,
     if stream:
         if http is not None:
             return _do(http, endpoint, headers, body, True)
-        client = httpx.Client(timeout=httpx.Timeout(120.0, connect=30.0))
+        client = _shared_client()
 
         def owned():
-            try:
-                rate_limit_sleep()
-                yield from _do(client, endpoint, headers, body, True)
-            finally:
-                client.close()
+            # stream errors surface on first iteration (the NDJSON tasks turn
+            # them into error frames), unlike non-stream where they are retried
+            rate_limit_sleep()
+            yield from _do(client, endpoint, headers, body, True)
 
         return owned()
 
@@ -119,10 +129,7 @@ def chat_completion(config: dict, messages: list[dict], *, stream: bool = False,
     for attempt in range(DEFAULT_RETRIES + 1):
         try:
             rate_limit_sleep()
-            if http is not None:
-                return _do(http, endpoint, headers, body, False)
-            with httpx.Client(timeout=httpx.Timeout(120.0, connect=30.0)) as client:
-                return _do(client, endpoint, headers, body, False)
+            return _do(http if http is not None else _shared_client(), endpoint, headers, body, False)
         except Exception as err:  # noqa: BLE001 — retry any transport/HTTP failure
             last_err = err
             if attempt < DEFAULT_RETRIES:

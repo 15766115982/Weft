@@ -1,10 +1,11 @@
 """Prompt file resolution and seeding (port of llm/lib/prompts.mjs).
 Defaults live in <repo>/templates/prompts/; editable per-KB copies in .kb/config/prompts/.
 """
+import functools
 import shutil
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+from .textutil import REPO_ROOT
 
 
 def default_prompts_dir() -> Path:
@@ -15,7 +16,9 @@ def kb_prompts_dir(kb_root: Path) -> Path:
     return kb_root / ".kb" / "config" / "prompts"
 
 
+@functools.lru_cache(maxsize=None)
 def resolve_prompt(kb_root: Path, name: str) -> str:
+    # cached per process (init-prompts clears after writing)
     kb_path = kb_prompts_dir(kb_root) / f"{name}.md"
     if kb_path.exists():
         return kb_path.read_text(encoding="utf-8")

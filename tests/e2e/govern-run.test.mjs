@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  GOVERNABLE, makeScratchKb, acquire, runLlm, rawRelFor, sourcePageFor, copyInbox,
+  GOVERNABLE, makeScratchKb, acquire, runLlm, rawRelFor, sourcePageFor, copyInbox, readNdjson,
 } from '../helpers/kb.mjs';
 
 const STUB_ENV = { WEFT_LLM_STUB: '1' };
@@ -22,10 +22,6 @@ before(() => {
   acquire(kb);
 });
 after(() => { fs.rmSync(kb, { recursive: true, force: true }); });
-
-function readNdjson(p) {
-  return fs.readFileSync(p, 'utf8').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l));
-}
 
 test('GR-01 govern-run (stub) governs all pending docs into source pages', () => {
   const out = path.join(kb, '.kb', 'gr01.ndjson');

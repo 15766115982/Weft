@@ -39,7 +39,7 @@ fs.writeFileSync(output, lines.join('\\n') + '\\n', 'utf8');
 console.log(JSON.stringify({ task: 'chat', output }));
 `, 'utf8');
 
-  process.env.WEFT_LLM_CLI = llmStub;
+  process.env.WEFT_AGENT_STUB = llmStub;
 
   server = createPortal({ kb, port: 0 });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -50,7 +50,7 @@ console.log(JSON.stringify({ task: 'chat', output }));
 
 after(() => {
   server.close();
-  delete process.env.WEFT_LLM_CLI;
+  delete process.env.WEFT_AGENT_STUB;
   fs.rmSync(kb, { recursive: true, force: true });
 });
 

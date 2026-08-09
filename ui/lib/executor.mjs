@@ -6,16 +6,13 @@
 //
 // Event contract:
 //   'event' { kind: 'init'|'assistant'|'result'|'stderr', text } — progressive
-//   'done'  { ok, text } — final; ok is parsed from the run's own result
-//           signal, NEVER from the process exit code.
+//   'done'  { ok, text } — final; ok comes from the run's own result signal
+//           (the agent task's stdout summary) gated on a clean exit.
 import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const repoFwd = () => REPO_ROOT.split(path.sep).join('/');
+import crypto from 'node:crypto';
 
 const registry = new Map();
 
@@ -38,8 +35,7 @@ export function startRun(name, spec) {
 // output file, mapping frames onto the executor event contract. All governance
 // writes happen inside the graph's govern.mjs subprocess calls — the portal's
 // C-layer git boundary check still applies on top.
-import { agentTaskSpawn } from './agentcli.mjs';
-import crypto from 'node:crypto';
+import { agentTaskIO, agentTaskSpawn } from './agentcli.mjs';
 
 function formatGovernFrame(ev) {
   switch (ev.type) {
@@ -72,16 +68,13 @@ function formatGovernFrame(ev) {
 
 function startLanggraphRun({ prompt, cwd }) {
   const events = new EventEmitter();
-  const dir = path.join(cwd, '.kb', 'ui');
-  fs.mkdirSync(dir, { recursive: true });
   const id = crypto.randomBytes(6).toString('hex');
-  const inputFile = path.join(dir, `govern-run-${id}.in.json`);
-  const outputFile = path.join(dir, `govern-run-${id}.out.ndjson`);
-  fs.writeFileSync(inputFile, JSON.stringify({ brief: String(prompt || ''), run_id: `portal-${id}` }), 'utf8');
+  const io = agentTaskIO(cwd, 'govern-run', { brief: String(prompt || ''), run_id: `portal-${id}` });
+  const outputFile = io.outputFile.replace(/\.json$/, '.ndjson');
 
   const agent = agentTaskSpawn();
   const child = spawn(agent.command, [...agent.baseArgs, 'govern-run', '--kb', cwd,
-    '--input-file', inputFile, '--output-file', outputFile],
+    '--input-file', io.inputFile, '--output-file', outputFile],
     { cwd: agent.cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
 
   let stdout = '', stderr = '';
@@ -91,36 +84,42 @@ function startLanggraphRun({ prompt, cwd }) {
     if (stderr.length > 32 * 1024) stderr = stderr.slice(-32 * 1024);
   });
 
-  // tail the NDJSON output file as the graph writes it
+  // tail the NDJSON output file as the graph writes it. Split the raw bytes
+  // on \n (0x0A never appears inside a UTF-8 multibyte sequence) and decode
+  // only complete lines — decoding each poll's delta would garble CJK split
+  // across the 300ms boundary.
   let offset = 0;
-  let carry = '';
+  let carry = Buffer.alloc(0);
   const tailFile = () => {
-    let text;
+    let buf;
     try {
       const fd = fs.openSync(outputFile, 'r');
       const size = fs.fstatSync(fd).size;
       if (size <= offset) { fs.closeSync(fd); return; }
-      const buf = Buffer.alloc(size - offset);
+      buf = Buffer.alloc(size - offset);
       fs.readSync(fd, buf, 0, buf.length, offset);
       fs.closeSync(fd);
       offset = size;
-      text = buf.toString('utf8');
     } catch { return; } // file not created yet
-    const lines = (carry + text).split('\n');
-    carry = lines.pop();
-    for (const line of lines) {
-      if (!line.trim()) continue;
+    const data = Buffer.concat([carry, buf]);
+    let start = 0;
+    for (let i = 0; i < data.length; i++) {
+      if (data[i] !== 0x0a) continue;
+      const line = data.toString('utf8', start, i).trim();
+      start = i + 1;
+      if (!line) continue;
       let ev;
       try { ev = JSON.parse(line); } catch { continue; }
       const mapped = formatGovernFrame(ev);
       if (mapped && mapped.text) events.emit('event', mapped);
     }
+    carry = data.subarray(start);
   };
   const timer = setInterval(tailFile, 300);
 
   const cleanup = () => {
     clearInterval(timer);
-    try { fs.unlinkSync(inputFile); } catch { /* ignore */ }
+    io.cleanup();
     try { fs.unlinkSync(outputFile); } catch { /* ignore */ }
   };
   child.on('error', (err) => { cleanup(); events.emit('done', { ok: false, text: `spawn failed: ${err.message}` }); });

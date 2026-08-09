@@ -30,4 +30,4 @@ def run(kb_root, input=None, output_path=None):
     writer.write({"type": "done", "citations": citations})
     writer.end()
 
-    return {"rounds": opts.get("maxRounds") or 3, "tokens_in": 0, "tokens_out": 0}
+    return {"rounds": opts.get("maxRounds") or 3}

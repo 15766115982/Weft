@@ -4,9 +4,8 @@
 import shutil
 from pathlib import Path
 
-from ..config import ensure_kb_config_dir, kb_config_path
-
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+from ..config import ensure_kb_config_dir, kb_config_path, load_models_config
+from ..textutil import REPO_ROOT
 
 TEMPLATES = {
     "azure": "models.example.json",
@@ -30,6 +29,7 @@ def run(kb_root, input=None, output_path=None):
         return {"ok": True, "status": "skipped", "path": str(dst), "provider": provider,
                 "hint": "models.json already exists; pass force to overwrite"}
     shutil.copyfile(src, dst)
+    load_models_config.cache_clear()
     return {
         "ok": True,
         "status": "overwritten" if input.get("force") is True else "created",

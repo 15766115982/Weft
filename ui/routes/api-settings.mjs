@@ -116,14 +116,14 @@ export function settingsRoutes({ jobs, registry }) {
       return json(res, 200, { file: name, saved: true });
     }
 
-    // POST /api/settings/check — run llm.mjs check.
+    // POST /api/settings/check — run the agent service's check task.
     if (req.method === 'POST' && url.pathname === '/api/settings/check') {
       const spec = llmJobSpec(kb, 'check');
       const job = jobs.enqueue(kb, spec);
       return json(res, 202, { job });
     }
 
-    // POST /api/settings/init-prompts — run llm.mjs init-prompts [--force].
+    // POST /api/settings/init-prompts — run the agent service's init-prompts task [--force].
     if (req.method === 'POST' && url.pathname === '/api/settings/init-prompts') {
       const body = JSON.parse(await readBody(req) || '{}');
       const spec = llmJobSpec(kb, 'init-prompts', { force: body.force === true });

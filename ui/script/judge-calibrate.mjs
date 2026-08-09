@@ -2,7 +2,7 @@
 // K4 judge calibration (manual run, zero deps): does the LLM judge agree with
 // the golden set? Rebuilds the deterministic fixture KB exactly like
 // tests/eval, runs every golden query through the REAL retrieval stack,
-// judges each top-5 with the judge backend (default claude), and reports
+// judges each top-5 with the judge backend (default agent), and reports
 // agreement metrics to docs/test-reports/judge-calibration-latest.md.
 //
 //   node ui/script/judge-calibrate.mjs [--backend agent] [--limit N]

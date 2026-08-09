@@ -1,6 +1,7 @@
 """KB location and model configuration resolution (port of llm/lib/config.mjs).
 Secrets are referenced by env-var name in config; actual values are read from env only.
 """
+import functools
 import json
 import os
 from pathlib import Path
@@ -20,7 +21,10 @@ def kb_config_path(kb_root: Path) -> Path:
     return kb_root / ".kb" / "config" / "models.json"
 
 
+@functools.lru_cache(maxsize=None)
 def load_models_config(kb_root: Path) -> dict | None:
+    # cached: a CLI process is one task, and a govern run calls this ~300×
+    # (init-config/init-prompts clear the cache after writing).
     p = kb_config_path(kb_root)
     if not p.exists():
         return None

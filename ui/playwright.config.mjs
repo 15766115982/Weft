@@ -39,8 +39,8 @@ export default defineConfig({
     locale: 'zh-CN',
   },
   webServer: [
-    serve(8422, { WEFT_LLM_CLI: E2E_STUB }),
-    serve(8424, { WEFT_LLM_CLI: E2E_FAIL_STUB }),
+    serve(8422, { WEFT_AGENT_STUB: E2E_STUB }),
+    serve(8424, { WEFT_AGENT_STUB: E2E_FAIL_STUB }),
   ],
   globalTeardown: './e2e/teardown.mjs',
 });

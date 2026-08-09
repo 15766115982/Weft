@@ -44,8 +44,6 @@ import {
 
 const UI_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(UI_DIR, 'public');
-// LLM task spawn (ADR-0012): the Python agent/ service via agentTaskSpawn();
-// tests override via the WEFT_LLM_CLI env var before calling createPortal().
 // async git: a 5s blocking execFileSync inside the request handler would stall
 // every other request on the event loop (review 2026-08-04)
 const execFileP = promisify(execFile);
@@ -368,8 +366,7 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
         // graph-constrained agent owns the workflow; the prompt box is the
         // operator's standing instruction injected into each LLM judgment node).
         if (url.pathname === '/api/govern-context') {
-          const repoRoot = path.resolve(UI_DIR, '..').split(path.sep).join('/');
-          return json(res, 200, { repoRoot, flow: 'sweep → plan → documents → synthesis → rebuild-index' });
+          return json(res, 200, { flow: 'sweep → plan → documents → synthesis → rebuild-index' });
         }
         if (url.pathname === '/api/diff') {
           // Same as the thin viewer: read-only git show; graceful null baseline
@@ -659,7 +656,7 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
           child.on('close', async (code) => {
             await streamDone;
             if (code !== 0 && !res.writableEnded) {
-              res.write(`event: error\ndata: ${JSON.stringify({ message: stderr.slice(-2000) || `llm.mjs exited ${code}` })}\n\n`);
+              res.write(`event: error\ndata: ${JSON.stringify({ message: stderr.slice(-2000) || `agent chat exited ${code}` })}\n\n`);
             }
             if (!res.writableEnded) {
               res.write('event: close\ndata: {}\n\n');

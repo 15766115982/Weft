@@ -1,9 +1,10 @@
 """chat — page-level Q&A, streaming NDJSON (port of llm/lib/tasks/chat.mjs).
 Every level retrieves (the product promise is "answers are KB-grounded"); they
 differ in depth:
-  quick         top-3 snippet grounding, single LLM call, fastest
-  deep          top-5 snippet grounding, single LLM call
-  deep-research multi-round search→read loop with full reasoning trace
+  quick         top-3 grounding, single LLM call, fastest
+  deep          top-5 grounding + listwise rerank, single LLM call
+  deep-research top-8 grounding + rerank (the multi-round loop lives in the
+                separate deep-research task)
 Context assembly (C3): full wiki page bodies; for source pages the raw evidence
 is followed via source_ref (agent reads of wiki/ + raw/ are in-contract).
 """
@@ -13,6 +14,7 @@ from pathlib import Path
 from ..research import search_smart
 from ..runner import run_json_prompt, run_prompt
 from ..stream import NdjsonWriter
+from ..textutil import strip_frontmatter
 
 LEVEL_LIMIT = {"quick": 3, "deep": 5, "deep-research": 8}
 PAGE_BUDGET = 2500    # per wiki page body
@@ -29,9 +31,8 @@ def read_page_full(kb_root: Path, page_rel: str):
     text = abs_path.read_text(encoding="utf-8")
     fm_end = text.find("\n---", 3) if text.startswith("---") else -1
     fm = text[3:fm_end] if fm_end > 0 else ""
-    body = (text[fm_end + 4:] if fm_end > 0 else text).strip()
     m = re.search(r'^source_ref:\s*"?([^"\n]+)"?', fm, flags=re.M)
-    return {"body": body, "source_ref": m.group(1).strip() if m else None}
+    return {"body": strip_frontmatter(text), "source_ref": m.group(1).strip() if m else None}
 
 
 def read_raw_evidence(kb_root: Path, source_ref: str | None) -> str:
@@ -40,9 +41,7 @@ def read_raw_evidence(kb_root: Path, source_ref: str | None) -> str:
     abs_path = kb_root / source_ref
     if not str(abs_path).startswith(str(kb_root / "raw")) or not abs_path.exists():
         return ""
-    text = abs_path.read_text(encoding="utf-8")
-    fm_end = text.find("\n---", 3) if text.startswith("---") else -1
-    return (text[fm_end + 4:] if fm_end > 0 else text).strip()
+    return strip_frontmatter(abs_path.read_text(encoding="utf-8"))
 
 
 def _cited(answer: str, hits: list[dict]) -> list[str]:
@@ -108,7 +107,7 @@ def run(kb_root, input=None, output_path=None):
         writer.write({"type": "chunk", "text": REFUSAL})
         writer.write({"type": "done", "citations": []})
         writer.end()
-        return {"level": level, "tokens_in": 0, "tokens_out": 0, "refused": True}
+        return {"level": level, "refused": True}
 
     try:
         res = run_prompt(kb_root, "chat", {"question": question, "context": context},
@@ -144,4 +143,4 @@ def run(kb_root, input=None, output_path=None):
     writer.write(done)
     writer.end()
 
-    return {"level": level, "tokens_in": 0, "tokens_out": 0}
+    return {"level": level}

@@ -29,6 +29,7 @@ from langgraph.graph import END, START, StateGraph
 from .config import load_models_config
 from .governcli import run_govern, write_body_file
 from .runner import run_json_prompt
+from .textutil import strip_frontmatter as _strip_frontmatter
 
 MAX_SYNTH_CLUSTERS = 10   # per run; anything beyond is reported, not silently dropped
 SYNTH_SOURCE_CAP = 6      # source page bodies fed to the drafting prompt
@@ -44,13 +45,7 @@ class GovernState(TypedDict, total=False):
     syntheses: Annotated[list[dict], add]
     synth_errors: Annotated[list[dict], add]
     plan_report: dict                       # human-owned lists, reported verbatim
-    sweep: dict
-    rebuild: dict
 
-
-def _strip_frontmatter(text: str) -> str:
-    end = text.find("\n---", 3) if text.startswith("---") else -1
-    return (text[end + 4:] if end > 0 else text).strip()
 
 
 def _slugify(text: str) -> str:
@@ -75,7 +70,7 @@ def build_govern_app(kb_root: Path, on_event, *, brief: str = "", checkpointer=N
     def sweep_node(state: GovernState):
         out = run_govern(kb_root, "sweep")
         on_event({"type": "phase", "phase": "sweep", "result": out})
-        return {"sweep": out}
+        return {}
 
     def plan_node(state: GovernState):
         plan = run_govern(kb_root, "plan")
@@ -200,7 +195,7 @@ def build_govern_app(kb_root: Path, on_event, *, brief: str = "", checkpointer=N
     def rebuild_node(state: GovernState):
         out = run_govern(kb_root, "rebuild-index")
         on_event({"type": "phase", "phase": "rebuild-index", "result": out})
-        return {"rebuild": out}
+        return {}
 
     g = StateGraph(GovernState)
     g.add_node("sweep", sweep_node)

@@ -27,6 +27,10 @@ def run(kb_root, input=None, output_path=None):
             final = app.invoke(None, cfg)  # resume from checkpoint
         else:
             final = app.invoke({}, cfg)
+        # a completed run never resumes — drop its thread so the checkpoint
+        # file doesn't accumulate dead history across runs (crashed runs keep
+        # theirs: this line is not reached on exception).
+        saver.delete_thread(run_id)
 
     results = final.get("results") or []
     created = sum(1 for r in results if r.get("action") == "auto:create-source")

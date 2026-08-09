@@ -13,7 +13,6 @@ import base64
 import json
 import threading
 import time
-from collections import defaultdict
 from pathlib import Path
 
 from langgraph.checkpoint.memory import InMemorySaver
@@ -35,23 +34,49 @@ class JsonFileSaver(InMemorySaver):
         self._load()
 
     # ---- persistence ----
+    def _compact(self):
+        """Latest-checkpoint-only view for serialization. Resume reads the latest
+        checkpoint (+ its pending writes + referenced blobs); older versions are
+        dead weight — without this every put rewrites the run's full history
+        (quadratic at ~150 docs) and dead threads pile up across runs."""
+        storage: dict = {}
+        keep_blobs: set = set()
+        keep_writes: set = set()
+        for tid, by_ns in self.storage.items():
+            for ns, by_id in by_ns.items():
+                if not by_id:
+                    continue
+                latest_id = next(reversed(by_id))  # insertion order == put order
+                storage.setdefault(tid, {})[ns] = {latest_id: by_id[latest_id]}
+                checkpoint = self.serde.loads_typed(by_id[latest_id][0])
+                for channel, version in (checkpoint.get("channel_versions") or {}).items():
+                    keep_blobs.add((tid, ns, channel, version))
+        writes = {}
+        for key, by_task in self.writes.items():
+            full = (self.storage.get(key[0]) or {}).get(key[1]) or {}
+            if key[2] in (next(reversed(full), None),) or key[2] not in full:
+                writes[key] = by_task  # latest checkpoint's writes, or in-flight
+        blobs = {k: v for k, v in self.blobs.items() if k in keep_blobs}
+        return storage, writes, blobs
+
     def _dump(self):
         with self._lock:
             self.path.parent.mkdir(parents=True, exist_ok=True)
+            storage, writes, blobs = self._compact()
             data = {
                 "storage": {
                     tid: {ns: {cid: [_enc_typed(v[0]), _enc_typed(v[1]), v[2]]
                                for cid, v in by_id.items()}
                           for ns, by_id in by_ns.items()}
-                    for tid, by_ns in self.storage.items()
+                    for tid, by_ns in storage.items()
                 },
                 "writes": [
                     [list(key), [list(wkey), w[0], w[1], _enc_typed(w[2]), w[3]]]
-                    for key, by_task in self.writes.items()
+                    for key, by_task in writes.items()
                     for wkey, w in by_task.items()
                 ],
                 "blobs": [
-                    [list(key), _enc_typed(value)] for key, value in self.blobs.items()
+                    [list(key), _enc_typed(value)] for key, value in blobs.items()
                 ],
             }
             tmp = self.path.with_suffix(".tmp")

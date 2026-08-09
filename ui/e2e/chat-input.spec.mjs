@@ -1,6 +1,6 @@
 // Chat input behavior browser regression (plan §3 P11–P15): Enter sends,
 // Shift+Enter newline, IME composition Enter ignored, level switch, stream
-// failure surfacing. Driven against the WEFT_LLM_CLI stub — no network.
+// failure surfacing. Driven against the WEFT_AGENT_STUB stub — no network.
 import { test, expect } from '@playwright/test';
 import { FAILING_LLM } from './paths.mjs';
 

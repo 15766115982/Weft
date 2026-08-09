@@ -16,12 +16,6 @@ class NdjsonWriter:
         self._fh.write(json.dumps(obj, ensure_ascii=False) + "\n")
         self._fh.flush()
 
-    def end(self, obj: dict | None = None) -> None:
-        if obj is not None:
-            self.write(obj)
-        self._finished = True
-        self._fh.close()
-
-    def close(self) -> None:
+    def end(self) -> None:
         self._finished = True
         self._fh.close()

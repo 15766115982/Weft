@@ -1,7 +1,7 @@
 // K judge tests: the registry plug point (mock backend through the same path),
 // rubric prompt shape, verdict parsing robustness (prose around JSON, missing
 // slots, out-of-range scores), endpoint validation + security.
-// The real claude backend is NOT spawned in tests — registerJudge is the
+// The real agent backend is NOT spawned in tests — registerJudge is the
 // documented plug point, so a mock proves the chain except the spawn.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -36,7 +36,7 @@ const post = (p, obj, headers = {}) => fetch(base + p, {
   method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(obj),
 });
 
-test('judge registry: claude built-in, mock registered through the same path', () => {
+test('judge registry: agent built-in, mock registered through the same path', () => {
   assert.ok(judgeNames().includes('agent'));
   assert.ok(judgeNames().includes('mock'));
 });

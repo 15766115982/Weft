@@ -119,6 +119,11 @@ export function govern(kb, args, stdin) {
   return runCli(SCRIPTS.govern, [...args, '--kb', kb], { stdin });
 }
 
+// Parse an NDJSON output file into frame objects (chat/govern-run streams).
+export function readNdjson(p) {
+  return fs.readFileSync(p, 'utf8').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l));
+}
+
 // Run an LLM service task against the scratch KB. Streaming tasks require
 // outputPath; non-streaming tasks may also write there. The env object is
 // merged into process.env so callers can set WEFT_LLM_STUB=1.

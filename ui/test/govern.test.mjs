@@ -1,7 +1,7 @@
 // M7c governance console tests: /api/plan preview (I5), mechanical steps via
 // the queue (I1), agent runs with a mock executor (I2/I3 pluggability), SSE
 // 'run' chunk streaming (I4), write security on the new endpoints.
-// The real claude executor is NOT spawned in tests — registerExecutor is the
+// The real langgraph executor is NOT spawned in tests — registerExecutor is the
 // documented plug point, so a mock proves the whole chain except the spawn.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -35,7 +35,7 @@ before(async () => {
   token = html.match(/name="ui-token" content="([^"]+)"/)[1];
 
   // Mock executor: the I3 plug point. Emits two progressive chunks then a
-  // successful done — mirrors the claude executor's event contract.
+  // successful done — mirrors the langgraph executor's event contract.
   registerExecutor('mock', ({ prompt }) => {
     const events = new EventEmitter();
     setTimeout(() => {
