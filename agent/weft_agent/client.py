@@ -91,21 +91,38 @@ def chat_completion(config: dict, messages: list[dict], *, stream: bool = False,
                     temperature=None, max_tokens=None,
                     http: httpx.Client | None = None):
     """Non-stream: returns the parsed response JSON.
-    Stream: returns an iterator of delta-content strings (SSE parsed).
+    Stream: returns an iterator of delta-content strings (SSE parsed). The
+    iterator owns its client — it opens on first next() and closes at the end;
+    request errors surface on first iteration (the NDJSON tasks turn them into
+    error frames), unlike non-stream where they are retried here.
     `http` is a test injection point; a fresh client is created otherwise.
     """
     endpoint = build_endpoint(config)
     headers = {"Content-Type": "application/json", **get_auth_header(config)}
     body = build_body(config, messages, stream, temperature, max_tokens)
 
+    if stream:
+        if http is not None:
+            return _do(http, endpoint, headers, body, True)
+        client = httpx.Client(timeout=httpx.Timeout(120.0, connect=30.0))
+
+        def owned():
+            try:
+                rate_limit_sleep()
+                yield from _do(client, endpoint, headers, body, True)
+            finally:
+                client.close()
+
+        return owned()
+
     last_err: Exception | None = None
     for attempt in range(DEFAULT_RETRIES + 1):
         try:
             rate_limit_sleep()
             if http is not None:
-                return _do(http, endpoint, headers, body, stream)
+                return _do(http, endpoint, headers, body, False)
             with httpx.Client(timeout=httpx.Timeout(120.0, connect=30.0)) as client:
-                return _do(client, endpoint, headers, body, stream)
+                return _do(client, endpoint, headers, body, False)
         except Exception as err:  # noqa: BLE001 — retry any transport/HTTP failure
             last_err = err
             if attempt < DEFAULT_RETRIES:
