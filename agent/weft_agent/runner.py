@@ -175,4 +175,21 @@ def stub_for(prompt_name: str, vars: dict) -> str:
     if prompt_name == "deep-research":
         return (f'Stub deep-research answer for "{question}". '
                 "In real mode this would perform multi-round retrieval.")
+    if prompt_name == "govern-source-page":
+        return json.dumps({
+            "title": title,
+            "tags": ["stub", "test"],
+            "related_topics": ["stub-topic"],
+            "summary_body": ("## Key Points\n\n- Stub point one.\n- Stub point two.\n\n"
+                             "## Key Details\n\nStub detail.\n\n"
+                             "## Related Topics\n\n- stub-topic\n"),
+        })
+    if prompt_name == "govern-synthesis":
+        slug = (vars or {}).get("slug") or "stub-synthesis"
+        return json.dumps({
+            "slug": slug,
+            "title": f"Stub synthesis {(vars or {}).get('topic') or ''}".strip(),
+            "body": f"Stub synthesis body for {(vars or {}).get('topic') or 'unknown'}.",
+            "sources": [],
+        })
     return f"stub answer for {prompt_name}"

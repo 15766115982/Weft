@@ -25,9 +25,10 @@ TASKS = [
     "chat",
     "deep-research",
     "complete",
+    "govern-run",
 ]
 
-STREAMING_TASKS = {"chat", "deep-research"}
+STREAMING_TASKS = {"chat", "deep-research", "govern-run"}
 
 
 def parse_args(argv: list[str]) -> dict:
