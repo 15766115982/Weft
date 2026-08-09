@@ -26,6 +26,8 @@ TASKS = [
     "deep-research",
     "complete",
     "govern-run",
+    "search-smart",
+    "prompt",
 ]
 
 STREAMING_TASKS = {"chat", "deep-research", "govern-run"}

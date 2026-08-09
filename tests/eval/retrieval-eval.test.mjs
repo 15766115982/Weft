@@ -9,10 +9,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  SCRIPTS, REPO, FIXTURES, sourcePageFor, runCli, copyInbox, makeScratchKb, acquire, govern, applyAllSources, rawRelFor,
+  SCRIPTS, REPO, FIXTURES, sourcePageFor, runCli, copyInbox, makeScratchKb, acquire, govern, applyAllSources, rawRelFor, runLlm,
 } from '../helpers/kb.mjs';
-import { searchSmart } from '../../llm/lib/research.mjs';
-import { runJsonPrompt } from '../../llm/lib/runner.mjs';
 
 // Optional donor config enables the LLM query-rewrite lane (ADR-0010) so the
 // conversational category measures the full product path, not just fallback.
@@ -116,10 +114,9 @@ test('retrieval effectiveness: golden query set', async (t) => {
       const expectPages = (q.expect || []).map(pageOf);
       let preview, routed, candidatesFile;
       if (q.via === 'fallback') {
-        const res = await searchSmart(kb, q.q, {
-          limit: 10,
-          rewrite: (question) => runJsonPrompt(kb, 'query-rewrite', { question }),
-        });
+        // ADR-0012: searchSmart lives in the Python agent service; drive it
+        // through the CLI contract (rewrite lane on).
+        const res = runLlm(kb, 'search-smart', { question: q.q, limit: 10, rewrite: true });
         preview = (res.preview || []).map((c) => c.page);
         routed = res.via === 'rewrite' ? `rewrite(${(res.variants || []).join('|')})`
           : res.relaxed ? `fallback(${res.relaxed_query || (res.relaxed_terms || []).join('|')})` : 'direct';

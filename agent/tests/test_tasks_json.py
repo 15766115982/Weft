@@ -76,3 +76,19 @@ def test_output_file_written(kb, tmp_path):
     assert written["task"] == "summarize-source"
     summary = json.loads(proc.stdout)
     assert summary["output"] == str(out_file)
+
+
+def test_prompt_task_generic_template(kb):
+    out = run_task(kb, "prompt", {"prompt_name": "govern-decide",
+                                  "vars": {"decision_type": "approve", "context": "x", "precedents": ""}})
+    assert out["data"]["decision"] == "candidate"
+    assert out["prompt_name"] == "govern-decide"
+
+
+def test_search_smart_task(kb, monkeypatch):
+    import weft_agent.tasks.search_smart as sm_task
+    monkeypatch.setattr(sm_task, "search_smart",
+                        lambda *a, **kw: {"total": 1, "preview": [{"page": "wiki/sources/x.md"}], "via": "direct"})
+    out = sm_task.run(kb_root=kb, input={"question": "q", "limit": 5})
+    assert out["task"] == "search-smart"
+    assert out["total"] == 1 and out["via"] == "direct"

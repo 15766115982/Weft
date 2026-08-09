@@ -16,7 +16,6 @@ export const SCRIPTS = {
   govern: path.join(REPO, 'governance', 'scripts', 'govern.mjs'),
   viewer: path.join(REPO, 'governance', 'viewer', 'serve.mjs'),
   search: path.join(REPO, 'retrieval', 'scripts', 'kb_search.mjs'),
-  llm: path.join(REPO, 'llm', 'llm.mjs'), // retired Node service (ADR-0012); kept for reference runs
 };
 
 // ADR-0012: LLM tasks run in the Python agent/ service. Resolution mirrors

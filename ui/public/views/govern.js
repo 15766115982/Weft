@@ -93,34 +93,25 @@ export async function render(view) {
   const runPanel = el('div', { class: 'run-panel', hidden: '' });
   let currentRunId = null;
 
-  let skillPath = null, repoRoot = null;
-  api('/api/govern-context').then((c) => { skillPath = c.skillPath; repoRoot = c.repoRoot; }).catch(() => {});
+  let repoRoot = null, graphFlow = '';
+  api('/api/govern-context').then((c) => { repoRoot = c.repoRoot; graphFlow = c.flow || ''; }).catch(() => {});
 
+  // ADR-0012: the LangGraph agent owns the workflow (fixed skeleton); the
+  // prompt box is the operator's BRIEF — injected into every LLM judgment
+  // node (summary drafting, synthesis, semantic check) as standing guidance.
   function defaultPrompt() {
     const lines = lastPlan.pending.slice(0, 30).map((p) => `- ${p.raw} (${p.reason})`);
     return [
-      // skillPath first: registration-independent (e2e finding — a headless
-      // executor may not have kb-govern registered, but the file is canonical)
-      skillPath
-        ? `First read the skill instructions at ${skillPath} and follow them exactly.`
-        : 'Use the kb-govern skill on this knowledge base (cwd IS the KB root).',
-      'Process the current plan for this knowledge base (cwd IS the KB root):',
-      'write English source-summary pages for each pending raw via apply-source,',
-      'then evaluate topic synthesis (apply-topic) where cross-source themes exist.',
-      // real-env finding 2026-08-04: the allow-list matches bare node commands
-      // ONLY — pipes/heredocs/stdin are auto-denied, so the body must go
-      // through a scratch file the agent writes with its file tools.
-      'Page bodies go via --body-file: WRITE each summary/synthesis to a scratch file inside the KB',
-      '(e.g. .kb/bodies/<page>.md) with your file tools, then run apply-source/apply-topic with',
-      '--body-file <that path>. Never use pipes, heredocs or stdin redirection — they are auto-denied.',
-      'Leave every page as candidate — a human reviews and approves. Do not approve or merge anything.',
-      // B layer (P2-2 ruling ⑧): the prompt states the confinement out loud;
-      // the acceptEdits boundary + allow-list enforce it underneath.
-      'Permission confinement is active: create or edit files ONLY inside this KB (your cwd) — writes outside it are denied.',
-      repoRoot ? `Run service scripts exactly as: node ${repoRoot}/<service>/scripts/<name>.mjs (forward slashes; other command forms are denied).` : '',
-      lines.length ? `\nPending raws (from plan):\n${lines.join('\n')}` : '',
-      '\nWhen done, output one short paragraph summarizing what you created or changed.',
-    ].join('\n');
+      '(本框是常驻指令 brief,会注入每个 LLM 判断节点;流程由图约束 agent 固定执行:',
+      `${graphFlow || 'sweep → plan → documents → synthesis → rebuild-index'}。)`,
+      '可写:摘要语言/风格偏好、主题聚合倾向、冲突处理原则、本轮治理重点等。',
+      '留空则按默认规范治理。',
+      lines.length ? `
+本轮 pending(plan):
+${lines.join('
+')}` : '',
+    ].join('
+');
   }
 
   function startRunPanel() {

@@ -11,7 +11,7 @@ import os from 'node:os';
 import http from 'node:http';
 import { EventEmitter } from 'node:events';
 import { createPortal } from '../serve.mjs';
-import { registerExecutor, executorNames, buildClaudeArgs, buildAgentSettings } from '../lib/executor.mjs';
+import { registerExecutor, executorNames } from '../lib/executor.mjs';
 import { boundaryViolations } from '../lib/govern.mjs';
 import { buildFrontmatter } from '../../governance/scripts/lib/frontmatter.mjs';
 
@@ -72,7 +72,7 @@ async function until(fn, ms = 10000, step = 100) {
 }
 
 test('mock executor registered (I3: the plug point works)', () => {
-  assert.ok(executorNames().includes('claude'), 'claude is the built-in');
+  assert.ok(executorNames().includes('langgraph'), 'langgraph is the built-in (ADR-0012)');
   assert.ok(executorNames().includes('mock'), 'third-party executors register by name');
 });
 
@@ -188,27 +188,6 @@ async function waitJob(id) {
   });
   return job;
 }
-
-// ---- P2-2 hardening (ruling ⑧): acceptEdits + generated allow-list ----
-
-test('claude args: acceptEdits + settings, skip-permissions GONE (posture revision)', () => {
-  const args = buildClaudeArgs(kb);
-  assert.ok(args.includes('--permission-mode') && args.includes('acceptEdits'));
-  assert.ok(!args.includes('--dangerously-skip-permissions'), 'skip-permissions is replaced (P2-2 spike: path rules are dead under it)');
-  const settings = args[args.indexOf('--settings') + 1];
-  assert.ok(settings.startsWith(kb), 'settings file lives under the KB derived dir');
-  const obj = JSON.parse(fs.readFileSync(settings, 'utf8'));
-  const allow = obj.permissions.allow;
-  assert.ok(allow.some((r) => /^Bash\(node .+\/\*\*\)$/.test(r)), 'repo scripts glob allowed (spike r8: :* form breaks on args)');
-  assert.ok(allow.some((r) => /^Read\(.+\/\*\*\)$/.test(r)), 'repo read allowed (SKILL.md must stay reachable)');
-  assert.ok(!allow.includes('Bash'), 'no blanket Bash (spike S14: it reopens outside writes)');
-});
-
-test('agent settings regenerate under <kb>/.kb/ui (derived artifact, whitelist ④)', () => {
-  const p = buildAgentSettings(kb);
-  assert.ok(fs.existsSync(p));
-  assert.equal(path.basename(p), 'agent-settings.json');
-});
 
 test('boundary check: only newly-dirty paths outside the governance write set flag', () => {
   const before = ' M wiki/syntheses/old.md\n?? scratch.txt\n';

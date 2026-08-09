@@ -364,18 +364,12 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
         if (url.pathname === '/api/feedback') {
           return json(res, 200, { entries: readFeedback(kb, { vote: url.searchParams.get('vote') || undefined }) });
         }
-        // The govern skill's canonical path — the default agent prompt points
-        // at it so runs follow the real workflow EVEN when the skill is not
-        // registered in the executor's environment (e2e finding 2026-08-02).
+        // Govern-run context for the portal's default brief (ADR-0012: the
+        // graph-constrained agent owns the workflow; the prompt box is the
+        // operator's standing instruction injected into each LLM judgment node).
         if (url.pathname === '/api/govern-context') {
-          // existsSync fallback (M7c review P3): a missing skill file must not
-          // leave the default prompt pointing at a phantom path.
-          const skillPath = path.resolve(UI_DIR, '..', 'governance', 'skills', 'govern', 'SKILL.md');
-          // repoRoot (forward-slash): the default prompt prescribes the exact
-          // script-invocation form the acceptEdits allow-list matches (S18 of
-          // the P2-2 spike: backslash invocations are denied).
           const repoRoot = path.resolve(UI_DIR, '..').split(path.sep).join('/');
-          return json(res, 200, { skillPath: fs.existsSync(skillPath) ? skillPath : null, repoRoot });
+          return json(res, 200, { repoRoot, flow: 'sweep → plan → documents → synthesis → rebuild-index' });
         }
         if (url.pathname === '/api/diff') {
           // Same as the thin viewer: read-only git show; graceful null baseline

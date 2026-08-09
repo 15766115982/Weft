@@ -12,7 +12,6 @@ import {
   SCRIPTS, REPO, FIXTURES, sourcePageFor, copyInbox, makeScratchKb, acquire, govern, applyAllSources,
   rawRelFor, runLlm,
 } from '../helpers/kb.mjs';
-import { runJsonPrompt } from '../../llm/lib/runner.mjs';
 
 const DATASET = JSON.parse(fs.readFileSync(path.join(REPO, 'tests', 'eval', 'chat-eval', 'dataset.json'), 'utf8'));
 const DONOR = process.env.WEFT_EVAL_CONFIG_KB;
@@ -70,10 +69,11 @@ function pageBody(rel, max = 2500) {
   return text.slice(text.indexOf('---', 4) + 3).trim().slice(0, max);
 }
 
-async function judge(promptName, vars) {
+// ADR-0012: judge prompts run in the Python agent service via the generic
+// `prompt` task (the Node llm/lib in-process import is gone).
+function judge(promptName, vars) {
   try {
-    const { data } = await runJsonPrompt(kb, promptName, vars);
-    return data;
+    return runLlm(kb, 'prompt', { prompt_name: promptName, vars }).data;
   } catch (err) {
     return { error: err.message.slice(0, 200) };
   }
