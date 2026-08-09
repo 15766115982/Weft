@@ -1,5 +1,41 @@
 # Development Log
 
+## ADR-0012 Phase 0 spike: Kimi 网关 + LangGraph 可行性验证通过(2026-08-08)
+
+Spike 脚本在 `D:\claude\tmp\agent-spike\`(venv, py3.11),配置复用
+`D:/kb/work/.kb/config/models.json`(provider openai, endpoint api.kimi.com/coding/v1,
+env `kimi-code`)。三项全过:
+
+- **S1 网关 chat**:1-3s 往返。`kimi-for-coding` 是 reasoning 模型——reasoning 走
+  独立 `reasoning_content` 字段并**计入 max_tokens**:budget 太小会返回空 content
+  (实测复现)。实现要求:max_tokens 留余量 + 空 content 重试。
+- **S2 结构化输出**:5 类治理 prompt(分类/决策/冲突/实体/摘要)× 2 模式 = 10/10
+  解析成功;`response_format={"type":"json_object"}` 网关**支持**;输出偶发
+  ```json 围栏,解析器须容忍。语义判断质量佳(正确识别 CET1 4.5% vs Tier1 6%)。
+- **S3 LangGraph**:langgraph 1.2.10 + openai SDK 2.53(**不需要 langchain-openai**,
+  避开 tiktoken Rust 编译失败;pip 需 ≥26);3 节点迷你治理图(plan→逐文档
+  classify+decide→finalize)25s/2 文档跑通;节点内崩溃 → checkpoint 保住
+  `next=('process_doc',)` 与已完成结果 → `invoke(None)` 14.7s 续跑完成。
+- 依赖面:~35 个主流纯 wheel 包(含 langchain-core 1.5.3、langsmith——内网须
+  `LANGSMITH_TRACING=false`);无明显高危包,内网拦截风险低(待内网复验)。
+- 未验证:Azure SPN 通道(无凭据,Node 侧实现已有,Python 移植时对照)。
+
+## ADR-0012: 去 Claude CLI 化决策(2026-08-08)
+
+内网不再提供 claude CLI / 任何 CLI agent 工具,模型通道只剩 Copilot API gateway
+(OpenAI 兼容)+ Azure OpenAI SPN。经 grilling 决策(全文见
+`docs/adr/0012-declaude-llm-layer-to-langgraph-agent-service.md`):
+
+- claude 硬依赖盘点:仅门户 executor(govern run)与 judge 两处;chat/DR/settings
+  已在 llm/ 层,不受影响。
+- 决策:LangGraph(Python)新顶层 `agent/` 服务整体接替 `llm/`(12 任务,CLI 契约
+  逐字保留);治理运行走图约束 agent(节点调 govern.mjs,LLM 只做结构化判断,
+  不依赖网关 tool-calling);claude executor/judge/claudecli 与三个 SKILL.md
+  删除;"No Python" 支柱修订为"Python 仅限 agent/"。
+- 否决:Copilot SDK 官方路(旁路公司网关,合规不过)、MAF、Pydantic AI、TS 系。
+- 阶段:P0 网关 spike → P1 任务对等移植(judge 改道)→ P2 治理图 agent →
+  P3 删除清理 + 文档收官。CONTEXT.md 术语表已加过渡期说明。
+
 ## Settings SPA-ization + DOMPurify icon strip root cause (2026-08-08)
 
 Two user-visible defects, one surprising shared root:

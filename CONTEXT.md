@@ -35,6 +35,19 @@ demand by Claude Code or by each other through a stable CLI contract:
   Governance tasks use non-streaming JSON; chat and deep-research stream NDJSON. The LLM
   service is the only service that talks to the model.
 
+Per ADR-0012 (accepted 2026-08-08, implementation in phases), the Node LLM service is being
+replaced by a fifth service; once landed, the inventory reads:
+
+- **Agent service** (`agent/`, Python + LangGraph) — the LLM service's successor: same CLI
+  contract, same 12 tasks, plus the **graph-constrained govern run** (fixed skeleton
+  sweep → plan → per-document → rebuild-index; graph nodes call `govern.mjs` subcommands, so
+  the governance CLI remains the only write path; the LLM produces structured per-node
+  judgments only). Model channels: **Copilot API gateway** (OpenAI-compatible) and
+  **Azure OpenAI SPN** — both supported via the `models.json` provider field. The official
+  Copilot SDK route was rejected on compliance grounds (bypasses the company gateway).
+  "Skill + scripts" no longer applies: the three SKILL.md files are retired with Claude
+  Code; services are plain CLI packages orchestrated by the portal.
+
 ### KB structure: two data zones + rules layer + candidate state machine
 
 The knowledge base consists of the following parts (aligned with the original meaning of the

@@ -7,3 +7,8 @@ Thumbs.db
 .DS_Store
 ui/kbs.json
 ui/test-results/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
