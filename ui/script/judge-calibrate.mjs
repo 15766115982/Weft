@@ -5,7 +5,7 @@
 // judges each top-5 with the judge backend (default claude), and reports
 // agreement metrics to docs/test-reports/judge-calibration-latest.md.
 //
-//   node ui/script/judge-calibrate.mjs [--backend claude] [--limit N]
+//   node ui/script/judge-calibrate.mjs [--backend agent] [--limit N]
 //
 // Cost: ~1 judge call per query (top-5 batched) × ~25s each — several
 // minutes for the full set. This is a calibration tool, not a CI gate:
@@ -21,7 +21,7 @@ import { judge } from '../lib/judge.mjs';
 
 const args = process.argv.slice(2);
 const getArg = (name, dflt) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : dflt; };
-const backend = getArg('--backend', 'claude');
+const backend = getArg('--backend', 'agent');
 const limit = Number(getArg('--limit', 'Infinity'));
 
 const QUERIES = JSON.parse(fs.readFileSync(path.join(REPO, 'tests', 'eval', 'queries.json'), 'utf8'));
@@ -55,7 +55,7 @@ try {
     let verdicts = [], ms = 0, judgeErr = '';
     if (top5.length) {
       try {
-        const v = await judge(backend, q, top5.map((c) => ({ page: c.page, title: c.title, snippet: c.snippet })));
+        const v = await judge(backend, q, top5.map((c) => ({ page: c.page, title: c.title, snippet: c.snippet })), { kb });
         verdicts = v.verdicts;
         ms = v.ms;
       } catch (err) { judgeErr = err.message; }

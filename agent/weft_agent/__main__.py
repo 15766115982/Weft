@@ -24,6 +24,7 @@ TASKS = [
     "semantic-check",
     "chat",
     "deep-research",
+    "complete",
 ]
 
 STREAMING_TASKS = {"chat", "deep-research"}

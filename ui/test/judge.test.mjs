@@ -37,7 +37,7 @@ const post = (p, obj, headers = {}) => fetch(base + p, {
 });
 
 test('judge registry: claude built-in, mock registered through the same path', () => {
-  assert.ok(judgeNames().includes('claude'));
+  assert.ok(judgeNames().includes('agent'));
   assert.ok(judgeNames().includes('mock'));
 });
 

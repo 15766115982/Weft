@@ -16,6 +16,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { EventEmitter } from 'node:events';
 import { createAuth } from './lib/auth.mjs';
+import { agentTaskSpawn } from './lib/agentcli.mjs';
 import { settingsRoutes } from './routes/api-settings.mjs';
 import { createKbRegistry } from './lib/kb.mjs';
 import { resolveUnder, normalizeWikiRelRead, normalizeRawRel, normalizeKbFileName, walkMd, normalizeRawAssetRel, assetMime } from './lib/paths.mjs';
@@ -43,9 +44,8 @@ import {
 
 const UI_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(UI_DIR, 'public');
-// LLM CLI path is resolved at portal creation time so tests can override it via
-// the WEFT_LLM_CLI env var before calling createPortal().
-function resolveLlmCli() { return process.env.WEFT_LLM_CLI || path.resolve(UI_DIR, '..', 'llm', 'llm.mjs'); }
+// LLM task spawn (ADR-0012): the Python agent/ service via agentTaskSpawn();
+// tests override via the WEFT_LLM_CLI env var before calling createPortal().
 // async git: a 5s blocking execFileSync inside the request handler would stall
 // every other request on the event loop (review 2026-08-04)
 const execFileP = promisify(execFile);
@@ -484,7 +484,7 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
         // snippet payload is untrusted KB content — the judge backend runs
         // tool-less (judge.mjs), its output is display-only.
         if (url.pathname === '/api/judge') {
-          const { q, results, backend = 'claude', kb: _kbName } = JSON.parse(await readBody(req) || '{}');
+          const { q, results, backend = 'agent', kb: kbName } = JSON.parse(await readBody(req) || '{}');
           if (!q || !String(q).trim()) return json(res, 400, { error: 'judge requires a query string' });
           if (!Array.isArray(results) || !results.length || results.length > 10) {
             return json(res, 400, { error: 'results must be a non-empty array (≤10)' });
@@ -492,7 +492,8 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
           if (!judgeNames().includes(backend)) {
             return json(res, 400, { error: `unknown judge backend: ${backend} (registered: ${judgeNames().join(', ')})` });
           }
-          const out = await judge(backend, String(q), results.slice(0, 10));
+          const kb = registry.resolve(kbName).path;
+          const out = await judge(backend, String(q), results.slice(0, 10), { kb });
           return json(res, 200, out);
         }
 
@@ -637,7 +638,8 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
           fs.mkdirSync(path.dirname(inputFile), { recursive: true });
           fs.writeFileSync(inputFile, JSON.stringify({ question, level, opts: body.opts || {} }), 'utf8');
 
-          const child = spawn(process.execPath, [resolveLlmCli(), 'chat', '--kb', kb, '--input-file', inputFile, '--output-file', outputFile], {
+          const agent = agentTaskSpawn();
+          const child = spawn(agent.command, [...agent.baseArgs, 'chat', '--kb', kb, '--input-file', inputFile, '--output-file', outputFile], {
             stdio: ['ignore', 'pipe', 'pipe'],
           });
 
