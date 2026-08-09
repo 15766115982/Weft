@@ -16,8 +16,20 @@ export const SCRIPTS = {
   govern: path.join(REPO, 'governance', 'scripts', 'govern.mjs'),
   viewer: path.join(REPO, 'governance', 'viewer', 'serve.mjs'),
   search: path.join(REPO, 'retrieval', 'scripts', 'kb_search.mjs'),
-  llm: path.join(REPO, 'llm', 'llm.mjs'),
+  llm: path.join(REPO, 'llm', 'llm.mjs'), // retired Node service (ADR-0012); kept for reference runs
 };
+
+// ADR-0012: LLM tasks run in the Python agent/ service. Resolution mirrors
+// ui/lib/agentcli.mjs: WEFT_AGENT_PYTHON > agent/.venv > python on PATH.
+export function agentPython() {
+  if (process.env.WEFT_AGENT_PYTHON) return process.env.WEFT_AGENT_PYTHON;
+  const venv = process.platform === 'win32'
+    ? path.join(REPO, 'agent', '.venv', 'Scripts', 'python.exe')
+    : path.join(REPO, 'agent', '.venv', 'bin', 'python');
+  if (fs.existsSync(venv)) return venv;
+  return 'python';
+}
+export const AGENT_DIR = path.join(REPO, 'agent');
 
 // Deterministic mtimes per inbox-relative path — the local connector uses
 // mtime as source_version, and retrieval date filters compare it, so the
@@ -117,7 +129,8 @@ export function runLlm(kb, task, input, outputPath, env = {}) {
   fs.writeFileSync(inputFile, JSON.stringify(input), 'utf8');
   const args = [task, '--kb', kb, '--input-file', inputFile];
   if (outputPath) args.push('--output-file', outputPath);
-  const out = execFileSync('node', [SCRIPTS.llm, ...args], {
+  const out = execFileSync(agentPython(), ['-m', 'weft_agent', ...args], {
+    cwd: AGENT_DIR,
     env: { ...process.env, ...env },
     encoding: 'utf8',
     stdio: ['pipe', 'pipe', 'pipe'],

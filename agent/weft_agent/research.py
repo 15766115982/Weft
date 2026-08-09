@@ -18,7 +18,10 @@ def run_kb_search(kb_root: Path, args: list[str]) -> dict:
         raise RuntimeError("node executable not found on PATH (retrieval CLI is plain node)")
     proc = subprocess.run(
         [node, str(KB_SEARCH), *args, "--kb", str(kb_root)],
-        capture_output=True, text=True, shell=False,
+        capture_output=True, shell=False,
+        # kb_search prints UTF-8 JSON (CJK content) — never let the Windows
+        # locale codec (GBK) decode it.
+        encoding="utf-8", errors="replace",
     )
     if proc.returncode != 0:
         raise RuntimeError(f"kb_search failed (code {proc.returncode}): {proc.stderr or proc.stdout[:500]}")
