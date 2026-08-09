@@ -4,8 +4,9 @@
 > KB Portal Web 控制台 + Claude Code 委托安装提示词,新用户请以它为准;
 > 本文保留作为纯服务层的参照。
 
-自治理知识库系统：三个完全解耦的服务（获取 / 治理 / 检索），以 Claude Code skill +
-Node.js 脚本形态分发。本教程从零开始，带你装到能连内网 Jira/Confluence 跑通为止。
+自治理知识库系统：五个完全解耦的服务（获取 / 治理 / 检索 / agent / UI 门户）——
+Node.js 脚本加一个 Python 服务（ADR-0012,2026-08 起 Claude Code skill 形态随 claude CLI
+依赖一同退役）。本教程从零开始，带你装到能连内网 Jira/Confluence 跑通为止。
 
 - English version: `installation.md`
 - 架构说明：`../CONTEXT.md` · 三方契约：`../schema/contract.md` ·
@@ -18,9 +19,15 @@ Node.js 脚本形态分发。本教程从零开始，带你装到能连内网 Ji
 | Node.js | **≥ 20**(20 / 22 / 24 均已验证) | 用到 global `fetch`、`AbortSignal.timeout`、`node --test`。全仓唯一原生依赖 `better-sqlite3` 版本范围 `~12.4.x`：其预编译二进制覆盖 Node 20–25(12.5+ 砍掉了 Node 20 预编译,所以范围收在 12.4.x)。更换 Node 大版本无需改配置——`npm install` 会自动下载与当前 Node 匹配的预编译二进制 |
 | npm | 随 Node 自带 | 安装唯一的原生依赖（`better-sqlite3`，预编译二进制——不需要编译器） |
 | Git | 任意近期版本 | 知识库本身是 Git 仓库 |
-| Claude Code | 任意近期版本 | 三个服务以 skill 形态被调用 |
+| Python | **≥ 3.11**（建议 64 位） | agent 服务（`agent/`)——全部模型调用与治理图 agent |
 
-全系统无 Python。无常驻服务，无需运维数据库（SQLite 在 `.kb/` 内，可随时重建）。
+Python 只存在于 agent 服务（ADR-0012 将"No Python"修订为"Python 仅限 `agent/`")，
+其余服务均为纯 Node。无常驻服务，无需运维数据库（SQLite 在 `.kb/` 内，可随时重建）。
+
+第四个服务 `agent/`(Python + LangGraph）统一管理所有模型调用（Azure OpenAI SPN 与
+OpenAI 兼容网关）、chat/deep-research 管线与图约束治理运行，通过 CLI
+(`python -m weft_agent <task>`）被门户与评测套件调用——服务间永不互相 import。
+prompt 模板在 `<repo>/templates/prompts/`，每个 KB 可在 `.kb/config/prompts/` 覆盖。
 
 ## 2. 获取代码
 
@@ -30,8 +37,8 @@ Node.js 脚本形态分发。本教程从零开始，带你装到能连内网 Ji
 ## 3. 安装 Node 依赖
 
 **一键方式**：在仓库根目录运行 `install.cmd`(Windows）或 `./install.sh`
-(Linux/macOS)——自动完成本节和第 4 节（Node ≥20 检查、`npm install`、skill 链接）。
-下面的手动步骤作为参照和兜底保留。
+(Linux/macOS)——自动完成本节和第 4 节（Node ≥20 / Python ≥3.11 检查、`npm install`、
+agent venv + `pip install -e agent`)。下面的手动步骤作为参照和兜底保留。
 
 只有检索服务有依赖：
 
@@ -48,36 +55,24 @@ npm install
 > 联网机器上执行 `npm install`，把产出的 `retrieval/scripts/node_modules/` 整个
 > 目录拷过去（预编译二进制是平台相关的，机器不一致不能拷）。
 
-## 4. 把三个 skill 装进 Claude Code
+## 4. 安装 agent 服务（Python 环境）
 
-skill 必须以**链接**方式（不是复制）放进 Claude Code 的个人 skill 目录。
-每个 SKILL.md 以自身所在目录为基准、向上一层两级定位脚本（`../../scripts/`),
-这个相对布局只有在 skill 目录仍位于仓库树内时才成立——文件系统链接恰好能保持这一点。
-链接的另一个好处：以后 `git pull` 更新立即生效。
-
-skill 名称（取自各 SKILL.md 的 frontmatter):`kb-acquire`、`kb-govern`、`kb-search`。
-
-**Windows**(cmd.exe，目录联接 junction——不需要管理员权限）:
-
-```cmd
-mklink /J "%USERPROFILE%\.claude\skills\kb-acquire" "<repo>\acquisition\skills\acquire"
-mklink /J "%USERPROFILE%\.claude\skills\kb-govern"  "<repo>\governance\skills\govern"
-mklink /J "%USERPROFILE%\.claude\skills\kb-search"  "<repo>\retrieval\skills\search"
-```
-
-**Linux / macOS**:
+agent 服务运行在自己的虚拟环境 `agent/.venv`（门户与测试会自动解析；可用环境变量
+`WEFT_AGENT_PYTHON` 覆盖）:
 
 ```bash
-ln -s <repo>/acquisition/skills/acquire ~/.claude/skills/kb-acquire
-ln -s <repo>/governance/skills/govern   ~/.claude/skills/kb-govern
-ln -s <repo>/retrieval/skills/search    ~/.claude/skills/kb-search
+python -m venv <repo>/agent/.venv
+<repo>/agent/.venv/Scripts/python -m pip install -e "<repo>/agent"      # Windows
+<repo>/agent/.venv/bin/python -m pip install -e "<repo>/agent"          # Linux/macOS
 ```
 
-重启 Claude Code 后验证：skill 列表里出现 `kb-acquire`、`kb-govern`、`kb-search`。
-每个链接目标目录内必须直接包含一个 `SKILL.md`。
+依赖全是纯 wheel 包（httpx、langgraph、pydantic——无原生编译）。刻意不使用
+`langgraph-checkpoint-sqlite`（其依赖 sqlite-vec 无 32 位轮且是原生包）；运行断点
+用内置的纯 JSON saver(`agent/weft_agent/checkpoints.py`)。
 
-> 不要只把 skill 文件夹**复制**进 `~/.claude/skills/`——复制后脚本不再位于"上两级",
-> 每次调用都会报模块找不到。
+> **离线内网？** 与 npm 同理：把 pip 指向内部镜像
+> (`pip config set global.index-url <url>`)，或在联网机器 `pip download` 后离线安装。
+> 注意镜像的高危包拦截规则——依赖集都是主流包（见 `agent/pyproject.toml`)。
 
 ## 5. 创建知识库实例
 
@@ -115,8 +110,7 @@ git init
 > 知识库的 `raw/` 会存放真实内网内容，提交进 Git 前请先确认单位的安全政策。
 
 > git 在这里是承重的，不只是卫生习惯：治理运行会把 `wiki/` + `log.md` 的变更
-> 自动提交（一次治理一次提交——portal 在服务端自动做，skill 驱动的会话按
-> SKILL.md 第 6 步做），查看器的冲突 diff 和 portal 的页面历史都读这段历史。
+> 自动提交（一次治理一次提交——portal 在服务端自动做），查看器的冲突 diff 和 portal 的页面历史都读这段历史。
 > 非 git 知识库一切照常，只是快照退化为文件副本。治理提交自带固定机器身份
 > （`kb-portal` / `kb-govern`,`-c` 旗标注入）——机器上**不需要**配置 git 的
 > user.name/user.email。
@@ -221,9 +215,9 @@ node <repo>/ui/serve.mjs --kb D:\kb\work
 # → http://127.0.0.1:8322(同样的本机 + token + Origin/Host 姿态)
 ```
 
-第 4 步的 `apply-source`/`apply-topic` 和整个检索循环，正常使用中由 Claude Code 的
-skill(kb-govern / kb-search）驱动——它们负责读原文、写摘要、迭代查询。上面这些命令
-正是 skill 底层调用的东西；手动跑一遍是最好的安装自检。
+第 4 步的逐篇 `apply-source` 与主题合成，正常使用中由门户的 **govern-run**(LangGraph
+图约束 agent:sweep → plan → 逐文档 → 合成 → rebuild-index）驱动——它底层调用的正是
+上面这些 CLI 命令，LLM 只负责写摘要与合成。手动跑一遍命令仍是最好的安装自检。
 
 要在真实服务器上做完整验收（失败演练、增量跳过验证、XHTML 保真审计），按
 `real-env-test.md` 执行。
@@ -242,19 +236,17 @@ cd <repo> && node --test tests/e2e/ tests/eval/      # 39 个(e2e 全流程 + �
 
 ## 9. 日常使用
 
-在任意 Claude Code 会话中（skill 是全局的）:
-
-1. **获取**——说"拉取知识库文档" → kb-acquire 跑连接器；
-2. **治理**（人工触发，绝不自动）——说"治理知识库" → kb-govern:
-   sweep、plan、写摘要、主题综合、候选评审（对话式或查看器）;
-3. **检索**——直接问知识问题 → kb-search：构造结构化查询、CSQE 迭代、带引用作答。
-
-也可以全在浏览器里驱动：`node <repo>/ui/serve.mjs --kb <路径>` 启动按需
+全在浏览器里驱动：`node <repo>/ui/serve.mjs --kb <路径>` 启动按需
 UI portal(http://127.0.0.1:8322；浏览/检索/评审/采集控制台/agent 治理
-控制台/图谱；多知识库切换器见 `<repo>/ui/kbs.json`)。portal 与对话可混用——
-它们只通过知识库目录通信。完整走查见 `guide.zh-CN.md` §7-8。
+控制台/图谱/chat；多知识库切换器见 `<repo>/ui/kbs.json`):
 
-各服务的行为规则写在各自的 SKILL.md 里；三方契约是 `schema/contract.md`。
+1. **获取**——采集控制台跑连接器（或命令行 `acquire.mjs`);
+2. **治理**（人工触发，绝不自动）——治理面板的 govern-run(LangGraph 图约束 agent:
+   sweep → plan → 逐文档摘要 → 主题合成 → rebuild-index;LLM 只做结构化判断，
+   写盘全走 govern.mjs)，候选页进评审队列人工裁决；
+3. **检索**——搜索页或直接 chat(quick/deep/deep-research 三档，带引用作答）。
+
+完整走查见 `guide.zh-CN.md` §7-8。三方契约是 `schema/contract.md`。
 
 ## 10. 升级
 
@@ -264,7 +256,7 @@ cd retrieval/scripts && npm install   # 刷新 better-sqlite3 预编译二进制
                                       # (仓库不含 package-lock.json——按当前 Node 现解析)
 ```
 
-skill 链接始终指向仓库，无需重做。若 SKILL.md 本身有改动，重启 Claude Code。
+agent 依赖有变化时重装:`<repo>/agent/.venv/Scripts/python -m pip install -e "<repo>/agent"`。
 
 ## 11. 故障排查
 
@@ -276,12 +268,12 @@ skill 链接始终指向仓库，无需重做。若 SKILL.md 本身有改动，�
 | `no knowledge base specified` | 传 `--kb <路径>` 或设 `KB_PATH` |
 | `kb directory does not exist` | 先建知识库根目录（见第 5 步）；脚本只自动建内部骨架，不建根目录 |
 | better-sqlite3 的 `npm install` 失败 | 无 registry 访问或平台无预编译二进制——见第 3 步离线说明 |
-| Claude Code 里看不到 skill | 重启 Claude Code；检查链接目标目录里有 `SKILL.md`；确认是链接不是复制（见第 4 步） |
+| 门户 LLM 任务报 python 找不到 / 模块错误 | agent venv 缺失或过期——重跑第 4 步，或用 `WEFT_AGENT_PYTHON` 指向有效解释器 |
 | `node: bad option: --test` 或 `fetch is not defined` | Node 版本低于 20——升级（见第 1 步） |
 | 查看器空白 / 翻转返回 409 | 有治理操作在同时进行——关掉查看器，跑 `sweep` 再试（单操作者纪律） |
 | 查看器/portal 写操作返回 403 `write requests require the per-startup token` | 开着的页面是上一次启动的，持的是已失效的旧令牌——刷新页面 |
 
 ## 12. 卸载
 
-删除 `~/.claude/skills/` 下的三个链接，再删除 `<repo>`。知识库是独立目录，
+直接删除 `<repo>`(`agent/.venv` 随之删除)。知识库是独立目录，
 保留或删除自便。

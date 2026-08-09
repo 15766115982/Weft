@@ -1,5 +1,21 @@
 # Development Log
 
+## ADR-0012 Phase 3 收官:claude 代码与 skill 形态删除,文档全量同步(2026-08-09)
+
+- **删除**:executor 'claude' + `ui/lib/claudecli.mjs`(注册表仅剩 langgraph);
+  `llm/`(Node) 整目录;三个 SKILL.md(acquisition/governance/retrieval skills/)。
+- **改道**:eval 套件原先进程内 import llm/lib——agent 服务新增 `search-smart` 与
+  `prompt`(通用模板 JSON prompt)两个任务,retrieval-eval/chat-eval 改走 CLI 契约;
+  门户 `/api/govern-context` 不再指 SKILL.md,治理页默认 prompt 改为 **brief 常驻
+  指令**语义(注入每个 LLM 判断节点,流程由图固定)。
+- **install.cmd/sh**:去掉 ~/.claude/skills 链接,改为 retrieval npm install +
+  agent/.venv(pip install -e agent)。
+- **文档**:CLAUDE.md(五服务/支柱修订/命令)、CONTEXT.md(术语表正式化)、
+  README.md、installation.md + installation.zh-CN.md、guide.zh-CN.md(§3 重装、
+  5.4 模型配置新增、§10 命令行化、§13 委托提示词去 skill、故障排查/自检单)
+  全部同步至 ADR-0012 现实。历史文档(docs/webui/* 等 spike/研究记录)保持原样。
+- 回归:e2e+eval 90 · agent pytest 70 · UI 96 · acq 75 · gov 83 · ret 46,全绿。
+
 ## ADR-0012 Phase 1+2 落地:agent/ 服务全量接替 llm/,治理图 agent 上线(2026-08-09)
 
 Phase 1(LLM 层移植,5 提交):agent/(Python)逐字继承 llm/ CLI 契约,12 任务 +

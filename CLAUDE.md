@@ -4,13 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-**Weft** (repo dir `knowledge-extension`) is a self-governing knowledge base system whose
-primary user is Claude Code itself. Three fully decoupled **services** — **acquisition**
-(Jira/Confluence/local files → normalized `raw/`), **governance** (`raw/` → curated `wiki/`),
-**retrieval** (hybrid FTS5 over approved wiki pages) — plus an on-demand localhost **UI portal**
-(`ui/`, pure consumer). No Python, no always-on services, no web platform.
+**Weft** (repo dir `knowledge-extension`) is a self-governing knowledge base system.
+Fully decoupled **services** — **acquisition** (Jira/Confluence/local files → normalized
+`raw/`), **governance** (`raw/` → curated `wiki/`), **retrieval** (hybrid FTS5 over approved
+wiki pages), **agent** (`agent/`, Python + LangGraph: all model calls + the graph-constrained
+govern run — ADR-0012) — plus an on-demand localhost **UI portal** (`ui/`, pure consumer).
+Python is confined to `agent/`; no always-on services, no web platform.
 
-The single most important architectural fact: **the three services have zero code dependency on
+The single most important architectural fact: **the services have zero code dependency on
 each other**; their only contract is the filesystem — directory structure + frontmatter spec in
 `schema/contract.md`. A KB is its own git repo, completely separate from this code repo.
 
@@ -24,8 +25,8 @@ User-mandated design contract (2026-08-05). Every feature/change should satisfy 
 trade-off arises, state which principle governs and why.
 
 1. **架构解耦,各板块独立,围绕同一 KB 工作** — Keep the architecture decoupled: each module
-   (acquisition / governance / retrieval / UI portal) stays independent and is developed as its
-   own capability package (skill + scripts). They coordinate **only through the KB directory** per
+   (acquisition / governance / retrieval / agent / UI portal) stays independent and is developed
+   as its own capability package behind a CLI contract. They coordinate **only through the KB directory** per
    `schema/contract.md`. When extending, extend one service — never introduce service-to-service
    code dependency, inter-process calls, or a shared lib. One writer per directory, single
    responsibility everywhere.
@@ -53,9 +54,9 @@ trade-off arises, state which principle governs and why.
 No build step and no linter. Plain Node ≥ 20 ESM scripts (`"type": "module"`), test runner is
 `node:test`. No root package.json — suites are per-service.
 
-**Install** (installs retrieval's `better-sqlite3` dep + links the three skills into
-`~/.claude/skills`): `install.cmd` (Windows) or `./install.sh` (Linux/macOS). Manual steps and
-troubleshooting: `docs/installation.md` §3–4.
+**Install** (installs retrieval's `better-sqlite3` dep + creates `agent/.venv` and
+`pip install -e agent`): `install.cmd` (Windows) or `./install.sh` (Linux/macOS). Manual steps
+and troubleshooting: `docs/installation.md` §3–4.
 
 **Tests** — all mocked, no network, no PATs:
 
@@ -63,6 +64,7 @@ troubleshooting: `docs/installation.md` §3–4.
 cd acquisition/scripts && npm test            # acquisition suite
 cd governance/scripts && npm test             # governance + thin viewer suites
 cd retrieval/scripts  && npm test             # retrieval suite (npm install first)
+cd agent              && .venv/Scripts/python -m pytest tests/   # agent service suite
 cd ui                 && node --test test/    # UI portal suite (no deps)
 node --test tests/e2e/ tests/eval/            # cross-service e2e + retrieval eval (from repo root)
 ```
@@ -83,19 +85,19 @@ order-dependent and share one scratch KB — don't reorder them casually.
 
 ## Architecture
 
-### The three services + UI portal
+### The services + UI portal
 
-Each service = a Claude Code **skill** (`SKILL.md`) + deterministic Node scripts in `scripts/`.
-Claude (the LLM) orchestrates: call acquisition → governance → retrieval in order; orchestration
-lives in no layer's code.
+Each service = deterministic scripts behind a stable CLI contract; orchestration lives in the
+UI portal (and in the agent service's governance graph), never in cross-service code imports.
 
-| Service | Skill | CLI entry | Writes |
-|---|---|---|---|
-| acquisition | `kb-acquire` | `acquisition/scripts/acquire.mjs <local\|jira\|confluence>` | `raw/` (exclusive) |
-| governance | `kb-govern` | `governance/scripts/govern.mjs <plan\|apply-source\|apply-entity\|apply-concept\|apply-synthesis\|approve\|reject\|archive\|dismiss-conflict\|sweep\|merge-page\|rebuild-index\|decisions>` (`apply-topic`/`merge-topic` = legacy synthesis aliases) | `wiki/` (exclusive) |
-| retrieval | `kb-search` | `retrieval/scripts/kb_search.mjs <search\|read\|reindex>` | `.kb/index.sqlite` only |
-| UI portal | — | `ui/serve.mjs` (port 8322) | per contract §1 whitelist |
-| thin viewer | — | `governance/viewer/serve.mjs` (port 8321) | frontmatter `status` only |
+| Service | CLI entry | Writes |
+|---|---|---|
+| acquisition | `acquisition/scripts/acquire.mjs <local\|jira\|confluence>` | `raw/` (exclusive) |
+| governance | `governance/scripts/govern.mjs <plan\|apply-source\|apply-entity\|apply-concept\|apply-synthesis\|approve\|reject\|archive\|dismiss-conflict\|sweep\|merge-page\|rebuild-index\|decisions>` (`apply-topic`/`merge-topic` = legacy synthesis aliases) | `wiki/` (exclusive) |
+| retrieval | `retrieval/scripts/kb_search.mjs <search\|read\|reindex>` | `.kb/index.sqlite` only |
+| agent (Python) | `python -m weft_agent <task> --kb <path>` (cwd `agent/`; tasks: check/init-config/init-prompts/summarize-source/classify-page/extract-entity/draft-concept/synthesize/govern-decide/semantic-check/chat/deep-research/complete/govern-run/search-smart/prompt) | `.kb/` scratch only (wiki writes go through govern.mjs) |
+| UI portal | `ui/serve.mjs` (port 8322) | per contract §1 whitelist |
+| thin viewer | `governance/viewer/serve.mjs` (port 8321) | frontmatter `status` only |
 
 Every CLI prints **JSON to stdout** for Claude to parse; usage errors exit 64. Boolean flags take
 no value (`--flag` / `--flag true` / `--flag false` only) and fail loudly otherwise — never pass
@@ -146,11 +148,12 @@ pages. Never flip a status by hand-editing a page; use the viewer/portal or the 
 - **`docs/` discipline**: `DEVLOG.md` gets new chronological entries at the **top**; contract
   changes require syncing `CONTEXT.md` + an ADR (contract §7 change discipline — increment-compatible
   only). ADRs in `docs/adr/`, one-off plans in `docs/plans/`, bug reports in `docs/bugs/`.
-- **Windows**: spawning `.cmd` (e.g. the `claude` CLI from the portal) requires the `cmd.exe /d /s /c`
-  wrapper — see `ui/lib/claudecli.mjs`. `spawn` without shell on `.cmd` fails with EINVAL.
-- **Skills resolve their script path relative to their install location**, not cwd — SKILL.md
-  instructions assemble `<skill-dir>/../../scripts/<script>.mjs`. Under the portal's agent
-  permission model, only bare `node <repo>/**` commands are allowed, so page bodies are passed via
-  `--body-file` (write into the KB's `.kb/bodies/`), never pipes/heredocs.
+- **Windows / Python**: the portal spawns the agent service as `<python> -m weft_agent`
+  resolved by `ui/lib/agentcli.mjs` (`WEFT_AGENT_PYTHON` > `agent/.venv` > PATH). Python
+  subprocesses that read service-CLI output must pass `encoding='utf-8'` — the Windows
+  locale codec (GBK) corrupts CJK JSON (P1-C5 bug).
+- **Page bodies go via `--body-file`** (scratch files in the KB's `.kb/bodies/`), never
+  pipes/heredocs — the govern graph does this internally, and it stays the headless-safe
+  CLI form everywhere.
 - Don't commit to a KB during tests — tests build scratch KBs under a temp dir and tear them down.
 - Commits in this repo are conventional one-liners prefixed by milestone/ADR (see `git log`).

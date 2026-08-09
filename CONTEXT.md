@@ -22,31 +22,26 @@ permission model.
 
 ### Services
 
-The system consists of four **fully decoupled** services. A "service" here is not a resident
-process but an independent capability package in the form of **Skill + scripts**, invoked on
-demand by Claude Code or by each other through a stable CLI contract:
+The system consists of five **fully decoupled** services. A "service" here is not a resident
+process but an independent capability package exposed through a stable CLI contract,
+invoked on demand by the UI portal, by each other, or directly by an operator
+(ADR-0012: the Claude Code skill form was retired with the claude CLI dependency):
 
 - **Acquisition service** — calls the APIs of each data source and pulls original documents
   to local storage. Also performs read-only upstream change detection (`acquire detect`).
 - **Governance service** — governs original documents and the existing wiki tree, producing a
   governed wiki tree. Every mutating action is recorded in a decision log.
 - **Retrieval service** — performs efficient, precise retrieval over the governed wiki tree.
-- **LLM service** — owns all model calls (Azure OpenAI via SPN) behind a single CLI contract.
-  Governance tasks use non-streaming JSON; chat and deep-research stream NDJSON. The LLM
-  service is the only service that talks to the model.
-
-Per ADR-0012 (accepted 2026-08-08, implementation in phases), the Node LLM service is being
-replaced by a fifth service; once landed, the inventory reads:
-
-- **Agent service** (`agent/`, Python + LangGraph) — the LLM service's successor: same CLI
-  contract, same 12 tasks, plus the **graph-constrained govern run** (fixed skeleton
-  sweep → plan → per-document → rebuild-index; graph nodes call `govern.mjs` subcommands, so
-  the governance CLI remains the only write path; the LLM produces structured per-node
-  judgments only). Model channels: **Copilot API gateway** (OpenAI-compatible) and
-  **Azure OpenAI SPN** — both supported via the `models.json` provider field. The official
-  Copilot SDK route was rejected on compliance grounds (bypasses the company gateway).
-  "Skill + scripts" no longer applies: the three SKILL.md files are retired with Claude
-  Code; services are plain CLI packages orchestrated by the portal.
+- **Agent service** (`agent/`, Python + LangGraph; ADR-0012) — owns all model calls behind
+  a single CLI contract (`python -m weft_agent <task> --kb …`): governance tasks
+  (non-streaming JSON), chat / deep-research (streaming NDJSON), the search judge, and the
+  **graph-constrained govern run** — fixed skeleton sweep → plan → per-document → synthesis →
+  rebuild-index, where graph nodes call `govern.mjs` subcommands (the governance CLI remains
+  the only write path) and the LLM produces structured per-node judgments only. Model
+  channels: **Azure OpenAI SPN** and any **OpenAI-compatible gateway** (Kimi / Copilot API
+  gateway / …), selected by the `models.json` provider field. The official Copilot SDK route
+  was rejected on compliance grounds (it bypasses the company gateway). It is the only
+  service that talks to the model, and the only Python in the repo.
 
 ### KB structure: two data zones + rules layer + candidate state machine
 
@@ -95,7 +90,7 @@ The original red lines are revised by ADR-0009:
    (candidate → approved / rejected); the portal's KB writes are confined to the contract
    §1 whitelist plus the new decision-reason flows, executed through a **per-KB serial write
    queue** that enforces the single-operator assumption at the tool layer. Governance rules
-   live forever only in the skills/scripts; prompts are editable per KB under `.kb/config/`.
+   live in the governance scripts and the agent service's prompts; prompts are editable per KB under `.kb/config/`.
 
 Tech stack: a Node script serving static files + a no-build HTML page (no framework build
 chain). Logging of review outcomes: the viewer/portal flips only `status` and never writes
@@ -106,9 +101,9 @@ human decision records for unlogged flips.
 
 ### Repository and deployment shape
 
-- **Single code repo**: the four services are top-level packages (acquisition/ governance/
-  retrieval/ llm/ each containing SKILL.md + scripts/) plus the M7 `ui/` portal package
-  (ADR-0006/0009, a pure consumer — zero reverse dependency), not split into per-service repos —
+- **Single code repo**: the services are top-level packages (acquisition/ governance/
+  retrieval/ each with `scripts/`, `agent/` with the Python package) plus the M7 `ui/` portal
+  package (ADR-0006/0009, a pure consumer — zero reverse dependency), not split into per-service repos —
   decoupling is guaranteed by "communicate only through the KB directory"; splitting repos
   would instead require syncing three copies of the contract.
 - **The rules layer is materialized as `schema/`**: contract.md (directory structure +
@@ -117,9 +112,9 @@ human decision records for unlogged flips.
 - **KB data is independent**: the KB directory (raw/ wiki/ log.md .kb/) is completely separate
   from the code repo and is its own independent Git repository; multiple KB instances may
   coexist.
-- **Distribution shape**: a Claude Code plugin; the three skills are globally available and
-  any session can point at any KB to work on.
-- **Script tech stack: Node.js (npm ecosystem), not Python**.
+- **Distribution shape**: plain CLI packages driven by the UI portal (or directly by an
+  operator); the Claude Code skill form was retired in ADR-0012.
+- **Script tech stack: Node.js (npm ecosystem); Python confined to `agent/` (ADR-0012)**.
   - SQLite/FTS5 via `better-sqlite3` (prebuilt Windows binaries, no build-chain problems);
     unicode61/trigram are both SQLite built-in tokenizers.
   - The vector leg (optional) via `node-llama-cpp` (GGUF) or an OpenAI-compatible endpoint
@@ -167,7 +162,7 @@ human decision records for unlogged flips.
 ### Retrieval service (v2, corrected through deep research)
 
 **Design philosophy: retrieval is an interface design problem, not a retriever design
-problem** — scripts own recall and bounding; the Claude session or LLM service owns precision
+problem** — scripts own recall and bounding; the agent service owns precision
 (iterative exploration, reranking, full-text reading). Chat and deep-research are first-class
 consumers of retrieval, not replacements for it.
 
@@ -188,7 +183,7 @@ consumers of retrieval, not replacements for it.
     source-system time source_version (when ISO) preferred, falling back to governance time
     updated_at; both are normalized to UTC at index time so lexicographic comparison is
     chronological; status is pinned to approved on the indexing side) + boolean combinations,
-    constructed by Claude or the LLM service (division: the logical query defines the candidate
+    constructed by the agent service (division: the logical query defines the candidate
     set, BM25 defines the ranking);
   - **Vector leg off by default**, configurable to an OpenAI-compatible endpoint or local GGUF
     (Qwen3-Embedding-0.6B for CJK corpora, not embeddinggemma); RRF (k=60) fusion; silently
@@ -204,7 +199,7 @@ consumers of retrieval, not replacements for it.
   construct a structured query → initial search → **CSQE** (extract key terms from hit
   snippets, rewrite, re-query; **HyDE-style speculative expansion forbidden**) → read the full
   text of hit sections → answer with wikilink citations; multi-hop questions follow graph
-  expansion. This loop is run by Claude Code sessions or by the LLM service's deep-research
+  expansion. This loop is run by the agent service's deep-research
   task.
 - **No offline graph-building pipeline** (GraphRAG-style): wiki backlinks + index.md already
   constitute explicit structure; agentic iterative retrieval suffices; re-evaluate only if
@@ -233,11 +228,11 @@ destructive ones, and those requiring business adjudication, go to the candidate
   supporting after-the-fact audit and rollback; the whole KB is a Git repository with one
   commit per governance run for automatic changes.
 - **Triggering: human-triggered or scheduled batch execution**. Operators explicitly initiate
-  governance in a Claude Code session or through the portal; scheduled daily jobs run the
+  governance through the portal's govern-run; scheduled daily jobs run the
   independent steps in order. Every governance run starts with `sweep`
   (reconciling any viewer/portal flips since the last run).
 - **Review shape**: the candidate queue is processed either item by item conversationally in
-  a Claude Code session (view diff, approve/reject/modify), in the thin viewer (M4), or in the
+  the portal's review queue (view diff, approve/reject/modify), in the thin viewer (M4), or in the
   portal's decision inbox; all channels drive the same state machine (contract §4) and write
   decision records.
 
