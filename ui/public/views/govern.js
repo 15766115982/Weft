@@ -132,7 +132,7 @@ export async function render(view) {
 
   function buildRunPanel() {
     const head = el('h2');
-    html(head, `${icon('sparkles', 16)} agent 治理运行 <span class="dim">I2 · 执行器:headless claude(acceptEdits + 仓库限定 · P2-2 加固)· 全程串行入队</span>`);
+    html(head, `${icon('sparkles', 16)} agent 治理运行 <span class="dim">I2 · 执行器:langgraph 图约束 agent(govern.mjs 为唯一写盘路径)· 全程串行入队</span>`);
     const helper = el('p', { class: 'dim', style: 'font-size:12px;margin:0 0 6px' },
       '下面是给 agent 的完整指令(已含计划快照与"全部留 candidate"约束),通常不用改。');
     const ta = el('textarea', { rows: '10', class: 'run-prompt' });

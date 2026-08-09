@@ -164,7 +164,7 @@ export function buildGovernPrompt(kb, userPrompt) {
 // synthesis). Streams executor events into job.log AND to onChunk (the SSE
 // 'run' channel, I4). The run's verdict comes from the executor's parsed
 // result event — never from an exit code (executor.mjs header).
-export function governRunJob(kb, { prompt, executor = 'claude' }, onChunk) {
+export function governRunJob(kb, { prompt, executor = 'langgraph' }, onChunk) {
   if (!executorNames().includes(executor)) {
     throw new Error(`unknown executor: ${executor} (registered: ${executorNames().join(', ')})`);
   }
