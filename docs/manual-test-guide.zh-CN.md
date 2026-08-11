@@ -1,5 +1,12 @@
 # 人工测试指南（流程与效果)
 
+> **⚠️ 已废弃(2026-08-12)**:本指南写于 Claude Code skill 形态时代,§0 检查项与
+> §1 技能对话流围绕的三个技能(kb-acquire / kb-govern / kb-search)已随 ADR-0012
+> 整体删除,自动化规模声明(39 项)与"topic 页"术语亦已过时。在新版本重写之前,
+> 人工验收请改走:上手指南 `docs/guide.zh-CN.md` §8(第一次完整闭环)+ 门户
+> Playwright 套件(`cd ui && npx playwright test`);自动化回归口径见 CLAUDE.md。
+> 本文仅作历史记录保留。
+
 > 配套自动化层:`node --test tests/`(39 项：流程回归 20 + 检索评估 19)。
 > 自动化已覆盖脚本层全部功能（除真实 Jira/Confluence 连接，见 `real-env-test.md`)。
 > 本指南覆盖**自动化测不到的部分**：技能对话流、摘要/合成的主观质量、viewer 交互体验、故障演练。

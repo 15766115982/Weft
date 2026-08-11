@@ -13,7 +13,12 @@ const LEVELS = [
 
 const store = {
   read(key) { try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch { return []; } },
-  write(key, arr) { localStorage.setItem(key, JSON.stringify(arr.slice(0, 100))); },
+  // keep the NEWEST 100: slice(0, 100) kept the oldest and silently dropped
+  // every new message once the cap was hit (2026-08-12 audit)
+  write(key, arr) {
+    try { localStorage.setItem(key, JSON.stringify(arr.slice(-100))); }
+    catch { /* quota exceeded — history is a convenience, never block send */ }
+  },
 };
 const historyKey = () => `ui.chat-history.${getKb() || 'default'}`;
 

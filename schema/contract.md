@@ -58,7 +58,7 @@ A knowledge base instance is a directory on disk, itself an independent Git repo
 | `log.md` | **append** | **append** | read | read | forbidden | **append** (manual-edit entries: `candidate:manual`, `file:edit`, `review` reject-restore) |
 | `.kb/acquire/` | **write** | read | read | read | read | read |
 | `.kb/govern/` | read | **write** | read | read | read | read |
-| `.kb/config/` | read | read | read | **write** (`prompts/` via `init-prompts` only) | read | read |
+| `.kb/config/` | read | read | read | **write** (`prompts/` via `init-prompts` only) | read | read + **write** (settings page: `models.json` + `prompts/` edits, user-ruled 2026-08-12 — the portal's settings console is the intended human edit path for per-KB model/prompt config) |
 | `.kb/ui/` | read | read | read | read | read | **write** |
 | `.kb/index.sqlite` / `.kb/search_state.json` / `.kb/candidates/` | read | read | **write** | read | read | read |
 | `.kb/acquire_runs.jsonl` / `.kb/govern_runs.jsonl` | **append** | read | read | read | read | **append** |

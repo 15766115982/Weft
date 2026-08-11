@@ -19,10 +19,10 @@ const MESSAGES = [
 ];
 
 test('agent distill-chat (stub) emits a valid chat distillation document', () => {
-  // PYTHONIOENCODING: python's stdout follows the Windows locale codec (GBK)
-  // and would corrupt the CJK JSON the body carries (the P1-C5 bug class).
-  const out = runLlm(kb, 'distill-chat', { messages: MESSAGES }, null,
-    { WEFT_LLM_STUB: '1', PYTHONIOENCODING: 'utf-8' });
+  // No PYTHONIOENCODING here on purpose: the agent CLI pins its own stdout to
+  // UTF-8 at the boundary (2026-08-12 fix), and this test guards that —
+  // the CJK payload below would come out GBK-mojibake without it.
+  const out = runLlm(kb, 'distill-chat', { messages: MESSAGES }, null, { WEFT_LLM_STUB: '1' });
   assert.equal(out.task, 'distill-chat');
   assert.equal(out.message_count, 2);
   assert.ok(out.body.includes('<!-- transcript-appendix -->'));

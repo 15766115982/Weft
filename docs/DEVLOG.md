@@ -1,5 +1,35 @@
 # Development Log
 
+## 多维度质量审核(agent teams)+ 第一批修复(2026-08-12)
+
+- **审核**:6 维度 finder 并行 + 逐条对抗性核实(46 agents),去重 40 条 →
+  35 confirmed / 3 plausible / 2 refuted。完整报告:`docs/bugs/2026-08-12-quality-audit.md`
+  (7 条标[已修],其余为 backlog)。
+- **本批修复**(4 High + 3 Medium/Low):
+  ① **白屏护栏闭合**:新增 `ui/test/public-syntax.test.mjs`——`node --check` 全量解析
+  public/**/*.js(排除 vendor),govern.js 同类转义事故从此在 node 单测层可见;
+  ② **manual-test-guide 废弃**:全文围绕已删 skill(ADR-0012),加废弃横幅指向
+  guide §8 + Playwright 套件,README 摘链;
+  ③ **graph.js**:`el(tag, null)` 三处 → `{}`(空 KB/超 2000 节点两条路径曾渲染成
+  TypeError 而非友好空态);导航树/图例/节点着色/悬浮卡从 ADR-0009 前的
+  topics/sources 二类迁到 entities/concepts/syntheses/sources 四类(此前实体/概念/
+  综合页被误标为来源页);
+  ④ **agent CLI stdout/stderr 入口 reconfigure utf-8**:此前 Windows GBK 下,输出含
+  emoji/生僻字时最后一次 print 抛 UnicodeEncodeError——任务全做完却 exit 1,门户把
+  成功的 govern-run/一键整理误判失败;CJK 摘要以 GBK 字节流出则作业日志乱码。
+  conftest run_cli 同步补 `encoding='utf-8'`(CLAUDE.md 既有纪律);e2e 撤掉
+  PYTHONIOENCODING 绕过,转为该修复的回归守卫;
+  ⑤ **chat.js 历史截断方向**:`slice(0,100)` 保留最旧 → `slice(-100)`(此前聊满
+  100 条后新消息永远写不进,聊天页事实瘫痪);localStorage 写入补 try/catch
+  (配额爆不再中断发送)。
+- 回归:UI 101(+1 护栏)· PW 21 · pytest 74 · chat-distill e2e 4,全绿。
+- 遗留值得先看的 backlog:契约第四服务仍名 'llm'、govern.mjs apply 全量重读 raw/
+  (O(N×语料) IO)、similarity exact-dup 组逃逸 similar 检查、deep-research 多轮
+  循环永不超 1 轮。
+- **当日裁决**:门户 settings 直写 `.kb/config/` 与契约矩阵的矛盾——用户裁定
+  **portal 可修改 config**(settings 页即 per-KB 模型/prompt 的既定人工编辑路径),
+  契约 §1 写权限矩阵 `.kb/config/` 行已修订放行(models.json + prompts/)。
+
 ## ADR-0013:chat 一键整理 — 对话蒸馏沉淀 raw/chat/(2026-08-11)
 
 - **功能**:门户聊天页新增「一键整理」——整段对话经 agent 蒸馏任务生成结构化文档

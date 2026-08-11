@@ -43,7 +43,7 @@ def run_cli(kb, task, input=None, output_path=None, env=None):
     if output_path:
         args += ["--output-file", str(output_path)]
     proc = subprocess.run(
-        args, capture_output=True, text=True,
+        args, capture_output=True, text=True, encoding="utf-8",
         cwd=str(AGENT_ROOT),
         env={**os.environ, "PYTHONPATH": str(AGENT_ROOT), **(env or {})},
     )

@@ -11,6 +11,17 @@ from pathlib import Path
 
 from .config import resolve_kb_root
 
+# Windows: stdout/stderr follow the locale codec (GBK). The final JSON summary
+# is printed with ensure_ascii=False, so a CJK/emoji payload would either emit
+# GBK bytes (mojibake for the UTF-8-decoding caller) or raise
+# UnicodeEncodeError on the LAST print — after all work is done and the output
+# file is written, turning a successful run into exit 1 (2026-08-12 audit).
+# Pin UTF-8 at the boundary instead of requiring every caller to set
+# PYTHONIOENCODING.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 TASKS = [
     "check",
     "init-prompts",

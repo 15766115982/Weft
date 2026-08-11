@@ -75,6 +75,6 @@ node --test tests/e2e/ tests/eval/            # 91: e2e pipeline + govern-run + 
 `tests/` builds a scratch KB from a fixture corpus (`tests/fixtures/inbox/`) and
 drives the real CLIs through every function except the live Jira/Confluence
 connections; the eval scores Hit@1/Hit@5/MRR against a golden query set and
-writes `docs/test-reports/retrieval-eval-latest.md`. Manual (human-in-the-loop)
-testing guide: [docs/manual-test-guide.zh-CN.md](docs/manual-test-guide.zh-CN.md);
-live Jira/Confluence acceptance: [docs/real-env-test.md](docs/real-env-test.md).
+writes `docs/test-reports/retrieval-eval-latest.md`. Browser-level acceptance:
+`cd ui && npx playwright test`; live Jira/Confluence acceptance:
+[docs/real-env-test.md](docs/real-env-test.md).

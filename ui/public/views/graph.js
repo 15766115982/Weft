@@ -45,9 +45,9 @@ export async function render(view, params) {
 
   // ---------- navigation tree ----------
   // Node-scan driven (ADR-0007 Decision 2): the directory tree is the type
-  // system. Topics/Sources groups mirror contract.md's structure 1:1; the
-  // candidate status badge needs the scan; coverage count comes from the graph
-  // layer (derived topic→source edge count).
+  // system. The four groups mirror contract.md §3 1:1 (ADR-0009 page types);
+  // the candidate status badge needs the scan; coverage count comes from the
+  // graph layer (derived page→source edge count).
   const treeFilter = el('input', { class: 'tree-filter', placeholder: '过滤导航树…' });
   const treeList = el('nav', { class: 'tree' });
   treePane.append(treeFilter, treeList);
@@ -57,7 +57,9 @@ export async function render(view, params) {
     treeList.textContent = '';
     const q = treeFilter.value.trim().toLowerCase();
     const groups = [
-      { label: '主题 Topics', nodes: treeNodes.filter((n) => n.path.startsWith('wiki/topics/')) },
+      { label: '实体 Entities', nodes: treeNodes.filter((n) => n.path.startsWith('wiki/entities/')) },
+      { label: '概念 Concepts', nodes: treeNodes.filter((n) => n.path.startsWith('wiki/concepts/')) },
+      { label: '综合 Syntheses', nodes: treeNodes.filter((n) => n.path.startsWith('wiki/syntheses/')) },
       { label: '来源 Sources', nodes: treeNodes.filter((n) => n.path.startsWith('wiki/sources/')) },
     ];
     for (const g of groups) {
@@ -92,7 +94,7 @@ export async function render(view, params) {
   // fresh link is missing while dangling_links (live-scanned) disagrees.
   const lag = el('span', { class: 'dim', style: 'font-size:11px', title: '边取自检索索引,页面重建索引前是冻结的:指向新建页面的边会迟到,plan 的悬空链接(实时扫描)可能已经算它有效。治理台 rebuild-index 可强制重建。' }, '边可能滞后');
   const legend = el('span', { class: 'graph-legend dim' });
-  html(legend, '<span class="lg-topic">●</span> 主题页 <span class="lg-source">○</span> 来源页 <span class="lg-cand">◌</span> 候选 <span class="lg-deriv">┅</span> 溯源边');
+  html(legend, '<span class="lg-topic">●</span> 知识页(实体/概念/综合) <span class="lg-source">○</span> 来源页 <span class="lg-cand">◌</span> 候选 <span class="lg-deriv">┅</span> 溯源边');
   const bar = el('div', { class: 'graph-bar' }, focusInput, candBtn, isoBtn, relayBtn, legend, lag, stats);
 
   const stage = el('div', { class: 'graph-stage' });
@@ -255,13 +257,15 @@ export async function render(view, params) {
       const on = !dimAll || focusSet.has(n.path);
       ctx.globalAlpha = on ? 1 : 0.18;
       const r = radius(n);
-      const isTopic = n.path.startsWith('wiki/topics/');
+      // ADR-0009: curated pages (entities/concepts/syntheses) are the filled
+      // class; only wiki/sources/ renders as the outlined "source" class.
+      const isSource = n.path.startsWith('wiki/sources/');
       ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, 6.2832);
       if (n.status === 'candidate') {
         ctx.fillStyle = c.soft; ctx.fill();
         ctx.setLineDash([3 / cam.k, 3 / cam.k]); ctx.lineWidth = 1.4 / cam.k;
         ctx.strokeStyle = '#b45309'; ctx.stroke(); ctx.setLineDash([]);
-      } else if (isTopic) {
+      } else if (!isSource) {
         ctx.fillStyle = c.celadon; ctx.fill();
       } else {
         ctx.fillStyle = c.paper; ctx.fill();
@@ -297,7 +301,9 @@ export async function render(view, params) {
   }
   function showTip(n, mx, my) {
     if (!n) { tip.hidden = true; return; }
-    const meta = [n.path.startsWith('wiki/topics/') ? '主题页' : '来源页',
+    const KIND_LABEL = { 'wiki/sources/': '来源页', 'wiki/entities/': '实体页', 'wiki/concepts/': '概念页', 'wiki/syntheses/': '综合页' };
+    const kindLabel = Object.entries(KIND_LABEL).find(([prefix]) => n.path.startsWith(prefix))?.[1] || '页面';
+    const meta = [kindLabel,
       STATUS_LABEL[n.status] || n.status || '', `${n.deg} 连接`].filter(Boolean).join(' · ');
     html(tip, `<span class="br">[[</span>${esc(n.title)}<span class="br">]]</span><span class="dim">${esc(meta)}</span>`);
     tip.hidden = false;
@@ -393,8 +399,8 @@ export async function render(view, params) {
 
     if (raw.nodes.length > MAX_AUTO) {
       const cover = el('div', { class: 'graph-guard' });
-      const btn = el('button', null, '仍然渲染');
-      cover.append(el('p', null, `这个知识库有 ${raw.nodes.length} 个页面,超过客户端布局的建议上限(${MAX_AUTO})。渲染可能变慢。`), btn);
+      const btn = el('button', {}, '仍然渲染');
+      cover.append(el('p', {}, `这个知识库有 ${raw.nodes.length} 个页面,超过客户端布局的建议上限(${MAX_AUTO})。渲染可能变慢。`), btn);
       stage.append(cover);
       btn.addEventListener('click', () => { cover.remove(); start(); });
       return;
@@ -433,7 +439,7 @@ export async function render(view, params) {
     await load();
     if (!raw.nodes.length) {
       stage.append(el('div', { class: 'empty-hint' },
-        el('p', null, '还没有页面可连成图 — 先去采集页投入第一批文档,或到治理台让 agent 起草。')));
+        el('p', {}, '还没有页面可连成图 — 先去采集页投入第一批文档,或到治理台让 agent 起草。')));
     }
   } catch (err) {
     stage.append(el('pre', { class: 'error' }, err.message));
