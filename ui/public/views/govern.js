@@ -106,12 +106,8 @@ export async function render(view) {
       `${graphFlow || 'sweep → plan → documents → synthesis → rebuild-index'}。)`,
       '可写:摘要语言/风格偏好、主题聚合倾向、冲突处理原则、本轮治理重点等。',
       '留空则按默认规范治理。',
-      lines.length ? `
-本轮 pending(plan):
-${lines.join('
-')}` : '',
-    ].join('
-');
+      lines.length ? `\n本轮 pending(plan):\n${lines.join('\n')}` : '',
+    ].join('\n');
   }
 
   function startRunPanel() {
