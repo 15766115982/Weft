@@ -92,10 +92,10 @@ UI portal (and in the agent service's governance graph), never in cross-service 
 
 | Service | CLI entry | Writes |
 |---|---|---|
-| acquisition | `acquisition/scripts/acquire.mjs <local\|jira\|confluence>` | `raw/` (exclusive) |
+| acquisition | `acquisition/scripts/acquire.mjs <local\|chat\|jira\|confluence>` | `raw/` (exclusive) |
 | governance | `governance/scripts/govern.mjs <plan\|apply-source\|apply-entity\|apply-concept\|apply-synthesis\|approve\|reject\|archive\|dismiss-conflict\|sweep\|merge-page\|rebuild-index\|decisions>` (`apply-topic`/`merge-topic` = legacy synthesis aliases) | `wiki/` (exclusive) |
 | retrieval | `retrieval/scripts/kb_search.mjs <search\|read\|reindex>` | `.kb/index.sqlite` only |
-| agent (Python) | `python -m weft_agent <task> --kb <path>` (cwd `agent/`; tasks: check/init-config/init-prompts/summarize-source/classify-page/extract-entity/draft-concept/synthesize/govern-decide/semantic-check/chat/deep-research/complete/govern-run/search-smart/prompt) | `.kb/` scratch only (wiki writes go through govern.mjs) |
+| agent (Python) | `python -m weft_agent <task> --kb <path>` (cwd `agent/`; tasks: check/init-config/init-prompts/summarize-source/classify-page/extract-entity/draft-concept/synthesize/govern-decide/semantic-check/chat/deep-research/complete/govern-run/search-smart/prompt/distill-chat) | `.kb/` scratch only (wiki writes go through govern.mjs) |
 | UI portal | `ui/serve.mjs` (port 8322) | per contract §1 whitelist |
 | thin viewer | `governance/viewer/serve.mjs` (port 8321) | frontmatter `status` only |
 

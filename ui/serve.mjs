@@ -41,6 +41,7 @@ import {
   UPLOAD_MAX, uploadJob, pullJob, inboxDeleteJob, rawDeleteJob, rawMoveJob,
   authCheck, probeCheck, sourceFreshness, listInbox, detectJob,
 } from './lib/acquire.mjs';
+import { distillJob } from './lib/distill.mjs';
 
 const UI_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(UI_DIR, 'public');
@@ -544,6 +545,16 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
           const body = JSON.parse(await readBody(req) || '{}');
           const kb = registry.resolve(body.kb).path;
           const spec = pullJob(kb, body);
+          return json(res, 202, { job: jobs.enqueue(kb, spec) });
+        }
+
+        // ADR-0013: one-click chat distillation → raw/chat/ (queued; the
+        // agent's distill-chat task + the acquisition chat connector do the
+        // work, the portal never writes raw/ itself).
+        if (url.pathname === '/api/distill-chat') {
+          const body = JSON.parse(await readBody(req) || '{}');
+          const kb = registry.resolve(body.kb).path;
+          const spec = distillJob(kb, { messages: body.messages }); // factory validates → 400
           return json(res, 202, { job: jobs.enqueue(kb, spec) });
         }
 

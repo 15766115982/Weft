@@ -24,7 +24,8 @@ A knowledge base instance is a directory on disk, itself an independent Git repo
 │   ├── jira/<issue-key>.md          # e.g. raw/jira/PROJ-123.md
 │   ├── confluence/<page-id>.md      # e.g. raw/confluence/123456.md
 │   ├── confluence/<page-id>.assets/<file>  # binary evidence sidecars (Gliffy PNGs; amendment 2026-08-03 phase 1)
-│   └── local/<hash8>-<slug>.md      # output of the local-file connector
+│   ├── local/<hash8>-<slug>.md      # output of the local-file connector
+│   └── chat/conv-<hash8>.md         # chat distillation documents (chat connector; amendment 2026-08-11, ADR-0013)
 ├── wiki/                    # Curation zone — exclusive write by the governance service
 │   ├── sources/<source>-<source_id>.md   # source summary pages, 1:1 with raw documents
 │   ├── entities/<slug>.md                # entity pages: named things (systems, teams, products)
@@ -72,7 +73,8 @@ Rules:
 - The **UI portal** (ADR-0006, `ui/`) is a team-server human console (ADR-0009 relaxes the
   original on-demand-only red line; it still runs on demand by default but may be deployed as
   a resident intranet service). Its KB writes are confined to an explicit whitelist: ① inbox/
-  uploads (staging area of the local connector — never raw/ directly), ② raw/ delete & move
+  uploads (staging area of the local connector — never raw/ directly; the sibling
+  `inbox-chat/` directory is the same kind of staging for the chat connector, ADR-0013), ② raw/ delete & move
   (snapshot first, impact preview first, executed via its per-KB serial write queue; move =
   new identity — the old document becomes an orphan, as with any rename), ③ frontmatter
   `status` flips via the governance statusflip primitive,
@@ -116,7 +118,8 @@ Asset filenames are sanitized (path separators/traversal rejected, image extensi
 
 ```yaml
 ---
-source: jira | confluence | local     # source system (required)
+source: jira | confluence | local | chat  # source system (required; `chat` = portal chat
+                                # distillation documents, amendment 2026-08-11, ADR-0013)
 source_id: "PROJ-123"                 # stable ID within the source (required)
 source_url: "https://jira.example.com/browse/PROJ-123"  # required
 source_version: "2026-07-28T02:30:00.000Z"  # source-system version number / update time (required).
@@ -130,6 +133,26 @@ connector: "jira@1.0.0"               # the connector that generated it, with ve
 extra: {}                             # source-specific metadata (optional, e.g. jira's issue_type/status/assignee)
 ---
 ```
+
+### Chat source documents (amendment 2026-08-11, ADR-0013)
+
+The `chat` source carries **chat distillation documents**: the UI portal's one-click
+"distill conversation" feature sends the current chat transcript to the agent service's
+distillation task, stages the result in `inbox-chat/` (a sibling of the local connector's
+`inbox/` — staging inside `inbox/` would be double-ingested by the local connector's
+recursive walk), and the acquisition chat connector
+lands it in `raw/chat/` (raw/ stays acquisition-exclusive). The document body is
+self-contained: an LLM-distilled structured text in the conversation's own language, where
+every distilled point carries a `[T-n]` reference marker, followed by a numbered
+**transcript appendix** (one entry per chat message, with role/timestamp) at the end of the
+same file — the markers resolve inside the document and the transcript is part of the hashed
+body. Identity rules: `source_id = conv-<transcript-hash8>` (re-distilling the same
+conversation overwrites the same document — idempotent); `source_url` is the pseudo-URL
+`weft://chat/<source_id>`; `source_version` is the timestamp of the last message;
+`connector = "chat@1.0.0"`. Both the portal (pre-staging) and the connector (pre-write)
+mechanically validate that every marker resolves to an appendix entry and that the appendix
+entry count equals the transcript message count — failure is a fail-closed skip, never a
+partial write.
 
 ### Incremental rules
 

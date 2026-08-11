@@ -1,5 +1,34 @@
 # Development Log
 
+## ADR-0013:chat 一键整理 — 对话蒸馏沉淀 raw/chat/(2026-08-11)
+
+- **功能**:门户聊天页新增「一键整理」——整段对话经 agent 蒸馏任务生成结构化文档
+  (每个整理点带 `[T-n]` 引用),文末机械追加编号转录附录(角色/时间戳,模型不碰
+  附录,保真结构性保证),落盘 `raw/chat/`(UI 显示"用户对话整理"),下次治理运行
+  进入 wiki 并可检索(用户裁决:不挂立即治理链)。
+- **契约修订**(increment-compatible):source 枚举 + `chat`;目录树 + `raw/chat/`
+  `conv-<hash8>.md`;身份规则 `source_id=conv-<转录附录hash8>`(同一对话重复整理 =
+  覆盖同一篇,幂等)、`source_url=weft://chat/<id>` 伪 URL、`source_version` = 末条
+  消息时间、`connector=chat@1.0.0`;写权限矩阵不变(raw/ 仍 acquisition 独占)。
+- **链路**:门户 job(串行写队列)→ agent `distill-chat`(唯一模型调用,prompt 入
+  `.kb/config/prompts/distill-chat.md`)→ 门户预检(fail-closed 层 1:引用可解析/
+  附录条数=消息数/无 frontmatter)→ 暂存 `inbox-chat/`(与 `inbox/` 平级——放进
+  inbox 会被 local 连接器递归扫描重复采集)→ `acquire.mjs chat` 连接器再校验
+  (fail-closed 层 2)落盘 → 清理暂存。失败不留半成品;对话超 30000 字符显式报错,
+  不静默截断。
+- **deliberate duplication 新成员**:附录锚点(`<!-- transcript-appendix -->` /
+  `### [Tn] role · ts` 格式)在 agent distill_chat.py(生成)、ui/lib/distill.mjs
+  (预检)、acquisition/connectors/chat.mjs(入口检)三处手工同步,与 frontmatter.mjs
+  同一纪律。
+- **测试**:agent pytest +5(distill 任务/中英文附录头/空与超长拒绝);acq +5
+  (摄入+身份/六种畸形 fail-closed/重蒸馏覆盖与幂等/mtime 兜底/CRLF 归一);
+  UI +4(端点全链路真连接器/幂等 unchanged/预检 fail-closed 无半成品/输入与鉴权);
+  e2e +4(chat-distill.test.mjs 独立 scratch KB:agent 桩→采集→治理→检索全链)。
+  全量回归:acq 80 · gov 83 · ret 46 · pytest 74 · UI 100 · e2e+eval 94(+1 个
+  opt-in live eval 跳过,旧例)全绿。
+- 坑:python stdout 在 Windows 走 GBK,e2e 直读 stdout 需 `PYTHONIOENCODING=utf-8`
+  (P1-C5 同类;门户生产路径读输出文件不受影响)。
+
 ## ADR-0012 Phase 3 收官:claude 代码与 skill 形态删除,文档全量同步(2026-08-09)
 
 - **删除**:executor 'claude' + `ui/lib/claudecli.mjs`(注册表仅剩 langgraph);

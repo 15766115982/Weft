@@ -175,6 +175,11 @@ def stub_for(prompt_name: str, vars: dict) -> str:
     if prompt_name == "deep-research":
         return (f'Stub deep-research answer for "{question}". '
                 "In real mode this would perform multi-round retrieval.")
+    if prompt_name == "distill-chat":
+        return json.dumps({
+            "title": "Stub 对话整理",
+            "body": "Stub distilled point one [T1].\n\nStub distilled point two [T1].",
+        })
     if prompt_name == "govern-source-page":
         return json.dumps({
             "title": title,

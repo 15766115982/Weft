@@ -1,6 +1,6 @@
 // views/chat.js — Phase 4: page-level Q&A with quick / deep / deep-research.
 // Streaming NDJSON from the LLM service is pushed as SSE and rendered live.
-import { api, apiPost, getKb } from '../lib/api.js';
+import { api, apiPost, waitJob, getKb } from '../lib/api.js';
 import { html, esc, el } from '../lib/render.js';
 import { icon } from '../lib/icons.js';
 import { renderMarkdown, setKnownPages } from '../lib/md.js';
@@ -42,7 +42,11 @@ export async function render(view, params) {
   }
   const clearBtn = el('button', { class: 'sm', title: '清空当前 KB 的聊天记录' }, '清空');
   clearBtn.addEventListener('click', () => { messages = []; saveHistory(); renderMessages(); });
-  header.append(el('h2', {}, '问答'), levelGroup, clearBtn);
+  // ADR-0013: one-click distillation of the whole conversation → raw/chat/.
+  const distillBtn = el('button', { class: 'sm', title: '把当前对话蒸馏成结构化文档,沉淀到「用户对话整理」(raw/chat/)' }, '一键整理');
+  distillBtn.addEventListener('click', distill);
+  const distillNote = el('div', { class: 'chat-distill-note', hidden: '' });
+  header.append(el('h2', {}, '问答'), levelGroup, clearBtn, distillBtn);
 
   function setLevel(v) {
     level = v;
@@ -61,7 +65,7 @@ export async function render(view, params) {
   html(sendBtn, `${icon('cornerDownLeft', 14)} 发送`);
   inputRow.append(input, sendBtn);
 
-  wrap.append(header, msgBox, thinkingBox, inputRow);
+  wrap.append(header, distillNote, msgBox, thinkingBox, inputRow);
 
   if (prefilled) {
     input.value = prefilled;
@@ -71,6 +75,8 @@ export async function render(view, params) {
   function renderMessages() {
     msgBox.textContent = '';
     clearBtn.hidden = messages.length === 0;
+    distillBtn.hidden = messages.length === 0;
+    if (!messages.length) distillNote.hidden = true;
     if (!messages.length) {
       msgBox.append(welcomeCard());
       return;
@@ -142,10 +148,33 @@ export async function render(view, params) {
 
   function saveHistory() { store.write(historyKey(), messages); }
 
+  // ADR-0013: distill the whole conversation into raw/chat/ via the queued job
+  // (agent distill task → portal pre-check → acquisition chat connector).
+  async function distill() {
+    if (!messages.length || streaming) return;
+    distillBtn.disabled = true;
+    distillNote.hidden = false;
+    distillNote.textContent = '整理中:蒸馏对话 → 校验引用 → 落盘 raw/chat/ …(含 LLM 调用,可能需要几十秒)';
+    try {
+      const payload = messages.map((m) => ({ role: m.role, text: m.text, ts: m.ts }));
+      const { job } = await apiPost('/api/distill-chat', { messages: payload });
+      const done = await waitJob(job.id, { timeout: 300000 });
+      const r = done.result || {};
+      const actionText = r.action === 'updated' ? '已更新' : r.action === 'unchanged' ? '内容未变' : '已沉淀';
+      distillNote.textContent = '';
+      const link = el('a', { href: `#/browse?raw=${encodeURIComponent(r.path)}` }, ` ${r.title || r.path} `);
+      distillNote.append(`✅ ${actionText}至「用户对话整理」(raw/chat/):`, link, '— 下次治理运行后进入 wiki 并可检索。');
+    } catch (err) {
+      distillNote.textContent = `❌ 整理失败:${err.message}`;
+    } finally {
+      distillBtn.disabled = false;
+    }
+  }
+
   async function send() {
     const text = input.value.trim();
     if (!text || streaming) return;
-    messages.push({ role: 'user', text });
+    messages.push({ role: 'user', text, ts: new Date().toISOString() });
     saveHistory();
     renderMessages();
     input.value = '';
@@ -160,7 +189,7 @@ export async function render(view, params) {
     thinkingBox.textContent = level === 'quick' ? '思考中…' : '检索并整理中…';
     scrollBottom();
 
-    const assistantMsg = { role: 'assistant', text: '', level, steps: [], citations: [] };
+    const assistantMsg = { role: 'assistant', text: '', level, steps: [], citations: [], ts: new Date().toISOString() };
     messages.push(assistantMsg);
     // Keep a reference to the live bubble so we can stream into it.
     let liveBubble = null;

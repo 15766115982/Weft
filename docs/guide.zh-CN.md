@@ -333,7 +333,8 @@ note: run at most ONE portal per knowledge base (the serial write queue is per-p
 
 所有服务都是独立 CLI,不开 portal 也能直接用:
 
-- 采集:`node <repo>/acquisition/scripts/acquire.mjs local --kb <路径>`;
+- 采集:`node <repo>/acquisition/scripts/acquire.mjs local --kb <路径>`
+  (chat 连接器同理:`acquire.mjs chat`,采集门户"一键整理"暂存在 `inbox-chat/` 的对话蒸馏文档);
 - 治理:`agent/.venv/Scripts/python -m weft_agent govern-run --kb <路径>
   --output-file <ndjson 路径>`(cwd 在 `agent/` 或设 `PYTHONPATH`);
 - 检索:`node <repo>/retrieval/scripts/kb_search.mjs search "<词>" --kb <路径>`;

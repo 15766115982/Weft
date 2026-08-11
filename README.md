@@ -43,7 +43,7 @@ govern-run / search / chat). Full smoke-test commands:
 
 | Path | Content |
 |---|---|
-| `acquisition/` | Acquisition service: `scripts/` (connectors: local, jira, confluence) |
+| `acquisition/` | Acquisition service: `scripts/` (connectors: local, chat, jira, confluence) |
 | `governance/` | Governance service: `scripts/` (plan/apply/review/sweep) + `viewer/` (thin review UI) |
 | `retrieval/` | Retrieval service: `scripts/` (dual FTS5 + graph expansion) |
 | `agent/` | Agent service (Python + LangGraph): all model calls (governance tasks, chat, deep-research, judge) + the graph-constrained govern run |

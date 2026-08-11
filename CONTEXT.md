@@ -293,6 +293,19 @@ type (an entity does not merge with a concept).
   precedent.
 - `raw/` is organized into directories by source system, not by project (project attribution
   is a curation judgment, a governance-layer responsibility).
+- **Chat distillation document** — a raw document of the **`chat` source** (`raw/chat/`,
+  displayed in the portal as "用户对话整理") whose body is LLM-distilled from a portal
+  chat conversation: a structured distilled text in which every distilled point carries a
+  reference marker, plus a numbered **transcript appendix** at the end of the same file (one
+  entry per chat message, with role/timestamp). The reference markers resolve inside the same
+  document, so each distilled point is verifiable against the verbatim transcript; the
+  transcript is part of the hashed body, never a separate file or a `.kb/` artifact.
+  Write path: portal sends the transcript to the agent service's distillation task, drops the
+  result into the `inbox-chat/` staging area (a sibling of the local connector's `inbox/`),
+  and invokes the acquisition chat connector — `raw/` stays acquisition-exclusive. The distilled text is written in **the conversation's own
+  language** (raw/ keeps source language; English normalization happens at governance time).
+  Landing in `raw/` completes the feature — it enters the wiki through the **next regular
+  governance run**, with no special immediate single-document chain.
 
 **Single-responsibility principle**: every directory has exactly one writer; orchestration is
 the Claude session's or the portal scheduler's responsibility.

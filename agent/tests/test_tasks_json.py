@@ -78,6 +78,47 @@ def test_output_file_written(kb, tmp_path):
     assert summary["output"] == str(out_file)
 
 
+MESSAGES = [
+    {"role": "user", "text": "重试策略是什么?", "ts": "2026-08-11T10:00:00+08:00"},
+    {"role": "assistant", "text": "指数退避,见 [[retry-policy]]。", "ts": "2026-08-11T10:00:05+08:00"},
+]
+
+
+def test_distill_chat(kb):
+    out = run_task(kb, "distill-chat", {"messages": MESSAGES})
+    assert out["task"] == "distill-chat"
+    assert out["message_count"] == 2
+    body = out["body"]
+    assert body.startswith("# Stub 对话整理\n")
+    # mechanical appendix: marker + one entry per message, in order
+    assert "<!-- transcript-appendix -->" in body
+    assert "### [T1] user · 2026-08-11T10:00:00+08:00" in body
+    assert "### [T2] assistant · 2026-08-11T10:00:05+08:00" in body
+    assert body.index("[T1]") < body.index("<!-- transcript-appendix -->")  # distilled cites first
+    # CJK conversation → Chinese appendix heading
+    assert "## 附录:对话转录" in body
+
+
+def test_distill_chat_english_heading(kb):
+    msgs = [{"role": "user", "text": "What is the retry policy?"}]
+    out = run_task(kb, "distill-chat", {"messages": msgs})
+    assert "## Transcript Appendix" in out["body"]
+    assert "### [T1] user · unknown-time" in out["body"]  # missing ts degrades, not crashes
+
+
+def test_distill_chat_rejects_empty(kb):
+    proc = run_cli(kb, "distill-chat", input={"messages": []}, env={"WEFT_LLM_STUB": "1"})
+    assert proc.returncode == 1
+    assert "messages" in json.loads(proc.stderr)["error"]
+
+
+def test_distill_chat_rejects_over_budget(kb):
+    msgs = [{"role": "user", "text": "x" * 30001}]
+    proc = run_cli(kb, "distill-chat", input={"messages": msgs}, env={"WEFT_LLM_STUB": "1"})
+    assert proc.returncode == 1
+    assert "对话过长" in json.loads(proc.stderr)["error"]
+
+
 def test_prompt_task_generic_template(kb):
     out = run_task(kb, "prompt", {"prompt_name": "govern-decide",
                                   "vars": {"decision_type": "approve", "context": "x", "precedents": ""}})

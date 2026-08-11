@@ -78,6 +78,13 @@ async function main() {
       summary = run(kbRoot, { inbox, prune: args.prune === undefined ? false : boolFlag(args.prune, '--prune') });
       break;
     }
+    case 'chat': {
+      const { run } = await import('./connectors/chat.mjs');
+      const inboxConf = config.connectors?.chat?.inbox || 'inbox-chat/';
+      const inbox = path.resolve(kbRoot, args.inbox || inboxConf);
+      summary = run(kbRoot, { inbox });
+      break;
+    }
     case 'jira': {
       const { run, check, probeZephyr } = await import('./connectors/jira.mjs');
       if (args.check !== undefined && boolFlag(args.check, '--check')) {
@@ -104,9 +111,10 @@ async function main() {
       break;
     }
     default:
-      console.error('usage: node acquire.mjs <local|jira|confluence> [--kb <path>] [options]');
+      console.error('usage: node acquire.mjs <local|chat|jira|confluence> [--kb <path>] [options]');
       console.error('       node acquire.mjs detect <local|jira|confluence> [--kb <path>] [options]');
       console.error('  local: [--inbox <path>] [--prune]  --prune removes orphaned docs (default report-only)');
+      console.error('  chat:  [--inbox <path>]  ingests chat distillation docs staged in inbox-chat/ (ADR-0013)');
       console.error('  jira:  [--jql "<JQL>"] [--max <n>] [--check] [--probe]  scope from kb.json connectors.jira.jql; PAT via env var');
       console.error('  confluence: [--cql "<CQL>"] [--max <n>] [--check] [--probe <pageId>]  scope from kb.json connectors.confluence.spaces/.cql; PAT via env var');
       process.exitCode = 64;
