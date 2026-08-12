@@ -317,7 +317,7 @@ structure + frontmatter spec. Zero code dependency between layers, zero inter-pr
 Any layer can be independently rewritten or replaced.
 
 - **Orchestration moved up to the LLM or the portal scheduler**: the Claude session or a daily
-  job calls acquisition → governance → retrieval → llm in order; orchestration logic exists in
+  job calls acquisition → governance → retrieval → agent in order; orchestration logic exists in
   no layer's code; layers contain only deterministic scripts.
 - **Indexes are derived artifacts**: SQLite and other indexes are outside the contract and can
   be fully rebuilt from Markdown at any time (except adjudication memory in `.kb/govern/` and

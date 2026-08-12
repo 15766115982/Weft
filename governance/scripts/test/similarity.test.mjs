@@ -75,10 +75,27 @@ test('findGroups: exact duplicate requires BOTH sides to carry content_hash', ()
   assert.equal(missing.groups.filter((g) => g.category === 'duplicate').length, 0);
 });
 
+test('findGroups: dup-group membership does NOT shield a third similar version (2026-08-12 escape fix)', () => {
+  // A and B are exact duplicates of each other; C is a newer (similar, not
+  // identical) version of the same document. Previously the (A,C) and (B,C)
+  // pairs were BOTH skipped because one side was a dup-group member, so C
+  // escaped similar-version detection entirely. Only the (A,B) pair — already
+  // classified duplicate — may be skipped.
+  const { groups } = findGroups([
+    doc('raw/local/a.md', 'Payment retry', latinV1, 'sha256:SAME'),
+    doc('raw/local/b.md', 'Payment retry', latinV1, 'sha256:SAME'),
+    doc('raw/local/c.md', 'Payment retry', latinV2, 'sha256:OTHER'),
+  ]);
+  const similar = groups.filter((g) => g.category === 'similar');
+  assert.ok(similar.length >= 1, 'C must be flagged as a similar version of A/B');
+  assert.ok(similar.every((g) => g.raws.includes('raw/local/c.md')));
+  // and the (A,B) pair is still only the duplicate group, never a similar one
+  assert.ok(!similar.some((g) => g.raws.includes('raw/local/a.md') && g.raws.includes('raw/local/b.md')));
+});
+
 test('findGroups: duplicate classification wins over similar (a hash-equal pair is one group)', () => {
   const { groups } = findGroups([
-    doc('raw/local/a.md', 'T', 'identical', 'sha256:SAME'),
-    doc('raw/local/b.md', 'T', 'identical', 'sha256:SAME'),
+    doc('raw/local/a.md', 'T', 'identical', 'sha256:SAME'),    doc('raw/local/b.md', 'T', 'identical', 'sha256:SAME'),
   ]);
   assert.equal(groups.length, 1);
   assert.equal(groups[0].category, 'duplicate');

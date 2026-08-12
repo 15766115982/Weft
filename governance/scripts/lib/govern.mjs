@@ -102,9 +102,10 @@ function currentRawHashes(kbRoot) {
   const map = {};
   for (const abs of walk(path.join(kbRoot, 'raw'))) {
     const rel = path.relative(kbRoot, abs).replace(/\\/g, '/');
-    const text = fs.readFileSync(abs, 'utf8');
-    const { fields } = parseFrontmatter(text);
-    map[rel] = fields.content_hash || hashText(text);
+    const fields = readFields(abs);
+    // full-file fallback hash only when the doc carries no content_hash —
+    // head-reading every file turned apply-* from O(N×corpus) IO into frontmatter reads
+    map[rel] = fields.content_hash || hashText(fs.readFileSync(abs, 'utf8'));
   }
   return map;
 }
@@ -133,6 +134,30 @@ function* walk(dir) {
 
 function readDoc(absPath) {
   return parseFrontmatter(fs.readFileSync(absPath, 'utf8'));
+}
+
+const HEAD_BYTES = 16 * 1024; // frontmatter lives at the top of the file
+
+/**
+ * Frontmatter-only read via a 16KB head buffer (2026-08-12 audit: apply-* used
+ * to full-read every raw file per invocation just for fields — O(N×corpus) IO
+ * on a govern run). Falls back to a full read only when the closing fence is
+ * beyond the head (unusually long frontmatter).
+ */
+function readFields(absPath) {
+  const fd = fs.openSync(absPath, 'r');
+  let head;
+  try {
+    const buf = Buffer.alloc(HEAD_BYTES);
+    head = buf.toString('utf8', 0, fs.readSync(fd, buf, 0, HEAD_BYTES, 0));
+  } finally {
+    fs.closeSync(fd);
+  }
+  const startsFm = head.startsWith('---') || head.charCodeAt(0) === 0xFEFF;
+  if (startsFm && !head.includes('\n---')) {
+    return parseFrontmatter(fs.readFileSync(absPath, 'utf8')).fields;
+  }
+  return parseFrontmatter(head).fields;
 }
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
@@ -216,7 +241,7 @@ export function plan(kbRoot) {
     if (!fs.existsSync(pageAbs)) {
       pending.push({ raw: rel, page: pageRel, reason: 'new', title: fields.title });
     } else {
-      const page = readDoc(pageAbs).fields;
+      const page = readFields(pageAbs);
       if (page.source_version !== fields.source_version) {
         pending.push({ raw: rel, page: pageRel, reason: 'stale', title: fields.title });
       } else if (page.content_hash && fields.content_hash && page.content_hash !== fields.content_hash) {
@@ -228,7 +253,7 @@ export function plan(kbRoot) {
   const orphanedPages = [];
   for (const abs of walk(path.join(kbRoot, 'wiki', 'sources'))) {
     const rel = path.relative(kbRoot, abs).replace(/\\/g, '/');
-    const { fields } = readDoc(abs);
+    const fields = readFields(abs);
     if (fields.source_ref && !raws.has(fields.source_ref)) {
       orphanedPages.push({ page: rel, missing_raw: fields.source_ref, title: fields.title });
     }
@@ -239,7 +264,7 @@ export function plan(kbRoot) {
   for (const sub of ['entities', 'concepts', 'syntheses']) {
     for (const abs of walk(path.join(kbRoot, 'wiki', sub))) {
       const rel = path.relative(kbRoot, abs).replace(/\\/g, '/');
-      const { fields } = readDoc(abs);
+      const fields = readFields(abs);
       for (const ref of Array.isArray(fields.sources) ? fields.sources : []) {
         if (!raws.has(ref)) orphanedPages.push({ page: rel, missing_raw: ref, title: fields.title });
         const list = pagesBySource.get(ref) ?? [];
@@ -256,7 +281,7 @@ export function plan(kbRoot) {
       const noExt = rel.replace(/^wiki\//, '').replace(/\.md$/, '');
       known.add(noExt);
       known.add(noExt.replace(/^(sources|entities|concepts|syntheses)\//, ''));
-      const { fields } = readDoc(abs);
+      const fields = readFields(abs);
       if (fields.status === 'candidate') {
         reviewQueue.push({ page: rel, type: fields.type, title: fields.title, updated_at: fields.updated_at });
       } else if (!fields.status) {
@@ -333,7 +358,7 @@ function findApprovedDuplicateRaw(kbRoot, rawRel, hash) {
   for (const abs of walk(path.join(kbRoot, 'raw'))) {
     const rel = path.relative(kbRoot, abs).replace(/\\/g, '/');
     if (rel === rawRel) continue;
-    const { fields: f } = readDoc(abs);
+    const f = readFields(abs);
     if (!f.content_hash || f.content_hash !== hash) continue;
     let pageRel;
     try { pageRel = sourcePageRelPath(f).replace(/\\/g, '/'); } catch { continue; }
@@ -357,7 +382,7 @@ export function applySourcePage(kbRoot, rawRelInput, summaryBody, {
   const body = (summaryBody || '').trim();
   if (!body) throw new Error('empty summary body, refusing to write');
 
-  const { fields } = readDoc(rawAbs);
+  const fields = readFields(rawAbs);
   const missing = missingRawFields(fields);
   if (missing.length) throw new Error(`raw doc missing contract fields ${missing.join(', ')}: ${rawRel}`);
 
@@ -381,7 +406,7 @@ export function applySourcePage(kbRoot, rawRelInput, summaryBody, {
   const pageAbs = path.join(kbRoot, pageRel);
   const existed = fs.existsSync(pageAbs);
   const now = new Date().toISOString();
-  const old = existed ? readDoc(pageAbs).fields : {};
+  const old = existed ? readFields(pageAbs) : {};
 
   const fm = buildFrontmatter({
     type: 'source',
@@ -447,12 +472,12 @@ function assertNoUnloggedFlip(kbRoot, pageRel, currentStatus) {
 function readContentHash(kbRoot, rawRel) {
   const abs = path.join(kbRoot, rawRel);
   if (!fs.existsSync(abs)) return null;
-  return readDoc(abs).fields.content_hash || null;
+  return readFields(abs).content_hash || null;
 }
 
 function sourcePageApproved(kbRoot, rawRel) {
   try {
-    const pageRel = sourcePageRelPath(readDoc(path.join(kbRoot, rawRel)).fields).replace(/\\/g, '/');
+    const pageRel = sourcePageRelPath(readFields(path.join(kbRoot, rawRel))).replace(/\\/g, '/');
     const abs = path.join(kbRoot, pageRel);
     return fs.existsSync(abs) && readStatus(abs) === 'approved';
   } catch { return false; }
@@ -484,7 +509,7 @@ export function applyNonSourcePage(kbRoot, type, {
   const pageRel = path.join('wiki', dir, `${slug}.md`);
   const pageAbs = path.join(kbRoot, pageRel);
   const existed = fs.existsSync(pageAbs);
-  const old = existed ? readDoc(pageAbs).fields : {};
+  const old = existed ? readFields(pageAbs) : {};
   const pageRelPosix = pageRel.replace(/\\/g, '/');
 
   const currentStatus = existed ? readStatus(pageAbs) : null;
@@ -547,11 +572,14 @@ export function applyNonSourcePage(kbRoot, type, {
       return { rel, title: fields.title, filename: path.basename(rel), body, content_hash: fields.content_hash || undefined };
     });
     const tombstones = readTombstones(kbRoot);
+    // compare against NORMALIZED new sources — raw CLI input may carry Windows
+    // backslashes, which would silently miss the forced-candidate flag
+    const newSourcesNorm = new Set(newSources.map((s) => normalizeRawRel(s)));
     for (const g of findGroups(srcDocs).groups) {
       if (g.category !== 'similar') continue;
       if (isDismissedGroup(kbRoot, g.raws)) continue;
       if (g.raws.filter((r) => !tombstones[r]).length < 2) continue;
-      if (g.raws.some((r) => newSources.includes(r))) {
+      if (g.raws.some((r) => newSourcesNorm.has(r))) {
         for (const r of g.raws) flaggedRaws.add(r);
       }
     }
@@ -570,12 +598,12 @@ export function applyNonSourcePage(kbRoot, type, {
   const semantic = [];
   if (newSources.length) {
     const newTitleTokens = newSources.map((rel) => {
-      try { return tokenize(readDoc(path.join(kbRoot, rel)).fields.title ?? ''); } catch { return new Set(); }
+      try { return tokenize(readFields(path.join(kbRoot, rel)).title ?? ''); } catch { return new Set(); }
     });
     const seen = new Set();
     for (const sub of ['entities', 'concepts', 'syntheses']) {
       for (const abs of walk(path.join(kbRoot, 'wiki', sub))) {
-        const { fields } = readDoc(abs);
+        const fields = readFields(abs);
         if (fields.status === 'archived' || fields.status === 'rejected') continue;
         const against = new Set();
         for (const t of [fields.title, ...(Array.isArray(fields.aliases) ? fields.aliases : [])]) {
@@ -642,14 +670,14 @@ export function rebuildIndex(kbRoot) {
     const dir = typeDir(type);
     for (const abs of walk(path.join(kbRoot, 'wiki', dir))) {
       const rel = path.relative(kbRoot, abs).replace(/\\/g, '/').replace(/^wiki\//, '').replace(/\.md$/, '');
-      const { fields } = readDoc(abs);
+      const fields = readFields(abs);
       const n = Array.isArray(fields.sources) ? fields.sources.length : 0;
       groups[dir].push(`- [[${rel}]] — ${flatten(fields.title) || rel}(status:${fields.status}, sources:${n})`);
     }
   }
   for (const abs of walk(path.join(kbRoot, 'wiki', 'sources'))) {
     const rel = path.relative(kbRoot, abs).replace(/\\/g, '/').replace(/^wiki\//, '').replace(/\.md$/, '');
-    const { fields } = readDoc(abs);
+    const fields = readFields(abs);
     const src = (fields.source_ref || '').split('/')[1] || '?';
     const date = (fields.source_version || '').slice(0, 10);
     groups.sources.push(`- [[${rel}]] — ${flatten(fields.title) || rel}(${src}, ${date})`);
@@ -770,7 +798,7 @@ export function archivePage(kbRoot, pageRelInput, { note = '', actor = 'govern',
   if (status !== 'approved') {
     throw new Error(`only approved pages can be archived (candidates should be rejected): ${rel}`);
   }
-  const { fields } = readDoc(abs);
+  const fields = readFields(abs);
   const target = moveToArchive(kbRoot, rel, abs);
   if (fields.source_ref && fs.existsSync(path.join(kbRoot, fields.source_ref))) {
     addTombstone(kbRoot, fields.source_ref, { reason: 'loser-archive', page: target });

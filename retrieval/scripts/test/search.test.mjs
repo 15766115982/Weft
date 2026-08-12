@@ -182,6 +182,21 @@ test('date filter semantic: source_version (ISO) wins over governance updated_at
   ensureFresh(kb);
 });
 
+test('date filter: before:<bare date> includes updates made ON the boundary day (2026-08-12 fix)', () => {
+  // eff is an ISO datetime; '2026-07-15T09:00' sorts AFTER the bare string
+  // '2026-07-15', so the old `eff <= value` excluded same-day updates.
+  writePage('wiki/sources/local-boundary.md', src('boundary', {
+    title: 'Boundary Doc', source_version: '2026-07-15T09:00:00+08:00', updated_at: '2026-07-29T09:00:00+08:00',
+  }), '## Boundary\n\npangolin-marker for the boundary-day fix.');
+  ensureFresh(kb);
+  assert.ok(search(kb, 'pangolin-marker before:2026-07-15').preview.some(c => c.page === 'wiki/sources/local-boundary.md'),
+    'a doc updated on 2026-07-15 must match before:2026-07-15');
+  assert.equal(search(kb, 'pangolin-marker before:2026-07-14').preview.filter(c => c.via === 'search').length, 0,
+    'but it must NOT match before:2026-07-14');
+  fs.unlinkSync(path.join(kb, 'wiki', 'sources', 'local-boundary.md'));
+  ensureFresh(kb);
+});
+
 test('--within tolerates trailing slash (directory scope)', () => {
   const r = search(kb, 'retries', { within: ['wiki/sources/'] });
   assert.ok(r.preview.some(c => c.page === 'wiki/sources/local-pay.md'));

@@ -1,7 +1,7 @@
 # Knowledge Base Contract (Contract v2)
 
 > This file is the **single contract** jointly obeyed by the four services: **acquisition /
-> governance / retrieval / llm**. The four services have zero code dependency and zero
+> governance / retrieval / agent**. The four services have zero code dependency and zero
 > inter-process calls; they communicate only through the directory structure and frontmatter
 > spec defined here. Modifying this file = modifying the four-party contract; it requires
 > review and a synchronized update of `CONTEXT.md` and the relevant ADRs.
@@ -12,6 +12,10 @@
 > `source | topic` to `source | entity | concept | synthesis`; added `.kb/acquire/`,
 > `.kb/config/`, and `.kb/govern/decisions/`; relaxed the blanket "everything in `.kb/` is
 > rebuildable" statement to carve out adjudication memory and per-KB user config.
+>
+> Naming amendment 2026-08-12: the fourth service, called `llm` in v2, is the **agent**
+> service (ADR-0012 renamed the implementation; the contract role is unchanged — it owns
+> all model calls). Historical log.md entries with actor `llm` predate this rename.
 
 ## 1. Knowledge Base (KB) Directory Structure
 
@@ -51,7 +55,7 @@ A knowledge base instance is a directory on disk, itself an independent Git repo
 
 ### Write Permission Matrix (single-responsibility principle)
 
-| Path | Acquisition | Governance | Retrieval | LLM | Thin viewer | UI portal |
+| Path | Acquisition | Governance | Retrieval | Agent | Thin viewer | UI portal |
 |---|---|---|---|---|---|---|
 | `raw/` | **write** | read | forbidden | read | read | read + **delete/move only** (see rules) |
 | `wiki/` | forbidden | **write** | read | read | only frontmatter `status` (candidate → approved / rejected) | same flip primitive + **human body edits** (demote rule, see ⑤) |
@@ -390,9 +394,10 @@ append-only; every entry starts with a uniform prefix (parseable with Unix tools
 ```
 
 Format: `## [<ISO8601>] <actor> | <action> | <object path> | <note>`,
-actor ∈ `govern | review | acquire | portal | llm` (`portal` = human actions through
-the UI portal, per §1 whitelist ⑤⑥: `candidate:manual`, `file:edit`; `llm` = automatic
-governance action where the model made the final approve/candidate call).
+actor ∈ `govern | review | acquire | portal | agent` (`portal` = human actions through
+the UI portal, per §1 whitelist ⑤⑥: `candidate:manual`, `file:edit`; `agent` = automatic
+governance action where the model made the final approve/candidate call — actor `llm` in
+older entries is the same role before the 2026-08-12 rename).
 
 Action vocabulary (non-exhaustive): `auto:create-source`, `auto:update-source`,
 `auto:rebuild-index`, `auto:create-entity`, `auto:update-entity`, `auto:create-concept`,

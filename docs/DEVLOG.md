@@ -1,5 +1,30 @@
 # Development Log
 
+## 审核第二批修复(2026-08-12 晚)
+
+- **契约更名落地**:contract.md 头部/写权限矩阵列/§5 actor 词表第四服务 `llm` →
+  `agent`(ADR-0012 重命名的契约层收尾;naming amendment 注记历史 `llm` actor 行);
+  CLAUDE.md "three-party" → four-party;CONTEXT.md 编排行同步。
+- **govern.mjs IO 热点**:新增 `readFields`(16KB 头读 frontmatter,超长才整读),
+  字段级调用点(17 处,含 `findApprovedDuplicateRaw`/`currentRawHashes`)全部切换——
+  apply-* 每次调用从 O(N×语料)整文件读降为 frontmatter 头读,113 篇 KB 的治理 run
+  磁盘 IO 降两个数量级;顺带修 degraded in-topic 检查用未归一化 `newSources` 比较
+  (Windows 反斜杠 `--sources` 漏标 forced-candidate)。
+- **similarity 逃逸修复**:`findGroups` 的 similar 跳过条件从"任一侧是 exact-dup
+  组成员"收紧为"该对已在同一 dup 组"——此前 A≡B 精确重复时,第三篇近似版本 C 的
+  (A,C)/(B,C) 对被双双跳过,C 整体逃逸冲突检测;含逃逸场景回归测试。
+- **deep-research 真多轮**:`run_research_loop` 第 2+ 轮改搜 LLM 改写变体(query-
+  rewrite,CSQE 式),此前每轮重搜同一问题、seen 过滤立即 break,"多轮"永不超 1 轮
+  且 rounds 字段报的是上限;无模型配置时诚实降级单轮;rounds 现报实际轮数。
+- **retrieval query.mjs**:① 纯字段过滤查询改流式(`.iterate()` + ≤2/页 + limit 早停),
+  不再把整张 chunks 表物化进内存;② `before:<裸日期>` 边界日修复——ISO 时间串排在
+  裸日期串之后,旧比较把当天更新的文档排除,现边界含当天(与 after 对称),含边界
+  回归测试。
+- **门户 jobs cancel 实化**:`spawnJob` 挂 `job.kill`,此前除 govern-run 外所有
+  spawnJob 作业(pull/upload/detect/distill)运行中取消是空操作;含 kill 测试。
+- 回归:acq 80 · gov 84(+1) · ret 47(+1) · pytest 76(+2) · UI 102(+1) ·
+  PW 21 · e2e+eval 94(+1 opt-in skip),全绿。审核报告 9 条标 [已修·二批]。
+
 ## 多维度质量审核(agent teams)+ 第一批修复(2026-08-12)
 
 - **审核**:6 维度 finder 并行 + 逐条对抗性核实(46 agents),去重 40 条 →

@@ -166,11 +166,15 @@ function loadHistory(kb) {
 
 // Shared helper for spawn-based job runners (acquire CLI, future executors):
 // capture combined output with a bound, resolve with tail; exit≠0 → throw.
+// The child handle is exposed as job.kill so jobs.cancel('running') actually
+// terminates the process (2026-08-12 audit: cancel was a no-op for every
+// spawnJob-based job — only govern-run set its own kill handle).
 export function spawnJob(job, command, args, opts = {}) {
   return new Promise((resolve, reject) => {
     const child = (opts.spawn || defaultSpawn)(command, args, {
       cwd: opts.cwd, env: opts.env || process.env, stdio: ['ignore', 'pipe', 'pipe'],
     });
+    job.kill = () => { try { child.kill(); } catch { /* already exited */ } };
     let out = '';
     const cap = (c) => {
       out += c;

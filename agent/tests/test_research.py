@@ -106,3 +106,40 @@ def test_search_smart_rerank_reorders(kb, monkeypatch):
     # Node parity: the final total fix-up only fires when preview is LONGER than
     # limit; after rerank preview == limit, so total keeps the pool count.
     assert out["total"] == 5
+
+
+def test_research_loop_multi_round_via_rewrite(kb, monkeypatch):
+    """2026-08-12 fix: rounds 2+ search rewrite variants and the rounds field
+    reports reality (before, every round re-searched the same question, the
+    seen filter broke the loop, and rounds reported the cap)."""
+    pages = {
+        "question": [{"page": "a"}, {"page": "b"}],
+        "variant-1": [{"page": "b"}, {"page": "c"}],  # b seen → only c is new
+        "variant-2": [{"page": "b"}, {"page": "c"}],  # nothing new → lane skipped
+    }
+    searches = []
+
+    def fake_search(kb_, query, limit=10):
+        searches.append(query)
+        return {"total": len(pages.get(query, [])), "preview": pages.get(query, [])}
+
+    monkeypatch.setattr(research, "search_pages", fake_search)
+    monkeypatch.setattr(research, "read_page", lambda kb_, p: f"body of {p}")
+    events = []
+    out = research.run_research_loop(
+        kb, "question", on_event=events.append, opts={"maxRounds": 3},
+        rewrite=lambda q: {"data": {"queries": ["variant-1", "variant-2"]}},
+    )
+    assert searches == ["question", "variant-1", "variant-2"]
+    assert out["rounds"] == 2  # variant-2 produced no new pages → not counted
+    assert [f["path"] for f in out["findings"]] == ["a", "b", "c"]
+    assert out["citations"] == ["a", "b", "c"]
+
+
+def test_research_loop_degrades_to_one_round_without_rewrite(kb, monkeypatch):
+    monkeypatch.setattr(research, "search_pages",
+                        _fake_search([{"total": 1, "preview": [{"page": "a"}]}])[0])
+    monkeypatch.setattr(research, "read_page", lambda kb_, p: "body")
+    out = research.run_research_loop(kb, "question", on_event=lambda e: None)
+    assert out["rounds"] == 1
+    assert [f["path"] for f in out["findings"]] == ["a"]

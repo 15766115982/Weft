@@ -2,7 +2,7 @@
 (port of llm/lib/tasks/deep-research.mjs).
 """
 from ..research import run_research_loop
-from ..runner import run_prompt
+from ..runner import run_json_prompt, run_prompt
 from ..stream import NdjsonWriter
 
 
@@ -14,10 +14,17 @@ def run(kb_root, input=None, output_path=None):
 
     context = ""
     citations: list[str] = []
+    rounds = 0
     try:
-        result = run_research_loop(kb_root, question, on_event=writer.write, opts=opts)
+        result = run_research_loop(
+            kb_root, question, on_event=writer.write, opts=opts,
+            # rounds 2+ search LLM rewrite variants; without a model config the
+            # rewrite fails and the loop honestly runs one round
+            rewrite=lambda q: run_json_prompt(kb_root, "query-rewrite", {"question": q}),
+        )
         context = result["context"]
         citations = result["citations"]
+        rounds = result["rounds"]
     except Exception as err:  # noqa: BLE001
         writer.write({"type": "error", "message": str(err)})
 
@@ -30,4 +37,4 @@ def run(kb_root, input=None, output_path=None):
     writer.write({"type": "done", "citations": citations})
     writer.end()
 
-    return {"rounds": opts.get("maxRounds") or 3}
+    return {"rounds": rounds}

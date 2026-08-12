@@ -72,11 +72,11 @@ def test_chat_source_page_includes_raw_evidence(kb, tmp_path, monkeypatch):
 def test_deep_research_streams_search_read_chunk_done(kb, tmp_path, monkeypatch):
     out = tmp_path / "dr.ndjson"
 
-    def fake_loop(kb_root, question, on_event, opts):
+    def fake_loop(kb_root, question, on_event, opts, rewrite=None):
         on_event({"type": "meta", "task": "deep-research", "kb": str(kb_root), "maxRounds": 1})
         on_event({"type": "search", "query": question, "round": 1})
         on_event({"type": "read", "page": "wiki/sources/x.md", "round": 1})
-        return {"context": "ctx", "citations": ["wiki/sources/x.md"]}
+        return {"context": "ctx", "citations": ["wiki/sources/x.md"], "rounds": 1}
 
     import weft_agent.tasks.deep_research as dr_task
     monkeypatch.setattr(dr_task, "run_research_loop", fake_loop)

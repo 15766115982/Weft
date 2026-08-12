@@ -146,9 +146,16 @@ def read_page(kb_root: Path, page_path: str) -> dict:
     return run_kb_search(kb_root, ["read", page_path])
 
 
-def run_research_loop(kb_root: Path, question: str, on_event, opts: dict | None = None) -> dict:
-    """Multi-round research loop. Rounds are capped; each round searches, reads top
-    pages, and appends findings. on_event receives dicts the caller writes to NDJSON.
+def run_research_loop(kb_root: Path, question: str, on_event, opts: dict | None = None,
+                      rewrite=None) -> dict:
+    """Multi-round research loop. Round 1 searches the question; rounds 2+ search
+    LLM rewrite variants (CSQE-style, same query-rewrite prompt as search_smart)
+    — before 2026-08-12 every round re-searched the SAME question, the seen-page
+    filter then broke the loop, so "multi-round" never exceeded round 1 and the
+    returned rounds field reported the cap, not reality. Without a rewrite
+    callable (no model config) the loop honestly degrades to one round.
+    Rounds are capped; each round searches, reads top pages, and appends
+    findings. on_event receives dicts the caller writes to NDJSON.
     """
     opts = opts or {}
     max_rounds = opts.get("maxRounds") or 3
@@ -160,17 +167,37 @@ def run_research_loop(kb_root: Path, question: str, on_event, opts: dict | None 
 
     on_event({"type": "meta", "task": "deep-research", "kb": str(kb_root), "maxRounds": max_rounds})
 
-    for rnd in range(1, max_rounds + 1):
-        on_event({"type": "search", "query": question, "round": rnd})
-        search_result = search_pages(kb_root, question, limit=hits_per_round)
-        hits = search_result.get("preview") if isinstance(search_result.get("preview"), list) else []
-        if not hits:
-            break
+    variants: list[str] | None = None
 
+    def query_for(rnd: int) -> str | None:
+        nonlocal variants
+        if rnd == 1:
+            return question
+        if variants is None:
+            variants = []
+            if rewrite:
+                try:
+                    data = rewrite(question)["data"]
+                    variants = [q.strip() for q in (data.get("queries") or [])
+                                if q.strip() and q.strip() != question][:max_rounds - 1]
+                except Exception:  # noqa: BLE001 — rewrite failure degrades to one round
+                    variants = []
+        idx = rnd - 2
+        return variants[idx] if idx < len(variants) else None
+
+    rounds_run = 0
+    for rnd in range(1, max_rounds + 1):
+        query = query_for(rnd)
+        if not query:
+            break
+        on_event({"type": "search", "query": query, "round": rnd})
+        search_result = search_pages(kb_root, query, limit=hits_per_round)
+        hits = search_result.get("preview") if isinstance(search_result.get("preview"), list) else []
         to_read = [h for h in hits[:read_top] if h["page"] not in seen]
         if not to_read:
-            break
+            continue  # this lane found nothing new — try the next variant
 
+        rounds_run += 1
         for hit in to_read:
             seen.add(hit["page"])
             on_event({"type": "read", "page": hit["page"], "round": rnd})
@@ -184,4 +211,4 @@ def run_research_loop(kb_root: Path, question: str, on_event, opts: dict | None 
                 on_event({"type": "error", "page": hit["page"], "round": rnd, "error": str(err)})
 
     context = "\n\n---\n\n".join(f"## {f['title']} ({f['path']})\n{f['body']}" for f in findings)
-    return {"rounds": max_rounds, "findings": findings, "context": context, "citations": citations}
+    return {"rounds": rounds_run, "findings": findings, "context": context, "citations": citations}

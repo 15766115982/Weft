@@ -16,7 +16,7 @@ each other**; their only contract is the filesystem — directory structure + fr
 `schema/contract.md`. A KB is its own git repo, completely separate from this code repo.
 
 Authoritative context (read before changing behavior): `CONTEXT.md` (system design) ·
-`schema/contract.md` (frozen three-party contract) · `schema/governance.md` (conventions) ·
+`schema/contract.md` (frozen four-party contract) · `schema/governance.md` (conventions) ·
 `docs/DEVLOG.md` (running dev log) · ADRs in `docs/adr/`.
 
 ## Design principles / 设计原则

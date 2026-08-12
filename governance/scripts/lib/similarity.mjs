@@ -199,10 +199,14 @@ export function findGroups(rawDocs, { threshold = DEFAULT_SIMILARITY_THRESHOLD, 
     list.push(i);
     byHash.set(h, list);
   }
-  const dupIndexes = new Set();
+  const dupPairs = new Set();
   for (const [hash, idxs] of byHash) {
     if (idxs.length < 2) continue;
-    idxs.forEach(i => dupIndexes.add(i));
+    for (let x = 0; x < idxs.length; x++) {
+      for (let y = x + 1; y < idxs.length; y++) {
+        dupPairs.add(`${idxs[x]}\x00${idxs[y]}`);
+      }
+    }
     groups.push({
       category: 'duplicate',
       raws: idxs.map(i => rawDocs[i].rel).sort(),
@@ -214,7 +218,11 @@ export function findGroups(rawDocs, { threshold = DEFAULT_SIMILARITY_THRESHOLD, 
   // 2. Similar versions: pre-filter candidate pairs, then body-similarity confirmation.
   const candidates = prefilterPairs(rawDocs, { bucketCap, warnings });
   for (const [ai, bi] of candidates) {
-    if (dupIndexes.has(ai) || dupIndexes.has(bi)) continue; // already classified
+    // Skip only pairs already classified as exact duplicates (both sides in the
+    // SAME dup group). A doc that is a dup member can still be a similar-version
+    // of a THIRD doc — skipping on either-side membership let that escape
+    // conflict detection entirely (2026-08-12 audit).
+    if (dupPairs.has(ai < bi ? `${ai}\x00${bi}` : `${bi}\x00${ai}`)) continue;
     const a = rawDocs[ai];
     const b = rawDocs[bi];
     const score = jaccard(normalizeBody(a.body), normalizeBody(b.body));

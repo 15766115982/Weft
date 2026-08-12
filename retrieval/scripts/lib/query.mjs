@@ -64,10 +64,14 @@ export function search(kbRoot, input, { within = [], limit = 50 } = {}) {
         // effective date = source-system update time (src_updated) preferred,
         // falling back to governance time (updated); ISO8601 lexicographic
         // order is chronological; after includes that day, before includes
-        // that day's midnight
+        // that whole day too (2026-08-12 fix: a bare-date boundary used to
+        // exclude same-day updates — ISO time strings sort AFTER the bare date)
         const eff = d.src_updated || d.updated || '';
         if (f.field === 'after') return eff >= f.value;
-        if (f.field === 'before') return eff !== '' && eff <= f.value;
+        if (f.field === 'before') {
+          const bound = /^\d{4}-\d{2}-\d{2}$/.test(f.value) ? `${f.value}\uffff` : f.value;
+          return eff !== '' && eff <= bound;
+        }
         return true;
       });
     }
@@ -105,36 +109,52 @@ export function search(kbRoot, input, { within = [], limit = 50 } = {}) {
       for (const [id, s] of hits) if (candidate.has(id)) score.set(id, (score.get(id) || 0) + s);
     }
 
-    // no free terms = pure field filtering; all chunks become candidates
-    if (candidate === null) {
-      candidate = new Set(db.prepare('SELECT id FROM chunks').all().map(r => r.id));
-      for (const id of candidate) score.set(id, 1);
-    }
-
     // 3. Filter to allowed docs, rank, ≤2 snippets per page
-    // one batched fetch (review 2026-08-04: per-chunk SELECT was an N+1)
-    const candidateIds = [...candidate];
-    const chunkById = new Map(candidateIds.length
-      ? db.prepare('SELECT * FROM chunks WHERE id IN (SELECT value FROM json_each(?))')
-        .all(JSON.stringify(candidateIds)).map((r) => [r.id, r])
-      : []);
-    const hits = candidateIds
-      .map(id => ({ ...chunkById.get(id), score: score.get(id) || 0 }))
-      .filter(c => allowedDocs.has(c.doc_path))
-      .sort((a, b) => b.score - a.score);
     const perPage = new Map();
     const candidates = [];
-    for (const c of hits) {
-      const n = perPage.get(c.doc_path) || 0;
-      if (n >= 2) continue; // contract: ≤2 snippets per page, controls context cost
-      perPage.set(c.doc_path, n + 1);
-      const meta = docMeta.get(c.doc_path);
-      candidates.push({
-        page: c.doc_path, anchor: c.anchor, heading: c.heading,
-        score: Math.round(c.score * 1000) / 1000,
-        snippet: makeSnippet(c.text, terms), title: meta?.title || '', via: 'search',
-      });
-      if (candidates.length >= limit) break;
+    if (candidate === null) {
+      // no free terms = pure field filtering. Stream the ALLOWED docs' chunks
+      // and stop at limit — the old path materialized the whole chunks table
+      // (SELECT id FROM chunks + batched SELECT *), defeating the doc-level
+      // filter it then re-applied in JS (2026-08-12 audit)
+      const rows = allowedDocs.size
+        ? db.prepare('SELECT * FROM chunks WHERE doc_path IN (SELECT value FROM json_each(?)) ORDER BY doc_path, id')
+          .iterate(JSON.stringify([...allowedDocs]))
+        : [];
+      for (const c of rows) {
+        const n = perPage.get(c.doc_path) || 0;
+        if (n >= 2) continue; // contract: ≤2 snippets per page
+        perPage.set(c.doc_path, n + 1);
+        const meta = docMeta.get(c.doc_path);
+        candidates.push({
+          page: c.doc_path, anchor: c.anchor, heading: c.heading, score: 1,
+          snippet: makeSnippet(c.text, terms), title: meta?.title || '', via: 'search',
+        });
+        if (candidates.length >= limit) break;
+      }
+    } else {
+      // one batched fetch (review 2026-08-04: per-chunk SELECT was an N+1)
+      const candidateIds = [...candidate];
+      const chunkById = new Map(candidateIds.length
+        ? db.prepare('SELECT * FROM chunks WHERE id IN (SELECT value FROM json_each(?))')
+          .all(JSON.stringify(candidateIds)).map((r) => [r.id, r])
+        : []);
+      const hits = candidateIds
+        .map(id => ({ ...chunkById.get(id), score: score.get(id) || 0 }))
+        .filter(c => allowedDocs.has(c.doc_path))
+        .sort((a, b) => b.score - a.score);
+      for (const c of hits) {
+        const n = perPage.get(c.doc_path) || 0;
+        if (n >= 2) continue; // contract: ≤2 snippets per page, controls context cost
+        perPage.set(c.doc_path, n + 1);
+        const meta = docMeta.get(c.doc_path);
+        candidates.push({
+          page: c.doc_path, anchor: c.anchor, heading: c.heading,
+          score: Math.round(c.score * 1000) / 1000,
+          snippet: makeSnippet(c.text, terms), title: meta?.title || '', via: 'search',
+        });
+        if (candidates.length >= limit) break;
+      }
     }
 
     // 4. graph expansion: outlink neighbors of top-hit pages join the
