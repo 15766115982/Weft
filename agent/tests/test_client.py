@@ -81,6 +81,37 @@ def test_chat_completion_retries_on_500(monkeypatch):
     assert len(attempts) == 2
 
 
+def test_chat_completion_no_retry_on_permanent_4xx(monkeypatch):
+    """2026-08-12 audit: auth/config errors (401/403/400/404) must fail fast —
+    retrying them 4× just multiplied the failure latency. 429 still retries."""
+    monkeypatch.setattr(client, "DEFAULT_BACKOFF_S", [0, 0, 0])
+    attempts = []
+
+    def handler(request):
+        attempts.append(1)
+        return httpx.Response(401, text="bad key")
+
+    try:
+        client.chat_completion(cfg(), [], http=mock_http(handler))
+        raise AssertionError("should have raised")
+    except client.HttpStatusError as err:
+        assert err.status_code == 401
+    assert len(attempts) == 1, "permanent 4xx must not be retried"
+
+    attempts.clear()
+
+    def handler429(request):
+        attempts.append(1)
+        return httpx.Response(429, text="slow down")
+
+    try:
+        client.chat_completion(cfg(), [], http=mock_http(handler429))
+        raise AssertionError("should have raised")
+    except client.HttpStatusError as err:
+        assert err.status_code == 429
+    assert len(attempts) == client.DEFAULT_RETRIES + 1, "429 stays retried"
+
+
 def test_chat_completion_stream_deltas():
     sse = (
         'data: {"choices":[{"delta":{"content":"he"}}]}\n\n'

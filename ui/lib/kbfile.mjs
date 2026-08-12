@@ -30,7 +30,7 @@ export function saveKbFileJob(kb, { path: name, body, baseHash }) {
 
       // snapshot() tracks existing files (git pathspec commit / copy); a
       // not-yet-existing file has nothing to snapshot.
-      const snap = existed ? snapshot(kb, [name], job) : null;
+      const snap = existed ? await snapshot(kb, [name], job) : null;
 
       fs.writeFileSync(abs, body.trim() + '\n', 'utf8');
 

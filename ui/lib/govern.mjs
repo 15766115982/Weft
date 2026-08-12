@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnJob } from './jobs.mjs';
 import { tail } from './sys.mjs';
 import { startRun, executorNames } from './executor.mjs';
-import { appendGovernRun } from './governruns.mjs';
+import { appendGovernRun, resumableGovernRun } from './governruns.mjs';
 // F4: read-only post-run validation (serve.mjs's in-process plan() precedent —
 // the file header's "never imported for writes" discipline stays intact).
 import { plan } from '../../governance/scripts/lib/govern.mjs';
@@ -164,13 +164,13 @@ export function buildGovernPrompt(kb, userPrompt) {
 // synthesis). Streams executor events into job.log AND to onChunk (the SSE
 // 'run' channel, I4). The run's verdict comes from the executor's parsed
 // result event — never from an exit code (executor.mjs header).
-export function governRunJob(kb, { prompt, executor = 'langgraph' }, onChunk) {
+export function governRunJob(kb, { prompt, executor = 'langgraph', resume = false }, onChunk) {
   if (!executorNames().includes(executor)) {
     throw new Error(`unknown executor: ${executor} (registered: ${executorNames().join(', ')})`);
   }
   return {
     type: 'govern-run',
-    label: `agent 治理 (${executor})`,
+    label: `agent 治理 (${executor})${resume ? ' · 续跑' : ''}`,
     run: (job) => new Promise((resolve, reject) => {
       let run;
       const before = gitPorcelain(kb); // C layer baseline (null when not git)
@@ -178,14 +178,23 @@ export function governRunJob(kb, { prompt, executor = 'langgraph' }, onChunk) {
       const headBefore = gitHead(kb);
       const startTs = new Date().toISOString();
       const finalPrompt = buildGovernPrompt(kb, prompt); // F3 brief injection
+      // resume: pick up the latest interrupted/failed/cancelled run's
+      // checkpoint thread; fresh run when none qualifies. The thread id rides
+      // the start record so a failed RESUME run still points at the same
+      // checkpoint thread (the resumable pointer follows the newer job).
+      const resumeTarget = resume ? resumableGovernRun(kb, job.id) : null;
+      if (resume && !resumeTarget) {
+        job.log = '没有可续跑的未完成 run,按全新 run 启动\n';
+      }
+      const threadId = resumeTarget?.threadId || `portal-${job.id}`;
       // F1 history: start line first — a missing finish line is how the read
       // side infers 'interrupted' (governruns.mjs).
       appendGovernRun(kb, {
-        ts: startTs, jobId: job.id, phase: 'start', executor,
+        ts: startTs, jobId: job.id, phase: 'start', executor, threadId,
         promptHash: crypto.createHash('sha256').update(finalPrompt).digest('hex').slice(0, 12),
       });
       try {
-        run = startRun(executor, { prompt: finalPrompt, cwd: kb });
+        run = startRun(executor, { prompt: finalPrompt, cwd: kb, resumeThreadId: resumeTarget ? threadId : null });
       } catch (err) { reject(err); return; }
       job.kill = run.kill; // jobs.cancel(kb, id) calls this for running jobs
       run.events.on('event', (e) => {
@@ -254,8 +263,9 @@ export function governRunJob(kb, { prompt, executor = 'langgraph' }, onChunk) {
           }
           // F1 history: finish line BEFORE resolve/reject so the record is on
           // disk before the job's done/failed event goes out.
+          const finishTs = new Date().toISOString();
           appendGovernRun(kb, {
-            ts: new Date().toISOString(), jobId: job.id, phase: 'finish',
+            ts: finishTs, jobId: job.id, phase: 'finish',
             status: job.cancelled ? 'cancelled' : ok ? 'complete' : 'failed',
             durationMs: Date.now() - Date.parse(startTs),
             gitHeadBefore: headBefore, gitHeadAfter: gitHead(kb),
@@ -264,6 +274,16 @@ export function governRunJob(kb, { prompt, executor = 'langgraph' }, onChunk) {
             gitCommitted: committed,
             postPlanCounts: postPlan ? postPlan.counts : null,
           });
+          // a resume run closes the old run's history: the checkpoint thread
+          // now belongs to THIS job (its finish status governs resumability).
+          // Same ts as this run's finish so freshness keeps the real run as
+          // latest (the close is bookkeeping, not newer activity).
+          if (resumeTarget) {
+            appendGovernRun(kb, {
+              ts: finishTs, jobId: resumeTarget.jobId, phase: 'finish',
+              status: 'resumed', resumedBy: job.id,
+            });
+          }
           if (ok) resolve({
             result: tail(text),
             wikiHashBefore: hashBefore, wikiHashAfter: hashAfter, noop,

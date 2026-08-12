@@ -25,13 +25,10 @@ export function appendGovernRun(kb, rec) {
   } catch { /* history is best-effort */ }
 }
 
-// Latest run's effective state. activeIds = job ids currently queued/running
-// in this portal's job center (a start-only record for one of those is
-// 'running', not 'interrupted').
-export function governRunFreshness(kb, activeIds = new Set()) {
+function runsById(kb) {
   const byId = new Map(); // jobId -> {start?, finish?} (file is small: 2 lines/run)
   let lines;
-  try { lines = fs.readFileSync(runsFile(kb), 'utf8').split('\n'); } catch { return null; }
+  try { lines = fs.readFileSync(runsFile(kb), 'utf8').split('\n'); } catch { return byId; }
   for (const line of lines) {
     if (!line.trim()) continue;
     let rec;
@@ -42,8 +39,19 @@ export function governRunFreshness(kb, activeIds = new Set()) {
     else if (rec.phase === 'finish') e.finish = rec;
     byId.set(rec.jobId, e);
   }
+  return byId;
+}
+
+// Latest run's effective state. activeIds = job ids currently queued/running
+// in this portal's job center (a start-only record for one of those is
+// 'running', not 'interrupted').
+export function governRunFreshness(kb, activeIds = new Set()) {
+  const byId = runsById(kb);
   let latest = null;
   for (const [jobId, e] of byId) {
+    // a 'resumed' close is bookkeeping for a superseded run (its thread moved
+    // to a newer job) — it must never read as the KB's latest activity
+    if (e.finish && e.finish.status === 'resumed') continue;
     const ts = (e.finish || e.start).ts;
     if (latest && ts <= latest.ts) continue;
     let status;
@@ -53,4 +61,26 @@ export function governRunFreshness(kb, activeIds = new Set()) {
   }
   if (latest) { delete latest.phase; latest.startedAt = byId.get(latest.jobId)?.start?.ts || null; }
   return latest;
+}
+
+// The latest RESUMABLE run (2026-08-12: wires the agent's checkpoint resume
+// into the portal — before this, govern-run always started a fresh thread and
+// the checkpoint was unreachable from the only production driver). Resumable
+// = interrupted (start, no finish) or finished failed/cancelled: in all three
+// the agent kept its checkpoint thread. Completed runs delete their thread, so
+// 'complete' is never resumable; a run closed as 'resumed' yielded its thread
+// to the run that continued it (the resumable pointer follows the NEWER job,
+// whose start record carries the same threadId).
+export function resumableGovernRun(kb, excludeJobId = null) {
+  let best = null;
+  for (const [jobId, e] of runsById(kb)) {
+    if (jobId === excludeJobId || !e.start) continue;
+    const resumable = !e.finish || e.finish.status === 'failed' || e.finish.status === 'cancelled';
+    if (!resumable) continue;
+    const ts = (e.finish || e.start).ts;
+    if (best && ts <= best.ts) continue;
+    best = { jobId, threadId: e.start.threadId || `portal-${jobId}`, ts,
+      status: e.finish ? e.finish.status : 'interrupted' };
+  }
+  return best;
 }

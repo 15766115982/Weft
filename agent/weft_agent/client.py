@@ -99,6 +99,15 @@ def build_body(config: dict, messages: list[dict], stream: bool,
     return body
 
 
+class HttpStatusError(RuntimeError):
+    """Non-200 LLM response; carries the status so the retry loop can tell
+    permanent failures (4xx auth/config) from transient ones (429/5xx)."""
+
+    def __init__(self, status_code: int, text: str):
+        super().__init__(f"LLM request failed ({status_code}): {text}")
+        self.status_code = status_code
+
+
 def chat_completion(config: dict, messages: list[dict], *, stream: bool = False,
                     temperature=None, max_tokens=None,
                     http: httpx.Client | None = None):
@@ -130,8 +139,14 @@ def chat_completion(config: dict, messages: list[dict], *, stream: bool = False,
         try:
             rate_limit_sleep()
             return _do(http if http is not None else _shared_client(), endpoint, headers, body, False)
-        except Exception as err:  # noqa: BLE001 — retry any transport/HTTP failure
+        except Exception as err:  # noqa: BLE001
             last_err = err
+            # permanent failures gain nothing from a retry (2026-08-12 audit):
+            # 4xx other than 429 (auth/config), and a 200 whose body won't parse
+            if isinstance(err, HttpStatusError) and err.status_code != 429 and 400 <= err.status_code < 500:
+                raise
+            if isinstance(err, json.JSONDecodeError):
+                raise
             if attempt < DEFAULT_RETRIES:
                 time.sleep(DEFAULT_BACKOFF_S[min(attempt, len(DEFAULT_BACKOFF_S) - 1)])
     raise last_err  # type: ignore[misc]
@@ -141,7 +156,7 @@ def _do(client: httpx.Client, endpoint: str, headers: dict, body: dict, stream: 
     if not stream:
         res = client.post(endpoint, headers=headers, json=body)
         if res.status_code != 200:
-            raise RuntimeError(f"LLM request failed ({res.status_code}): {res.text}")
+            raise HttpStatusError(res.status_code, res.text)
         return res.json()
 
     def deltas() -> Iterator[str]:

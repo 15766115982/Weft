@@ -26,6 +26,10 @@ def run(kb_root, input=None, output_path=None):
         if input.get("resume") is True and app.get_state(cfg).next:
             final = app.invoke(None, cfg)  # resume from checkpoint
         else:
+            # a fresh start on a reused run_id must not inherit a crashed
+            # run's leftover state (2026-08-12 audit: results/hooks
+            # accumulated into the new run otherwise)
+            saver.delete_thread(run_id)
             final = app.invoke({}, cfg)
         # a completed run never resumes — drop its thread so the checkpoint
         # file doesn't accumulate dead history across runs (crashed runs keep

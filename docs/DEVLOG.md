@@ -1,5 +1,30 @@
 # Development Log
 
+## 审核第三批修复(2026-08-12 深夜)
+
+- **apply-source candidate 保护**(plausible 转实修):applySourcePage 此前无条件写
+  approved——门户人工编辑(白名单⑤)降级出的待审 candidate 源页会被源跟随更新静默
+  重批。现比照 applyNonSourcePage 补 keepCandidate + unlogged-flip guard,含回归测试。
+- **/api/raw-asset SVG**:KB 内 SVG 以 image/svg+xml 直出,顶层打开即同源脚本执行;
+  SVG 响应加 `content-security-policy: script-src 'none'` + nosniff(<img> 内联不受影响)。
+- **snapshot() 异步化**:队列内 execFileSync(git add/commit)曾冻结整个门户事件循环;
+  改 execFileP + 10s 超时,raw-delete/raw-move/wiki-edit/kbfile 四处调用点同步 await。
+- **govern-run checkpoint 续跑接通**(此前断点续跑能力在唯一生产驱动上不可达):
+  threadId 贯穿 start 记录,executor 支持 resumeThreadId 复用中断 run 的 checkpoint
+  线程;治理页对 中断/已取消/失败 的上次 run 显示「↻ 续跑」按钮;续跑 run 结束时把旧
+  run 关闭为 'resumed'(freshness 不把该簿记行当最新活动);agent 侧修fresh 启动残留
+  线程累积(同 run_id 非 resume 重跑会先 delete_thread)。executor stdout 补 64KB 上限。
+- **低值批量**:client.py 永久性 4xx(非 429)与 200-但-JSON-坏 不再重试 4 次
+  (HttpStatusError 带 status_code);agent CLI 缺值选项(--input-file 无值)从静默
+  空输入改为 64 大声报错;/api/chat 300s deadline 到点杀子进程并关 SSE(此前子进程
+  照跑、响应悬挂)+ stderr 32KB 上限;queue.js 未注册图标名 alertTriangle→circleAlert;
+  graph.js 初始标签态与默认面板一致(语义图);viewer public/ 补 node --check 解析护栏
+  (governance 套件);README/installation 测试计数刷新 + Playwright 行 + installation.md
+  章节号修复(缺 §8、§12 重复)+"The three services" 残留清除。
+- 回归:acq 80 · gov 86(+2) · ret 47 · pytest 78(+2) · UI 105(+3) · PW 21 ·
+  e2e+eval 94(+1 opt-in skip),全绿。报告 16 条标 [已修·三批];累计 32 修 + 1 裁决,
+  余 5 条 backlog。
+
 ## 审核第二批修复(2026-08-12 晚)
 
 - **契约更名落地**:contract.md 头部/写权限矩阵列/§5 actor 词表第四服务 `llm` →

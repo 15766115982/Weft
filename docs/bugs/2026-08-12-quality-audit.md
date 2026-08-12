@@ -2,7 +2,7 @@
 
 > 生成方式:6 个维度 finder 并行 + 每条发现一个对抗性核实者(46 agents)。
 > 去重后 40 条,核实确认 35 条 confirmed / 3 条 plausible(2 条 refuted 已丢弃)。
-> 标注 **[已修]** / **[已修·二批]** 的为 2026-08-12 两个修复批次(见 DEVLOG 同日条目);**[已裁决]** 为用户裁决后以契约修订闭合;其余为待办 backlog。
+> 标注 **[已修]** / **[已修·二批]** / **[已修·三批]** 的为 2026-08-12 三个修复批次(见 DEVLOG 同日条目);**[已裁决]** 为用户裁决后以契约修订闭合;其余为待办 backlog。
 
 ## HIGH(5 条)
 
@@ -48,13 +48,13 @@
 
 ## MEDIUM(15 条)
 
-### README/installation/guide 三处测试计数与 ADR-0013 后现实漂移(实测 UI=100 vs 文档 96)
+### [已修·三批] README/installation/guide 三处测试计数与 ADR-0013 后现实漂移(实测 UI=100 vs 文档 96)
 
 - 位置: `README.md:66` · 维度: 测试与文档 · 判定: confirmed
 - 问题: 三处文档的测试计数停留在 ADR-0013(chat 蒸馏,2026-08-11)之前:README.md:66-72、installation.md:326-331、guide.zh-CN.md:350-355 均写 acq 75 / pytest 70 / UI 96 / e2e+eval 91;现实(DEVLOG 2026-08-11 条 + 我本地重跑 UI 套件实测 # tests 100 / # pass 100)为 acq 80 / pytest 74 / UI 100 / e2e+eval 94。guide.zh-CN.md:412 自检单『六个测试套件全绿』同样滞后。触发场景:读者跑完套件得到 100 而文档写 96,无法判断是多跑了还是环境错了。
 - 核实: 发现属实,实测证据确凿。文档侧:README.md:66-72 写 acq 75 / gov 83 / ret 46 / pytest 70 / UI 96 / e2e+eval 91;docs/installation.md:326-331 与 docs/guide.zh-CN.md:350-355 同样写 75/83/46/70/96/91。实测(本机刚跑):acquisition npm test → # tests 80 / # pass 80;agent pytest → 74 passed;ui node --test → # tests 100 / # pass 100;根目录 node --test tests/e2e/ tests/eval/ → # tests 95, pass 94, skipped 1(即 DEVLOG 所述 opt-in live eval 旧例跳过)。docs/DEVLOG.md:27-28 的 ADR-0013(2026-08-11,即今日)收官条明确记录新计数 acq 80 · pytest 74 · UI 100 · e2e+eval 94,证明 ADR-0013 落地时更新了 DEVLOG 却漏同步三处文档,gov 83/ret 46 未变故未漂移。这不是刻意设计——CLAUDE.md 的 docs discipline 要求文档同步,且 DEVLOG 自身记了新值,纯属疏漏。severity medium 合理:纯文档漂移,不影响代码,但读者跑套件得 100 而文档写 96 确实会产生『多跑了还是环境错了』的困惑。附带核对:guide.zh-CN.md:412 自检单写『六个测试套件全绿』——README.md:61 称 seven suites(五个服务套件 + UI + 跨服务层),guide 按 6 条命令行计 6 个,未含具体数字故不随计数漂移,但该措辞与 README 的 seven suites 表述不一致,属同一处轻微滞后,不改变主结论。涉及文件(绝对路径):D:\claude\knowledge-extension\README.md(L66-72)、D:\claude\knowledge-extension\docs\installation.md(L326-331)、D:\claude\knowledge-extension\docs\guide.zh-CN.md(L350-355, L412)、对照依据 D:\claude\knowledge-extension\docs\DEVLOG.md(L27-28)。
 
-### Playwright 套件(唯一执行 public/*.js 的门禁)在所有文档的测试命令中缺席
+### [已修·三批] Playwright 套件(唯一执行 public/*.js 的门禁)在所有文档的测试命令中缺席
 
 - 位置: `docs/installation.md:320` · 维度: 测试与文档 · 判定: confirmed
 - 问题: ui/e2e/(flows.spec.mjs PW-01..06 + open-portal 15 例 + chat-input 5 例)是唯一真正加载 public/*.js 的测试层,test-catalog.md §E 把它定为 L1/L2 CI 门禁,但它不出现在任何文档化测试命令里:README.md Tests 节、CLAUDE.md Commands、installation.md §9(line 320-332)、guide.zh-CN.md §11(line 345-355)全部只列 6 条 node/pytest 命令;仅 ui/package.json 的 test:e2e 脚本知道它存在。触发场景:贡献者按文档跑『全量回归』永远跑不到 Playwright——这正是 68c4f18 把 govern.js 破坏带进 main 的机制,昨天事故后仍未把该层写进文档。
@@ -72,7 +72,7 @@
 
 Minor unverified details (exact case counts 6+15+5 vs DEVLOG's "Playwright 21/21") don't affect the finding. The docs/test-commands gap and its real-world consequence are fully confirmed.
 
-### governance/viewer/public/app.js 零执行覆盖:同 govern.js 盲区且无浏览器套件兜底
+### [已修·三批] governance/viewer/public/app.js 零执行覆盖:同 govern.js 盲区且无浏览器套件兜底
 
 - 位置: `governance/viewer/test/viewer.test.mjs:144` · 维度: 测试与文档 · 判定: confirmed
 - 问题: viewer 的 13KB 前端 app.js 在全仓库没有任何解析或执行覆盖:governance/viewer/test/viewer.test.mjs:144-151 仅通过 HTTP 把 /app.js 取回断言字节内容/前缀,从不执行;viewer 没有 Playwright 层(ui/e2e 只覆盖 8322 门户,没有任何 spec 访问 8321 viewer)。比 ui/public 更盲区——门户至少有 Playwright 兜底,viewer 连兜底都没有。触发场景:viewer app.js 引入语法错误或运行时引用错误,gov 83 全绿,评审者打开 8321 白屏。
@@ -103,7 +103,7 @@ Minor unverified details (exact case counts 6+15+5 vs DEVLOG's "Playwright 21/21
 
 影响属实但有限：语义图画布上这些节点仍可渲染/点击导航（只是样式与 tooltip 误标），页面也可经其他视图到达；导航树缺失三类页面入口 + 图例/tooltip 误导属真实用户可见缺陷，medium 定级合理。
 
-### 队列内 sync git(execFileSync 无超时)冻结整个门户事件循环,与仓库已修复的同类问题不一致
+### [已修·三批] 队列内 sync git(execFileSync 无超时)冻结整个门户事件循环,与仓库已修复的同类问题不一致
 
 - 位置: `ui/lib/acquire.mjs:129` · 维度: 门户后端 · 判定: confirmed
 - 问题: snapshot()(acquire.mjs:129-133)在每次 wiki 编辑保存(edit.mjs:51)、kbfile 保存(kbfile.mjs:33)、raw 删除/移动时用 execFileSync 跑 git add+commit,无 timeout;govern.mjs 的 gitPorcelain/gitHead(55-65)同样是 sync,且在 govern-run 的 async done 回调里被直接调用(govern.mjs:199、261)。Node 单线程:git 慢/卡(大仓库 status、pre-commit hook、Windows Defender 扫描)期间整个门户事件循环冻结——所有 SSE、health 轮询、其他请求全部停顿;git 真卡死则无超时永久挂起。仓库自己在 serve.mjs:48-50 和 govern.mjs:19-21 注释里把这列为一类已修 bug(commit 路径改成了 execFileP),但 snapshot 和 porcelain/head 这些同等热度的路径漏改了。触发:git 仓库型 KB 上任意一次编辑/删除保存,恰逢 git 慢。
@@ -123,7 +123,7 @@ Minor unverified details (exact case counts 6+15+5 vs DEVLOG's "Playwright 21/21
 
 对严重度叙事的校准（不改变缺陷成立）：发现称"卡死子进程把队列顶死、除重启无计可施"略有夸大——acquisition 连接器每次请求有 30s AbortSignal.timeout(jira.mjs:34/119,confluence.mjs:29)，挂起的单请求会超时失败，子进程退出后 enqueue 链（jobs.mjs:69-71）会将其置为 cancelled 并放行后续作业，队列非永久死锁；且 cancel 返回的 job.status 仍是 'running'（非立即显示 cancelled)。但真实影响成立：一次正常的大拉取（数百页×多请求）或长时间 distill-chat agent 运行期间，cancel 完全无效，串行队列被合法长作业占据直至其自然结束——这正是 M7c P3 承诺解决却未覆盖的场景。判 confirmed,medium 合理（偏中低）。
 
-### govern-run 的 checkpoint 续跑在唯一生产驱动(门户)下不可达
+### [已修·三批] govern-run 的 checkpoint 续跑在唯一生产驱动(门户)下不可达
 
 - 位置: `agent/weft_agent/tasks/govern_run.py:26` · 维度: agent(Python) · 判定: confirmed
 - 问题: ADR-0012 的卖点之一是"崩溃后按同一 thread_id 从断点续跑"(govern_run.py:26-29 的 resume 分支),但门户侧 ui/lib/executor.mjs:72 每次启动生成随机 run_id(portal-<hex>)且从不传 resume:true——崩溃的 portal 运行永远从 sweep 重新开始,150 篇文档的全部 LLM 调用成本重付一遍(apply-source 幂等所以结果不错,纯粹是钱和时间);崩溃线程的 checkpoint 也因 run_id 不再复用而永久留在 .kb/agent/checkpoints.json(_compact 只压单线程历史,不清死线程)。repo 内除 e2e 外没有任何调用方传 resume。触发场景:门户跑的 govern-run 中途崩溃/被 kill 后再次点击运行。
@@ -189,7 +189,7 @@ CONTEXT.md 部分同步、部分陈旧:术语表(第 25、35 行)已改为 "five
 
 影响评估:这确实是文档不一致,但性质是命名层面的失同步而非契约结构性错误——LLM 列的权限语义与 agent 服务实际行为(.kb/config 写、其余只读)仍一一对应,CLAUDE.md 与 CONTEXT.md 术语表均已正确定义 agent 服务,新实现者不至于真的"找不到服务"。medium 定级合理,事实层面全部成立,判 confirmed。
 
-### applySourcePage 无条件写 status:'approved'，会静默覆盖门户人工编辑产生的待审 candidate 源码页
+### [已修·三批] applySourcePage 无条件写 status:'approved'，会静默覆盖门户人工编辑产生的待审 candidate 源码页
 
 - 位置: `governance/scripts/lib/govern.mjs:388` · 维度: Node 服务 · 判定: plausible
 - 问题: applyNonSourcePage 有 keepCandidate + assertNoUnloggedFlip 双重保护（既保留 candidate 状态、又拒绝吞掉未记录的 review flip），而 applySourcePage 两者都没有：只要 raw 的 source_version 变了（plan 判 stale），它就无条件覆写页面并硬编码 status: 'approved'。触发场景：操作员通过门户手工编辑 wiki/sources/<x>.md（按契约 §1⑤ 被降级为 candidate 并写 portal | candidate:manual 日志，处于待审），此时上游源文档更新，下一次治理运行跑 apply-source —— 人工编辑被静默覆盖、页面从 candidate 直接变 approved，且新日志行 auto:update-source 把 pending-review 标记从审计链上抹掉（sweep 的 lastLogAction 再也看不到 candidate:*）。这违反契约 §4 'approval is a review outcome only' 的候选保护精神，且与非源码页的行为不一致。
@@ -197,13 +197,13 @@ CONTEXT.md 部分同步、部分陈旧:术语表(第 25、35 行)已改为 "five
 
 ## LOW(18 条)
 
-### installation.md 章节编号断裂:缺 §8、§12 重复
+### [已修·三批] installation.md 章节编号断裂:缺 §8、§12 重复
 
 - 位置: `docs/installation.md:320` · 维度: 测试与文档 · 判定: confirmed
 - 问题: installation.md 的章节号从 ## 7(line 273)直接跳到 ## 9(line 320,无 §8),且 ## 12 出现两次(Troubleshooting line 353、Uninstalling line 368);对照 installation.zh-CN.md(§1-12 完整无重号)确认是 EN 版编辑漂移。README line 40 指引读者看 §7 恰好未受影响,但任何按章节号交叉引用 §8+ 的读者会错位。
 - 核实: Verified by direct inspection. In D:\claude\knowledge-extension\docs\installation.md, the `## ` heading sequence is: 1, 2, 3, 4, 5, 6, 7 (line 273, Smoke test), then 9 (line 320, "Optional: run the test suite") — §8 is skipped; and `## 12.` appears twice: line 353 "Troubleshooting" and line 368 "Uninstalling". The parallel docs\installation.zh-CN.md has a complete, duplicate-free sequence §1–§12 (with "可选：跑测试套件" correctly numbered §8 at line 225), confirming the EN version drifted during an edit rather than this being deliberate design (no note in CLAUDE.md/CONTEXT.md sanctions section renumbering; zh-CN is the intact mirror). Cross-reference impact check: README.md:40 cites §7 (intact), CLAUDE.md:59 cites §3–4 (intact), docs\guide.zh-CN.md:194 cites §6.4 (§6 intact in both versions) — so no in-repo cross-reference currently lands in the broken §8+ range; the harm is limited to future/manual section-number citations, consistent with the low severity assigned.
 
-### README『The three services』残留 — 服务数自相矛盾
+### [已修·三批] README『The three services』残留 — 服务数自相矛盾
 
 - 位置: `README.md:56` · 维度: 测试与文档 · 判定: confirmed
 - 问题: README 开头(line 5)正确声明五个服务,但目录结构表后的总结句仍是 ADR-0012 之前的『The three services have zero code dependency on each other』。触发场景:新读者同一段落内读到 five services 和 three services 两个数字,削弱契约文档可信度。
@@ -215,7 +215,7 @@ CONTEXT.md 部分同步、部分陈旧:术语表(第 25、35 行)已改为 "five
 - 问题: renderPrompts 的 open()(第 340 行)切换 prompt 文件直接 stage.textContent='' 重建编辑器,ta 里未保存的修改无任何确认即丢失——ta 的 input 监听只把 saveNote 置为『未保存』(第 363 行),不构成拦截。同文件 LLM 区有完整的 llmDirty + confirm 守卫(第 38-40 行),prompts 区行为不一致;治理页 GOVERNANCE.md 编辑器也有 409 冲突卡。触发:改了一半 summarize 的 prompt,顺手点开另一个 prompt,回来改动全无。
 - 核实: 代码逐条验证属实。ui/public/views/settings.js:341-375 的 open() 切换 prompt 文件时直接 stage.textContent='' 重建编辑器,无任何脏检查/确认;363 行 input 监听仅置 saveNote='未保存',不构成拦截。同文件 38-40 行 LLM 区确有 llmDirty+confirm 守卫(17-18 行注释明示设计意图就是防止静默丢弃),且守卫只挂 llmDirty——prompts 区编辑不仅切文件丢,切 section 也丢(视图 hashchange 重挂载)。对照声明核实无误:govern.js:253-256 GOVERNANCE.md 编辑器注释明示沿用 browse.js 的 optimistic-lock 409 纪律,browse.js:431 有 409 card。无文档(设计原则/注释/ADR)将此声明为刻意设计,反而设计原则 4 与 LLM 区注释意图指向这是遗漏。low 严重度定级合理:仅 UX 一致性缺陷,无数据损坏或安全问题,但触发场景真实(编辑一半切文件,改动不可恢复)。
 
-### 两个图标名不在 ICONS 注册表,静默回退成 fileText 图标
+### [已修·三批] 两个图标名不在 ICONS 注册表,静默回退成 fileText 图标
 
 - 位置: `ui/public/views/queue.js:120` · 维度: 门户前端 · 判定: confirmed
 - 问题: queue.js:120 icon('alertTriangle', 14) 与 dashboard.js:132 STAT('link2', …) 在 lib/icons.js 注册表中都不存在(注册表是 'link-2' 带连字符,没有 alertTriangle),icon() 的兜底 ICONS.fileText 让冲突组警示条和『悬空链接』统计卡都显示成文件图标,警示语义丢失。属静默退化,无任何报错。
@@ -229,7 +229,7 @@ CONTEXT.md 部分同步、部分陈旧:术语表(第 25、35 行)已改为 "five
 
 结论:两处调用都命中兜底,冲突组警示条与「悬空链接」统计卡均渲染成 fileText 文件图标,警示语义确实丢失。属真实存在的低严重度装饰性缺陷(功能不受影响,仅图标语义错误),发现描述与代码完全一致,无文档表明这是刻意设计。修复也简单:queue.js 改用 'circleAlert',dashboard.js 改用 'link-2'。
 
-### 初始标签态不一致:『导航树』高亮但显示的是语义图
+### [已修·三批] 初始标签态不一致:『导航树』高亮但显示的是语义图
 
 - 位置: `ui/public/views/graph.js:27` · 维度: 门户前端 · 判定: confirmed
 - 问题: 第 27 行 tabTree 带 class 'active',第 32 行 treePane 却 hidden、graphPane 可见——打开图谱页时『导航树』标签呈选中态,实际展示的是语义图画布。用户想看树必须去点一个看起来已选中的标签。二选一:默认 tabTree 不加 active,或默认展示 treePane。
@@ -241,7 +241,7 @@ CONTEXT.md 部分同步、部分陈旧:术语表(第 25、35 行)已改为 "five
 - 问题: chat.js 的 store.write(第 16 行)与 search.js 的 store.write(第 11 行)都没捕获 QuotaExceededError。chat 每条 assistant 消息带 steps/citations,深研答案很长,100 条历史可达数 MB;写爆时 saveHistory 在 send() 内(第 178 行)同步抛出 → 事件处理器里的 promise 变 unhandled rejection,用户消息已 push 进内存但 renderMessages/ask 不再执行,表现是『发了没反应』且无任何提示。store.read 有 try/catch 而 write 没有,不对称。修复:write 里 try/catch,失败时截断重试或静默降级。
 - 核实: 代码事实全部核实：chat.js:16 与 search.js:11 的 store.write 均无 try/catch，而 read（chat.js:15/search.js:10）有，不对称属实。失败路径确凿：chat.js send() 中 saveHistory()(178 行）在 renderMessages()(179 行）与 ask()(182 行）之前同步执行，QuotaExceededError 抛出时用户消息已入内存数组但永不渲染/发送，input 未清空，事件处理器无 catch → unhandled rejection 且零提示，"发了没反应"描述准确。触发条件可信：历史上限 100 条、assistant 消息含 steps/citations/深研长文，单条数十 KB,5MB localStorage 配额可达。非文档明示的刻意设计（CLAUDE.md/contract 无相关约定，read 端防御表明 write 端是遗漏）。影响为 low 级别边缘场景（需配额耗尽，单机 localhost 工具可清站点数据恢复），但一旦发生即静默且稳定复现。修复建议（write 内 try/catch + 截断重试/静默降级）合理。
 
-### executor 的 govern-run 子进程 stdout 缓冲无上限(stderr 有 32KB 上限,stdout 没有)
+### [已修·三批] executor 的 govern-run 子进程 stdout 缓冲无上限(stderr 有 32KB 上限,stdout 没有)
 
 - 位置: `ui/lib/executor.mjs:81` · 维度: 门户后端 · 判定: confirmed
 - 问题: child.stderr 有 32KB 截断(84 行),child.stdout 是裸 `stdout += c` 无上限。govern-run 结束时 stdout 被 JSON.parse 当 summary,若 python 进程异常刷屏(stdout 打印日志/警告),门户内存随运行时长无界增长。与 stderr 的截断纪律明显不对称,属同一函数内的疏漏。触发:govern-run 子进程 stdout 输出失控。
@@ -253,25 +253,25 @@ CONTEXT.md 部分同步、部分陈旧:术语表(第 25、35 行)已改为 "five
 - 问题: 校验函数报错信息写 'endpoint must be an https URL',但实际判断是 String(config.endpoint).startsWith('http')——http:// 明文端点照常通过并落盘 models.json。之后 agent 服务会带着 API key(配置里的 env 变量名对应的密钥)向该 http 端点发起 LLM 请求,密钥明文上网段。触发:操作员在设置页手滑把 https 写成 http,门户不拦。
 - 核实: Confirmed. ui/routes/api-settings.mjs:54 reads `if (!config.endpoint || !String(config.endpoint).startsWith('http')) return 'endpoint must be an https URL';` — the error message states an https requirement but the check passes any `http://` URL, and POST /api/settings/config then writes it verbatim to .kb/config/models.json (lines 95–103). No test pins https (ui/test/settings.test.mjs only covers rejection cases unrelated to scheme). On the consumer side, agent/weft_agent/client.py build_endpoint (line 53) uses the endpoint as-is and _do (line 142) POSTs with the API key header via httpx, so a cleartext http endpoint would receive the key unencrypted — the claimed leak path is real. The portal's POST is token-gated and the trigger requires operator error, which bounds severity (low, as filed). One mitigating nuance: client.py's docstring explicitly advertises "any OpenAI-compatible endpoint (Kimi, DeepSeek, vLLM, …)" and vLLM-style local servers are commonly http://localhost — so permitting http may be semi-intentional, in which case the defect is at minimum the misleading error message ('endpoint must be an https URL') contradicting the actual check. Either way the finding's factual core — message claims https, code allows http, key transits in cleartext on typo — is verified against the code; no CLAUDE.md/CONTEXT.md/contract.md documentation sanctions the discrepancy. Fix is one line: require startsWith('https://') (optionally exempting localhost) or correct the message.
 
-### /api/raw-asset 以 image/svg+xml 直出 KB 内 SVG,无 CSP/attachment,顶层打开即同源脚本执行
+### [已修·三批] /api/raw-asset 以 image/svg+xml 直出 KB 内 SVG,无 CSP/attachment,顶层打开即同源脚本执行
 
 - 位置: `ui/lib/paths.mjs:63` · 维度: 门户后端 · 判定: confirmed
 - 问题: normalizeRawAssetRel 白名单含 .svg(paths.mjs:63),serve.mjs:321-322 直接以 image/svg+xml 流式返回,无 Content-Disposition、无 CSP/sandbox。当前前端只经 <img> 加载(md.js:82,脚本不执行),但一旦资产 URL 被顶层打开(中键新标签、复制链接),SVG 内嵌脚本即在门户源执行——同源可读 '/' 拿到注入的每启动 token,随后调用全部写 API;Host/Origin 检查对同源脚本无效。资产内容来自 Confluence 拉取的 Gliffy 附件,属半不可信输入。触发:KB 内含恶意 SVG 资产 + 操作员在新标签页直接打开该资产 URL。修法便宜:对 svg 加 Content-Security-Policy: sandbox 或强制 attachment。
 - 核实: 发现属实。代码逐项核实：(1) ui/lib/paths.mjs:63 ASSET_EXT 白名单含 .svg，ASSET_MIME 映射 image/svg+xml；(2) ui/serve.mjs:315-323 /api/raw-asset 以 image/svg+xml 流式直出，无 Content-Disposition、无 CSP/sandbox 头；(3) 前端仅经 <img> 加载（ui/public/lib/md.js:82），正常使用路径不执行脚本，但顶层打开（新标签/复制链接）时 SVG 内嵌脚本在门户源执行——浏览器标准行为；(4) 同源脚本可 fetch('/') 拿到 serve.mjs:729 注入 index.html 的每启动 token（%%UI_TOKEN%% 替换）；(5) ui/lib/auth.mjs 的 checkHost/checkWrite 只校验 loopback Host/Origin + x-ui-token，同源脚本自带合法 Host/Origin，持 token 即通过全部写检查，可调用全部写 API——auth.mjs:34-36 注释自认"读到注入 token 即失守"。攻击链完整：恶意 SVG 经 Confluence Gliffy 附件（半不可信输入）进入 KB → 操作员顶层打开资产 URL → 同源脚本执行 → 偷 token → 任意写。严重度 low 合理：本地单用户工具、需两步触发条件，但非文档明示的刻意设计（paths.mjs 注释只谈扩展名白名单，未提 SVG 脚本风险；CLAUDE.md 原则 4 要求门户"safe"）。修法便宜：svg 响应加 Content-Security-Policy: sandbox 或强制 Content-Disposition: attachment。
 
-### /api/chat 子进程资源失管:stderr 无上限、300s deadline 不杀进程不关响应、stdout 管道无人消费
+### [已修·三批] /api/chat 子进程资源失管:stderr 无上限、300s deadline 不杀进程不关响应、stdout 管道无人消费
 
 - 位置: `ui/serve.mjs:660` · 维度: 门户后端 · 判定: confirmed
 - 问题: 三处叠加:(a) child.stderr 累加无任何上限(executor.mjs 同类缓冲有 32KB 上限,此处没有);(b) streamNdjson 的 300s deadline(serve.mjs:81-85)到期只是停止 tail——既不 res.end() 也不 child.kill(),若 python 子进程挂死,child+SSE 响应+缓冲无限期存活,只能靠客户端断开(res close 才 kill);(c) spawn 用了 stdio:'pipe' 的 stdout 但从不挂 data 监听(serve.mjs:644-646),一旦 chat 任务哪天向 stdout 打印超过管道缓冲(Windows ~64KB)的内容,子进程写阻塞死锁且无人杀它。触发:agent chat 子进程 hang 或 stderr/stdout 输出失控(模型服务故障、依赖库刷屏)。
 - 核实: All three sub-claims verified in code. (a) ui/serve.mjs:659-660 accumulates child.stderr with no cap, while the parallel buffer in ui/lib/executor.mjs:82-84 is capped at 32KB — the inconsistency is real and the accumulated string is only ever used via slice(-2000), so the unbounded growth serves no purpose. (b) streamNdjson's 300s deadline (serve.mjs:81-85) returns silently: no res.end(), no child.kill(), no error event; the child 'close' handler that would end the SSE response only fires when the child exits, so a hung python child with a patient client leaks the process + socket + stderr buffer indefinitely (only client disconnect via res 'close' at serve.mjs:692-695 kills it). (c) stdio:['ignore','pipe','pipe'] (serve.mjs:645) with no stdout listener is factual, but currently latent: agent/weft_agent/__main__.py:94-96 shows chat prints only a one-shot JSON summary to stdout and tasks/chat.py:146 returns just {"level": level} (~hundreds of bytes, far under the ~64KB Windows pipe buffer), so the write-block deadlock needs a future change or a dependency printing to stdout. Impact is genuinely low: triggers require agent-side malfunction (hang/runaway stderr), the portal is localhost with per-startup token and single user, and the normal path is unaffected. Facts conclusive; severity rating (low) accurate.
 
-### 非流式重试把永久性 4xx(认证/配置错误)也重试 4 次,且 200 但 JSON 解析失败同样重试
+### [已修·三批] 非流式重试把永久性 4xx(认证/配置错误)也重试 4 次,且 200 但 JSON 解析失败同样重试
 
 - 位置: `agent/weft_agent/client.py:129` · 维度: agent(Python) · 判定: confirmed
 - 问题: chat_completion 的 except Exception 全捕获重试(client.py:133):_do 对非 200 抛 RuntimeError(含 400 参数错、401/403 认证错、404 部署名错——这些重试永远不会成功),每次调用白白等 1+2+4=7s 并重复打 4 次失败请求后才把真正的错误抛给上层;200 但 res.json() 解析失败(gateway 返回空体/HTML 错误页配 200)也被同样重试。触发场景:models.json 配错 deployment、SPN token 被拒、网关 401 时,check/chat 的报错延迟 7 秒且网关侧多 3 次无效请求。只应重试 429/5xx 与连接层错误。
 - 核实: Verified in D:\claude\knowledge-extension\agent\weft_agent\client.py: the non-streaming retry loop (lines 129-137) catches all exceptions (`except Exception`, line 133) and retries 4 total attempts with 1+2+4=7s backoff. `_do` (lines 143-144) raises RuntimeError for any non-200 with no status-code discrimination, so permanent 4xx (400/401/403/404, e.g. wrong deployment in models.json, rejected SPN token, gateway 401) are retried identically to transient 429/5xx, adding 7s latency and 3 futile gateway requests before the real error surfaces. `res.json()` failure on a 200 (empty/HTML gateway body) raises JSONDecodeError, also caught and retried. Streaming path correctly does not retry, matching the finding's scope. Git history shows this is a faithful port of the deleted llm/lib/openai.mjs (same retry-everything loop), and ADR-0009 only documents the retry parameters (1s/2s/4s, 3 retries) — retrying 4xx is not a documented deliberate design decision. Impact is accurately rated low by the finding itself: off hot path, correct error eventually propagates, cost is delay + redundant requests on misconfiguration. All factual claims confirmed.
 
-### parse_args 把缺值的长选项静默当布尔 True,--input-file 缺值时任务拿空输入照跑
+### [已修·三批] parse_args 把缺值的长选项静默当布尔 True,--input-file 缺值时任务拿空输入照跑
 
 - 位置: `agent/weft_agent/__main__.py:44` · 维度: agent(Python) · 判定: confirmed
 - 问题: parse_args(44-47 行)在 `--flag` 后跟另一个 `--xxx` 或到末尾时记 True;而 80 行用 isinstance(input_path, str) 判断,--input-file 缺值时被当成'没传',input 静默为 {}。这违反仓库自己的纪律(CLAUDE.md:布尔 flag 必须 fail loudly,--candidate yes 之类不得静默)。触发场景:`python -m weft_agent chat --kb K --output-file o.ndjson --input-file`(顺序写错/漏值)→ chat 以空 question 跑完整个检索+LLM 流程并产出 refusal,而不是 exit 64 报用法错,排查时极误导。
@@ -283,7 +283,7 @@ CONTEXT.md 部分同步、部分陈旧:术语表(第 25、35 行)已改为 "five
 
 同类隐患顺带存在:bare `--kb` 会被静默丢弃并回退 KB_PATH 环境变量(resolve 到别的 KB),比 --input-file 更危险,但不在本发现范围内。修复方向:parse_args 对已知带值选项缺值时 usage() exit 64。
 
-### 崩溃后同 run_id 非 resume 重跑会把崩溃run的 results/hooks 累积进新 run(已实测)
+### [已修·三批] 崩溃后同 run_id 非 resume 重跑会把崩溃run的 results/hooks 累积进新 run(已实测)
 
 - 位置: `agent/weft_agent/tasks/govern_run.py:29` · 维度: agent(Python) · 判定: confirmed
 - 问题: govern_run.py:26-29:resume 为假时直接 app.invoke({}, cfg),不检查也不清理该 thread 的既有状态。实测 langgraph 1.2.10:同一 thread_id 用 {} 再次 invoke 会从旧 checkpoint 的状态继续,带 add reducer 的通道(results/doc_errors/hooks)直接叠加(测试复现:results 由 ['r1','r2'] 变 ['r1','r2','r1','r2'])。触发场景:CLI 用户在 run 崩溃后用同一 run_id 重跑但不传 resume(语义上他要的是全新 run)——plan 节点会重置 queue,但崩溃run的 results 残留导致 govern_run.py:36-38 的 created/updated/deduped 计数翻倍,旧 hooks 还会漏进 synthesize_node 的聚类(synthesize 簇按 raw 去重,但来自已失效run的 hook 仍可能把某主题凑过 MIN_CLUSTER_RAWS 门槛或喂进过时页面正文)。修复方向:非 resume 且 thread 存在时先 delete_thread 再 invoke。

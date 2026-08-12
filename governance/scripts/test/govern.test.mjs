@@ -84,3 +84,30 @@ test('governance v1 end-to-end', () => {
 
   fs.rmSync(kbRoot, { recursive: true, force: true });
 });
+
+test('apply-source never re-approves a candidate source page (2026-08-12 candidate protection)', () => {
+  const { kbRoot, writeRaw } = makeKbWithRaws();
+  const r1 = writeRaw('cccc3333-manual', 'Manual Edit Doc', '2026-07-01T00:00:00Z');
+  const res = applySourcePage(kbRoot, r1, '## Key Points\n\n- Original summary');
+  assert.equal(res.action, 'auto:create-source');
+  const pageAbs = path.join(kbRoot, res.page);
+
+  // simulate a portal manual edit (whitelist ⑤): body rewritten, demoted to
+  // candidate with a review_note — and the log line the portal appends
+  const parsed = parseFrontmatter(fs.readFileSync(pageAbs, 'utf8'));
+  const demoted = buildFrontmatter({ ...parsed.fields, status: 'candidate', review_note: 'manual edit via portal @ 2026-08-12' });
+  fs.writeFileSync(pageAbs, demoted + '\nHuman-edited body.\n', 'utf8');
+  fs.appendFileSync(path.join(kbRoot, 'log.md'),
+    `## [2026-08-12T00:00:00Z] portal | candidate:manual | ${res.page} | manual edit via portal\n`, 'utf8');
+
+  // a source-following update must NOT silently re-approve
+  writeRaw('cccc3333-manual', 'Manual Edit Doc', '2026-07-20T00:00:00Z');
+  const res2 = applySourcePage(kbRoot, r1, '## Key Points\n\n- Regenerated summary');
+  assert.equal(res2.action, 'auto:update-source');
+  const after = parseFrontmatter(fs.readFileSync(pageAbs, 'utf8')).fields;
+  assert.equal(after.status, 'candidate', 're-apply must keep the pending-review candidate status');
+  assert.equal(after.review_note, 'manual edit via portal @ 2026-08-12');
+  assert.equal(after.source_version, '2026-07-20T00:00:00Z', 'content still follows the source');
+
+  fs.rmSync(kbRoot, { recursive: true, force: true });
+});

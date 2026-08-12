@@ -408,15 +408,25 @@ export function applySourcePage(kbRoot, rawRelInput, summaryBody, {
   const now = new Date().toISOString();
   const old = existed ? readFields(pageAbs) : {};
 
+  // Candidate protection (2026-08-12 audit): a source page can be candidate —
+  // a portal manual edit (whitelist ⑤) demotes it. A source-following update
+  // must never silently re-approve it (approval is a review outcome only);
+  // mirrors applyNonSourcePage's keepCandidate. The unlogged-flip guard gets
+  // the same coverage as non-source pages.
+  const currentStatus = existed ? readStatus(pageAbs) : null;
+  if (existed) assertNoUnloggedFlip(kbRoot, pageRel.replace(/\\/g, '/'), currentStatus);
+  const keepCandidate = existed && currentStatus === 'candidate';
+
   const fm = buildFrontmatter({
     type: 'source',
-    status: 'approved',
+    status: keepCandidate ? 'candidate' : 'approved',
     title: fields.title,
     source_ref: rawRel,
     source_url: fields.source_url,
     source_version: fields.source_version,
     content_hash: fields.content_hash,
     tags: tags === undefined ? (Array.isArray(old.tags) ? old.tags : []) : tags,
+    review_note: keepCandidate ? (old.review_note || 'kept candidate (pending review)') : undefined,
     created_at: old.created_at || now,
     updated_at: now,
   });

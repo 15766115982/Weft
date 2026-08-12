@@ -53,7 +53,7 @@ govern-run / search / chat). Full smoke-test commands:
 | `guide/` | Pre-M0 research notes (Chinese) + `materials/` (paper/article snapshots) |
 | `install.cmd` / `install.sh` | One-click installers (steps 3-4 of the installation guide) |
 
-The three services have **zero code dependency** on each other; they communicate only
+The services have **zero code dependency** on each other; they communicate only
 through the knowledge base directory per `schema/contract.md`.
 
 ## Tests / 测试
@@ -63,13 +63,14 @@ suites — five service suites, the UI portal suite, and a cross-service layer (
 pipeline regression + retrieval effectiveness eval):
 
 ```bash
-cd acquisition/scripts && npm test            # 75
-cd governance/scripts && npm test             # 83 (includes the thin viewer)
-cd retrieval/scripts  && npm test             # 46 (npm install first)
-cd agent              && .venv/Scripts/python -m pytest tests/   # 70
-cd ui                 && node --test test/    # 96 (no dependencies)
+cd acquisition/scripts && npm test            # 80
+cd governance/scripts && npm test             # 86 (includes the thin viewer)
+cd retrieval/scripts  && npm test             # 47 (npm install first)
+cd agent              && .venv/Scripts/python -m pytest tests/   # 78
+cd ui                 && node --test test/    # 105 (no dependencies)
+cd ui                 && npx playwright test  # 21 browser-level acceptance (needs playwright install)
 
-node --test tests/e2e/ tests/eval/            # 91: e2e pipeline + govern-run + evals
+node --test tests/e2e/ tests/eval/            # 95: e2e pipeline + govern-run + evals
 ```
 
 `tests/` builds a scratch KB from a fixture corpus (`tests/fixtures/inbox/`) and

@@ -12,7 +12,7 @@ import { createPortal } from '../serve.mjs';
 import { registerExecutor } from '../lib/executor.mjs';
 import { createJobCenter } from '../lib/jobs.mjs';
 import { governRunJob, wikiHash } from '../lib/govern.mjs';
-import { appendGovernRun, governRunFreshness } from '../lib/governruns.mjs';
+import { appendGovernRun, governRunFreshness, resumableGovernRun } from '../lib/governruns.mjs';
 
 const write = (kb, rel, text) => {
   const abs = path.join(kb, rel);
@@ -280,6 +280,85 @@ test('/api/health exposes lastGovernRun after a portal agent run', async () => {
     assert.equal(h.lastGovernRun.noop, true);
   } finally {
     server.close();
+    fs.rmSync(kb, { recursive: true, force: true });
+  }
+});
+
+// ---- 2026-08-12: checkpoint resume wiring ----
+
+test('resumableGovernRun: interrupted/failed/cancelled resumable; complete/resumed not; threadId rides the start record', () => {
+  const kb = makeKb();
+  try {
+    assert.equal(resumableGovernRun(kb), null, 'no history → null');
+    appendGovernRun(kb, { ts: '2026-08-12T10:00:00Z', jobId: 'done1', phase: 'start' });
+    appendGovernRun(kb, { ts: '2026-08-12T10:05:00Z', jobId: 'done1', phase: 'finish', status: 'complete' });
+    assert.equal(resumableGovernRun(kb), null, 'completed runs delete their thread — not resumable');
+
+    appendGovernRun(kb, { ts: '2026-08-12T11:00:00Z', jobId: 'dead1', phase: 'start' });
+    const r1 = resumableGovernRun(kb);
+    assert.equal(r1.threadId, 'portal-dead1', 'legacy record without threadId falls back to portal-<jobId>');
+    assert.equal(r1.status, 'interrupted');
+
+    // a failed resume run points at the ORIGINAL thread via its start record
+    appendGovernRun(kb, { ts: '2026-08-12T12:00:00Z', jobId: 'retry1', phase: 'start', threadId: 'portal-dead1' });
+    appendGovernRun(kb, { ts: '2026-08-12T12:01:00Z', jobId: 'retry1', phase: 'finish', status: 'failed' });
+    const r2 = resumableGovernRun(kb);
+    assert.equal(r2.jobId, 'retry1', 'the newer resumable job wins');
+    assert.equal(r2.threadId, 'portal-dead1', 'thread id survives across the resume chain');
+
+    appendGovernRun(kb, { ts: '2026-08-12T12:02:00Z', jobId: 'dead1', phase: 'finish', status: 'resumed', resumedBy: 'retry1' });
+    const r3 = resumableGovernRun(kb);
+    assert.equal(r3.jobId, 'retry1', 'a resumed-away run is no longer resumable itself');
+
+    assert.equal(resumableGovernRun(kb, 'retry1'), null, 'excludeJobId skips the running job');
+  } finally {
+    fs.rmSync(kb, { recursive: true, force: true });
+  }
+});
+
+test('governRunJob resume:true hands the checkpoint thread to the executor and closes the old run', async () => {
+  const kb = makeKb();
+  const jobs = createJobCenter();
+  try {
+    appendGovernRun(kb, { ts: '2026-08-12T09:00:00Z', jobId: 'old9', phase: 'start' });
+    let seen = null;
+    registerExecutor('fake-capture', (spec) => {
+      seen = spec;
+      const events = new EventEmitter();
+      setTimeout(() => events.emit('done', { ok: true, text: 'resumed run finished' }), 10);
+      return { events, kill: () => {} };
+    });
+    const j = jobs.enqueue(kb, governRunJob(kb, { prompt: 'x', executor: 'fake-capture', resume: true }));
+    await jobs.waitFor(j);
+    assert.equal(j.status, 'done', JSON.stringify(j.error));
+    assert.equal(seen.resumeThreadId, 'portal-old9', 'executor receives the interrupted run\'s thread');
+
+    const fresh = governRunFreshness(kb);
+    assert.equal(fresh.status, 'complete');
+    // old run closed as resumed; nothing left to resume
+    assert.equal(resumableGovernRun(kb), null, 'completed resume closes the chain');
+  } finally {
+    fs.rmSync(kb, { recursive: true, force: true });
+  }
+});
+
+test('governRunJob resume:true with nothing resumable starts fresh and says so', async () => {
+  const kb = makeKb();
+  const jobs = createJobCenter();
+  try {
+    let seen = null;
+    registerExecutor('fake-capture2', (spec) => {
+      seen = spec;
+      const events = new EventEmitter();
+      setTimeout(() => events.emit('done', { ok: true, text: 'fresh' }), 10);
+      return { events, kill: () => {} };
+    });
+    const j = jobs.enqueue(kb, governRunJob(kb, { prompt: 'x', executor: 'fake-capture2', resume: true }));
+    await jobs.waitFor(j);
+    assert.equal(j.status, 'done');
+    assert.equal(seen.resumeThreadId, null);
+    assert.match(j.log, /没有可续跑/);
+  } finally {
     fs.rmSync(kb, { recursive: true, force: true });
   }
 });

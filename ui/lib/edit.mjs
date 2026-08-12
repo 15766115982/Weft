@@ -48,7 +48,7 @@ export function saveWikiEditJob(kb, { path: rel, body, baseHash }) {
         }
       }
 
-      const snap = snapshot(kb, [rel], job);
+      const snap = await snapshot(kb, [rel], job);
       const loc = locateFrontmatter(text);
       if (!loc) throw new Error(`page has no frontmatter: ${rel}`);
 

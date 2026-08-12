@@ -117,7 +117,7 @@ async function renderReview(container, rel, onDone, conflicts, suppressed) {
   const group = (conflicts?.groups || []).find((g) => !g.dismissed && Array.isArray(f.sources) && g.raws.some((r) => f.sources.includes(r))) || null;
   if (group) {
     const c = el('div', { class: 'stale-cta conflict' });
-    html(c, `${icon('alertTriangle', 14)} <b>冲突组 ${esc(group.category)}</b>:${esc(group.raws.join('、'))}${group.score !== undefined ? `(相似度 ${group.score})` : ''} — 必须裁决:归档败方来源页 或 保留两者(dismiss)`);
+    html(c, `${icon('circleAlert', 14)} <b>冲突组 ${esc(group.category)}</b>:${esc(group.raws.join('、'))}${group.score !== undefined ? `(相似度 ${group.score})` : ''} — 必须裁决:归档败方来源页 或 保留两者(dismiss)`);
     reader.append(c);
   }
 

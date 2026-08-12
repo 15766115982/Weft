@@ -66,10 +66,16 @@ function formatGovernFrame(ev) {
   }
 }
 
-function startLanggraphRun({ prompt, cwd }) {
+function startLanggraphRun({ prompt, cwd, resumeThreadId = null }) {
   const events = new EventEmitter();
   const id = crypto.randomBytes(6).toString('hex');
-  const io = agentTaskIO(cwd, 'govern-run', { brief: String(prompt || ''), run_id: `portal-${id}` });
+  // resumeThreadId reuses the interrupted run's checkpoint thread (the agent's
+  // run_id IS the LangGraph thread_id); otherwise a fresh thread per run
+  const io = agentTaskIO(cwd, 'govern-run', {
+    brief: String(prompt || ''),
+    run_id: resumeThreadId || `portal-${id}`,
+    ...(resumeThreadId ? { resume: true } : {}),
+  });
   const outputFile = io.outputFile.replace(/\.json$/, '.ndjson');
 
   const agent = agentTaskSpawn();
@@ -78,7 +84,12 @@ function startLanggraphRun({ prompt, cwd }) {
     { cwd: agent.cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
 
   let stdout = '', stderr = '';
-  child.stdout.on('data', (c) => { stdout += c; });
+  child.stdout.on('data', (c) => {
+    stdout += c;
+    // bounded like stderr (2026-08-12 audit): the final summary JSON is ~1KB,
+    // so a 64KB tail never hurts the success path
+    if (stdout.length > 64 * 1024) stdout = stdout.slice(-64 * 1024);
+  });
   child.stderr.on('data', (c) => {
     stderr += c;
     if (stderr.length > 32 * 1024) stderr = stderr.slice(-32 * 1024);

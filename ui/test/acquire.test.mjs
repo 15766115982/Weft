@@ -315,6 +315,15 @@ test('raw-asset: whitelist-gated image serving', async () => {
   assert.equal(badExt.status, 400);
   const missing = await get(`/api/raw-asset?path=${encodeURIComponent('raw/confluence/501.assets/none.png')}`);
   assert.equal(missing.status, 404);
+
+  // 2026-08-12: KB SVG must not run same-origin script when opened top-level
+  fs.writeFileSync(path.join(kb, 'raw', 'confluence', '501.assets', 'evil.svg'),
+    '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+  const svg = await get(`/api/raw-asset?path=${encodeURIComponent('raw/confluence/501.assets/evil.svg')}`);
+  assert.equal(svg.status, 200);
+  assert.equal(svg.headers.get('content-type'), 'image/svg+xml');
+  assert.equal(svg.headers.get('content-security-policy'), "script-src 'none'");
+  assert.equal(svg.headers.get('x-content-type-options'), 'nosniff');
 });
 
 test('probe endpoint: write gates + jira shape output via real CLI spawn', async (t) => {

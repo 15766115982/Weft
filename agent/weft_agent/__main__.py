@@ -77,6 +77,14 @@ def main() -> None:
     args = parse_args(sys.argv[1:])
     task = args["_"][0] if args["_"] else None
 
+    # A value-taking option left valueless parses as boolean True (2026-08-12
+    # audit: `--input-file` alone silently ran the task with EMPTY input) —
+    # fail loudly instead, mirroring the boolean-flag discipline elsewhere.
+    for opt in ("kb", "input-file", "output-file"):
+        if args.get(opt) is True:
+            print(json.dumps({"error": f"--{opt} requires a value"}), file=sys.stderr)
+            sys.exit(64)
+
     if not task or task not in TASKS:
         usage()
 

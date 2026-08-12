@@ -1,6 +1,6 @@
 # Retrieval Evaluation Report
 
-Date: 2026-08-11T18:00:21.368Z · golden set: 44 queries (41 scored + 3 negative)
+Date: 2026-08-12T02:56:49.866Z · golden set: 44 queries (41 scored + 3 negative)
 
 **Hit@1 = 0.659 · Hit@5 = 0.976 (gate ≥0.85, non-conversational 1.000) · MRR = 0.811**
 **conversational (fallback path, tracked, not gated): Hit@5 = 0.900 (10 queries)**

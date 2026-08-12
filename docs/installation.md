@@ -317,21 +317,23 @@ syntheses). Running the commands by hand remains the best installation check.
 For a full acceptance pass on real servers (failure drills, incremental-skip verification,
 XHTML fidelity audit), follow `real-env-test.md`.
 
-## 9. Optional: run the test suite
+## 8. Optional: run the test suite
 
 400+ tests across seven suites, all against mocks/stubs — no network, no PATs, no model
 endpoint needed:
 
 ```bash
-cd <repo>/acquisition/scripts && npm test            # 75 tests
-cd <repo>/governance/scripts && npm test             # 83 tests (includes the thin viewer)
-cd <repo>/retrieval/scripts  && npm test             # 46 tests (needs npm install first)
-cd <repo>/agent              && .venv/Scripts/python -m pytest tests/   # 70 tests
-cd <repo>/ui                 && node --test test/    # 96 tests (no dependencies)
-cd <repo> && node --test tests/e2e/ tests/eval/      # 91 tests (e2e pipeline + retrieval eval)
+cd <repo>/acquisition/scripts && npm test            # 80 tests
+cd <repo>/governance/scripts && npm test             # 86 tests (includes the thin viewer)
+cd <repo>/retrieval/scripts  && npm test             # 47 tests (needs npm install first)
+cd <repo>/agent              && .venv/Scripts/python -m pytest tests/   # 78 tests
+cd <repo>/ui                 && node --test test/    # 105 tests (no dependencies)
+cd <repo>/ui                 && npx playwright test  # 21 tests, browser-level (needs npx playwright install first;
+                                                     #  the only suite that parses public/ frontend files end to end)
+cd <repo> && node --test tests/e2e/ tests/eval/      # 95 tests (e2e pipeline + retrieval eval)
 ```
 
-## 10. Daily usage
+## 9. Daily usage
 
 Drive everything from the browser: `node <repo>/ui/serve.mjs --kb <path>` starts the
 on-demand UI portal at http://127.0.0.1:8322 (browse/search/review/acquisition console/
@@ -341,7 +343,7 @@ Full walkthrough: `guide.zh-CN.md` §7-8 (Chinese).
 The three-party contract is `schema/contract.md`; the agent service's task/prompt surface
 lives under `<repo>/agent/` and `<repo>/templates/prompts/`.
 
-## 11. Upgrading
+## 10. Upgrading
 
 ```bash
 cd <repo> && git pull
@@ -350,7 +352,7 @@ cd retrieval/scripts && npm install   # refreshes the prebuilt better-sqlite3 bi
 <repo>/agent/.venv/Scripts/python -m pip install -e "<repo>/agent"   # agent dep changes
 ```
 
-## 12. Troubleshooting
+## 11. Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|

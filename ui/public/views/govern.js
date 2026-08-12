@@ -34,6 +34,8 @@ export async function render(view) {
     return box;
   }
 
+  let resumeNext = false;
+
   async function loadPlan() {
     const [plan, h] = await Promise.all([api('/api/plan'), api('/api/health').catch(() => null)]);
     lastPlan = plan;
@@ -41,10 +43,18 @@ export async function render(view) {
     // F1: last agent-governance run summary (from .kb/govern_runs.jsonl)
     if (h && h.lastGovernRun) {
       const r = h.lastGovernRun;
-      const LABEL = { complete: '✓ 完成', failed: '✗ 失败', cancelled: '■ 已取消', interrupted: '⚠ 中断(需重跑)', running: '… 进行中' };
+      const LABEL = { complete: '✓ 完成', failed: '✗ 失败', cancelled: '■ 已取消', interrupted: '⚠ 中断(需重跑)', running: '… 进行中', resumed: '↻ 已被续跑' };
       const line = el('p', { class: 'dim', style: 'font-size:11.5px;margin:0 0 4px' });
       line.textContent = `上次 agent 治理:${LABEL[r.status] || r.status} · ${r.ts.slice(0, 16).replace('T', ' ')}`
         + `${r.durationMs != null ? ` · 耗时 ${Math.round(r.durationMs / 1000)}s` : ''}${r.noop ? ' · 无变更' : ''}`;
+      // checkpoint resume (2026-08-12): an unfinished run kept its agent
+      // checkpoint thread — offer continuing it instead of starting over
+      if (['interrupted', 'cancelled', 'failed'].includes(r.status)) {
+        const resumeBtn = el('button', { class: 'sm', style: 'margin-left:8px',
+          title: '从上次的 checkpoint 继续,已完成治理的文档不会重做' }, '↻ 续跑');
+        resumeBtn.addEventListener('click', () => { resumeNext = true; startRunPanel(); });
+        line.append(resumeBtn);
+      }
       planBox.append(line);
     }
     // I5 freshness (M7c review): the preview is a confirm page — say how old it is
@@ -85,7 +95,7 @@ export async function render(view) {
     html(go, `${icon('sparkles', 14)} 发起 agent 治理`);
     go.disabled = n === 0 && q === 0;
     go.title = go.disabled ? '计划为空,无需治理' : '以当前计划清单为上下文启动 headless agent';
-    go.addEventListener('click', () => startRunPanel());
+    go.addEventListener('click', () => { resumeNext = false; startRunPanel(); });
     ctaRow.append(summary, go);
   }
 
@@ -135,7 +145,8 @@ export async function render(view) {
       transcript.textContent = '';
       runPanel.querySelector('.findings-card')?.remove(); // F4: clear last run's card
       try {
-        const { job } = await apiPost('/api/govern-run', { prompt: ta.value });
+        const { job } = await apiPost('/api/govern-run', { prompt: ta.value, ...(resumeNext ? { resume: true } : {}) });
+        resumeNext = false;
         currentRunId = job.id;
         note.textContent = `作业 ${job.id} 已入队 — 流式输出如下(全部写操作与其他作业串行)`;
       } catch (err) {

@@ -17,6 +17,20 @@ def test_missing_kb_exit_64(tmp_path, monkeypatch):
     assert json.loads(proc.stderr)["error"]
 
 
+def test_valueless_option_exit_64(kb):
+    """2026-08-12 audit: --input-file with no value used to parse as boolean
+    True and the task silently ran on empty input — now a loud usage error."""
+    import subprocess, sys, os
+    from conftest import AGENT_ROOT
+    proc = subprocess.run(
+        [sys.executable, "-m", "weft_agent", "summarize-source", "--kb", str(kb), "--input-file"],
+        capture_output=True, text=True, encoding="utf-8", cwd=str(AGENT_ROOT),
+        env={**os.environ, "PYTHONPATH": str(AGENT_ROOT)},
+    )
+    assert proc.returncode == 64
+    assert "requires a value" in json.loads(proc.stderr)["error"]
+
+
 def test_init_config_creates_models_json(kb_no_config):
     proc = run_cli(kb_no_config, "init-config", input={"provider": "openai"})
     assert proc.returncode == 0, proc.stderr

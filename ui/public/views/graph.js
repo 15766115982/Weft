@@ -24,8 +24,8 @@ export async function render(view, params) {
 
   // ---------- ADR-0007 tab bar: navigation tree / semantic graph ----------
   const tabs = el('div', { class: 'graph-tabs' });
-  const tabTree = el('button', { class: 'active' }, '导航树');
-  const tabGraph = el('button', {}, '语义图');
+  const tabTree = el('button', {}, '导航树');
+  const tabGraph = el('button', { class: 'active' }, '语义图'); // graph pane is the default view — the active tab must match (2026-08-12)
   tabs.append(tabTree, tabGraph);
   wrap.append(tabs);
 

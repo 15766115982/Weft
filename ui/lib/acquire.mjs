@@ -5,11 +5,19 @@
 // split); nothing in the acquisition service is imported in-process for writes.
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { spawnJob } from './jobs.mjs';
 import { normalizeInboxName, normalizeRawRel, resolveUnder } from './paths.mjs';
 import { tail, isGitRepo } from './sys.mjs';
+
+// async git: execFileSync inside the serial queue froze the whole portal event
+// loop for the duration of the commit (2026-08-12 audit; same class as the
+// 2026-08-04 review fix in serve.mjs). 10s timeout so a wedged git fails the
+// job instead of hanging the queue.
+const execFileP = promisify(execFile);
+const GIT_TIMEOUT = { timeout: 10000 };
 
 const ACQUIRE = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'acquisition', 'scripts', 'acquire.mjs',
@@ -85,7 +93,7 @@ export function rawDeleteJob(kb, { path: rel }) {
     run: async (job) => {
       const abs = resolveUnder(kb, rel, 'raw');
       if (!fs.existsSync(abs)) throw new Error(`raw doc does not exist: ${rel}`);
-      const snap = snapshot(kb, [rel], job);
+      const snap = await snapshot(kb, [rel], job);
       fs.unlinkSync(abs);
       return { deleted: rel, snapshot: snap };
     },
@@ -106,7 +114,7 @@ export function rawMoveJob(kb, { from, to }) {
       const absTo = resolveUnder(kb, to, 'raw');
       if (!fs.existsSync(absFrom)) throw new Error(`raw doc does not exist: ${from}`);
       if (fs.existsSync(absTo)) throw new Error(`move target already exists: ${to}`);
-      const snap = snapshot(kb, [from], job);
+      const snap = await snapshot(kb, [from], job);
       fs.mkdirSync(path.dirname(absTo), { recursive: true });
       fs.renameSync(absFrom, absTo);
       return { from, to, snapshot: snap };
@@ -120,16 +128,16 @@ export function rawMoveJob(kb, { from, to }) {
 // .kb/ui/snapshots/ otherwise (whitelist ④).
 // Also reused by the M7d wiki-edit path (ruling ⑨c: original rests on
 // git / G6 copy snapshots).
-export function snapshot(kb, rels, job) {
+export async function snapshot(kb, rels, job) {
   if (isGitRepo(kb)) {
     // -c user.*: snapshot commits must not depend on the machine's git config,
     // and a fixed machine author makes automated snapshots greppable in git log.
     const GIT_ID = ['-c', 'user.name=kb-portal', '-c', 'user.email=kb-portal@localhost'];
     for (const rel of rels) {
-      execFileSync('git', ['-C', kb, 'add', '--', rel], { stdio: 'ignore' });
+      await execFileP('git', ['-C', kb, 'add', '--', rel], GIT_TIMEOUT);
       try {
-        execFileSync('git', ['-C', kb, ...GIT_ID, 'commit', '-m', `ui: snapshot before ${job.type} (${job.id})`, '--', rel],
-          { stdio: ['ignore', 'ignore', 'ignore'] });
+        await execFileP('git', ['-C', kb, ...GIT_ID, 'commit', '-m', `ui: snapshot before ${job.type} (${job.id})`, '--', rel],
+          GIT_TIMEOUT);
       } catch { /* already committed at HEAD — the restorable point exists */ }
     }
     return { kind: 'git', note: 'committed to HEAD (pathspec-scoped)' };

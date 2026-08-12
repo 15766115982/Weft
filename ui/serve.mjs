@@ -82,7 +82,19 @@ async function streamNdjson(filePath, res, child) {
   for (;;) {
     drain();
     if (child.exitCode !== null || child.signalCode !== null) { drain(); flush(true); return; }
-    if (res.writableEnded || Date.now() > deadline) return;
+    if (res.writableEnded) return;
+    // deadline: kill the child and close the stream — returning silently used
+    // to leave the child running and the SSE response hanging (2026-08-12 audit)
+    if (Date.now() > deadline) {
+      try { child.kill(); } catch { /* already exited */ }
+      flush(true);
+      if (!res.writableEnded) {
+        res.write(`event: error\ndata: ${JSON.stringify({ message: 'agent 响应超时(300s),已终止' })}\n\n`);
+        res.write('event: close\ndata: {}\n\n');
+        res.end();
+      }
+      return;
+    }
     await new Promise((r) => setTimeout(r, 60));
   }
 }
@@ -318,7 +330,15 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
           if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
             return json(res, 404, { error: `asset does not exist: ${rel}` });
           }
-          res.writeHead(200, { 'content-type': assetMime(rel), 'cache-control': 'no-cache' });
+          const headers = { 'content-type': assetMime(rel), 'cache-control': 'no-cache' };
+          // KB-content SVG opened top-level would execute same-origin script
+          // with the portal's privileges (2026-08-12 audit); <img> embedding is
+          // unaffected by CSP, so the preview path keeps working
+          if (rel.toLowerCase().endsWith('.svg')) {
+            headers['content-security-policy'] = "script-src 'none'";
+            headers['x-content-type-options'] = 'nosniff';
+          }
+          res.writeHead(200, headers);
           return fs.createReadStream(abs).pipe(res);
         }
         // I5 plan-as-preview: the full lists (paths + titles + reasons) —
@@ -619,7 +639,7 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
         if (url.pathname === '/api/govern-run') {
           const body = JSON.parse(await readBody(req) || '{}');
           const kb = registry.resolve(body.kb).path;
-          const spec = governRunJob(kb, body, (job, kind, chunk) =>
+          const spec = governRunJob(kb, { prompt: body.prompt, executor: body.executor, resume: body.resume === true }, (job, kind, chunk) =>
             runBridge.emit('chunk', { kb, jobId: job.id, kind, chunk }));
           return json(res, 202, { job: jobs.enqueue(kb, spec) });
         }
@@ -657,7 +677,10 @@ export function createPortal({ kb: cliKb, port = 8322 } = {}) {
           });
 
           let stderr = '';
-          child.stderr.on('data', (c) => { stderr += c; });
+          child.stderr.on('data', (c) => {
+            stderr += c;
+            if (stderr.length > 32 * 1024) stderr = stderr.slice(-32 * 1024); // bounded like the job log
+          });
 
           // Stream NDJSON lines as they are written; finish when the child exits.
           const streamDone = streamNdjson(outputFile, res, child).catch((err) => {
